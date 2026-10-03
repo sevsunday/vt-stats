@@ -1,14 +1,140 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "starena",
   "dome": "dunedome",
   "cloud": "white_clouds",
   "sun": "dunesun",
   "radius": 200.0,
   "colors": {
-    "sky": "#78735a",
-    "zenith": "#ffe696",
-    "horizon": "#375a78"
+    "sky": "#78735a"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#78735a",
+      "start": 200.0,
+      "end": 500.0,
+      "visibility": 600.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#b4aa82",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 7.5,
+      "color_hex": "#ffe696",
+      "intensity": 1.176,
+      "texture": "dunesun",
+      "size_deg": 30.0,
+      "distance": 200.0
+    },
+    "ambient": {
+      "color_hex": "#375a78",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "white_clouds",
+      "height": 120.0,
+      "tilesize": 500.0,
+      "uspeed": 6.0,
+      "vspeed": 0.0,
+      "modulate": 0
+    },
+    "flags": 49,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": false,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 0,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 1,
+      "height": 0.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#643c14",
+      "light": {
+        "azim_deg": 90.0,
+        "elev_deg": 35.0,
+        "dist": 300.0,
+        "range": 400.0,
+        "attenuation": 1.0,
+        "color_hex": "#fac878"
+      },
+      "name": "dunedome",
+      "radius": 200.0
+    },
+    "local_fog": [
+      {
+        "slot": 0,
+        "position": [
+          350.0,
+          8.0,
+          -267.0
+        ],
+        "radius": [
+          100.0,
+          30.0,
+          100.0
+        ],
+        "density": 2.5
+      },
+      {
+        "slot": 1,
+        "position": [
+          18.0,
+          6.0,
+          -258.0
+        ],
+        "radius": [
+          100.0,
+          30.0,
+          100.0
+        ],
+        "density": 2.5
+      },
+      {
+        "slot": 2,
+        "position": [
+          -367.0,
+          6.0,
+          -131.0
+        ],
+        "radius": [
+          100.0,
+          30.0,
+          100.0
+        ],
+        "density": 2.5
+      }
+    ],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#b2b2b2",
+      "specular_hex": "#ffffff",
+      "specular_power": null,
+      "emissive_hex": "#000000",
+      "source": "default"
+    }
   },
   "assets": {
     "dome_glb": "sky/dunedome.glb",
@@ -16,13 +142,16 @@
     "dome_ambient": 1.0,
     "dome_emissive": 0.0,
     "cloud_dds": "sky/white_clouds.dds",
-    "sun_dds": "sky/dunesun.dds"
+    "sun_dds": "sky/dunesun.dds",
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "dunemoon",
       "blend": 1,
-      "color": "#b4dcff",
+      "color": "#ffdcb4",
       "size": 40.0,
       "azimuth": 0.0,
       "elevation": 20.0,
@@ -42,7 +171,7 @@
     {
       "name": "dunemoon",
       "blend": 1,
-      "color": "#b4dcff",
+      "color": "#ffdcb4",
       "size": 10.0,
       "azimuth": 30.0,
       "elevation": 30.0,

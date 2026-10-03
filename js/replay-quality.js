@@ -83,7 +83,10 @@ function blank() {
     modelTier: 'full',
     ground: 'tiles',
     motion: 'smooth',
-    fog: false,
+    // Engine-true atmosphere: the map's own lights, and its distance fog in
+    // the chase camera. 'studio' is the brighter pre-atmosphere light stack.
+    lighting: 'engine',
+    fog: true,
     cache: true,
   };
 }
@@ -123,13 +126,18 @@ function normalize(raw) {
     : (models === 'reduced' || models === 'full' ? models : 'full');
   const ground = raw && (raw.ground === 'minimap' || raw.ground === 'tiles') ? raw.ground : base.ground;
   const motion = raw && (raw.motion === 'smooth' || raw.motion === 'coarse') ? raw.motion : base.motion;
+  // Settings saved before the atmosphere work have no `lighting` key and
+  // carry the old `fog: false` default (whole-scene haze); they take the
+  // new defaults once. Fog now means the chase camera's engine fog.
+  const preAtmosphere = !raw || (raw.lighting !== 'engine' && raw.lighting !== 'studio');
   const next = {
     chosen: !!(raw && raw.chosen),
     models,
     modelTier,
     ground,
     motion,
-    fog: !!(raw && raw.fog === true),
+    lighting: raw && raw.lighting === 'studio' ? 'studio' : base.lighting,
+    fog: preAtmosphere ? base.fog : raw.fog !== false,
     cache: raw && raw.cache === false ? false : true,
   };
   next.preset = matchPreset(next);
@@ -168,6 +176,7 @@ export function writeSettings(partial) {
     modelTier: (models === 'reduced' || models === 'full') ? models : cur.modelTier,
     ground: partial && partial.ground != null ? partial.ground : cur.ground,
     motion: partial && partial.motion != null ? partial.motion : cur.motion,
+    lighting: partial && partial.lighting != null ? partial.lighting : cur.lighting,
     fog: partial && partial.fog != null ? !!partial.fog : cur.fog,
     cache: partial && partial.cache != null ? partial.cache : cur.cache,
   });
@@ -315,6 +324,19 @@ export function mountPanel(host) {
   root.appendChild(ground.field);
   root.appendChild(motion.field);
 
+  const lightLabel = el('label', 'vt-rq-check');
+  const lightBox = document.createElement('input');
+  lightBox.type = 'checkbox';
+  lightBox.dataset.rq = 'lighting';
+  lightLabel.appendChild(lightBox);
+  lightLabel.appendChild(document.createTextNode('In-Game Lighting'));
+  root.appendChild(lightLabel);
+  root.appendChild(el(
+    'p',
+    'vt-rq-hint',
+    'Sun, ambient light and sky colour from the map\u2019s own .sky file, as the game draws them. Off uses the replay\u2019s previous studio lighting.',
+  ));
+
   const fogLabel = el('label', 'vt-rq-check');
   const fogBox = document.createElement('input');
   fogBox.type = 'checkbox';
@@ -325,7 +347,7 @@ export function mountPanel(host) {
   root.appendChild(el(
     'p',
     'vt-rq-hint',
-    'Distance haze from the map. Off keeps the whole field clear.',
+    'The map\u2019s distance fog and visibility limit in the chase camera, matching the game. Free, cinema and top-down views always see the whole field.',
   ));
   root.appendChild(el(
     'p',
@@ -461,6 +483,7 @@ export function mountPanel(host) {
     models.picker.sync();
     ground.picker.sync();
     motion.picker.sync();
+    lightBox.checked = settings.lighting !== 'studio';
     fogBox.checked = settings.fog === true;
     cacheBox.checked = settings.cache !== false;
     purge.hidden = true;
@@ -486,6 +509,7 @@ export function mountPanel(host) {
       models: models.select.value,
       ground: ground.select.value,
       motion: motion.select.value,
+      lighting: lightBox.checked ? 'engine' : 'studio',
       fog: fogBox.checked,
       cache: cacheBox.checked,
       textureSet: texture ? texture.value : '',

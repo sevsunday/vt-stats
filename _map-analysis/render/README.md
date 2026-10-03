@@ -107,6 +107,9 @@ render/
   js/
     viewer.js                Three.js scene composition + render loop
     loader.js                fetch + base64 decode
+    atmosphere.js            engine lighting + fog from the .sky sidecar (shared
+                             by viewer.js, replay.js and js/explorer/world.js)
+    sky-dome.js              camera-locked sky dome, clouds, sun / moon sprites
     objects.js               per-kind primitive factories + height samplers
     terrain-owners.js        terrain surface: 8 m grid, 2 m tunnel blocks, cuts
     props.js                 placed scenery and tunnel pieces
@@ -127,7 +130,10 @@ scripts/                     PIPELINE (lives at project root, not under
   extract_tile_textures.py   tier-3 tile texture extractor (Steam-only)
   _ter_full.py               full-grid .TER decoder
   verify_terrain_scale.py    proves every .3d.json is 1:1 engine meters
-  _wat_sky.py                .WAT + .SKY header decoders
+  _wat_sky.py                .WAT decoder + full .SKY decode (SKY1 atmosphere,
+                             FOG volumes, dome / sprite assets) + .TRN material
+  extract_sky.py             writes data/render/<stem>.sky.json (schema 3) and
+                             the dome GLBs / textures under data/render/sky/
   _corpus_stats.py           dev utility (corpus-wide audits)
   _paths.py                  shared path constants (canonical home)
   _schema.py                 schema helpers for calibration configs
@@ -144,6 +150,11 @@ data/render/                 EXTRACTION OUTPUTS (all tracked in git;
   <stem>.alpha1.png          tier-3 composite input: alpha layer 1
   <stem>.alpha2.png          tier-3 composite input: alpha layer 2
   <stem>.alpha3.png          tier-3 composite input: alpha layer 3
+  <stem>.sky.json            per-map .SKY decode: `atmosphere` block (fog, sun,
+                             ambient, sky colour, layer switches, stars, dome,
+                             terrain material) + dome / cloud / sun / star /
+                             sprite asset references (schema 4)
+  sky/                       dome GLBs and cloud / sun / sprite textures
   tiles/                     tier-3 floor textures
     _manifest.json           tile inventory + per-map slot mapping
     <name>.dds               GPU-native BC-compressed tile texture
@@ -319,6 +330,255 @@ drawn surface. `OWNERSHIP_SCOPE` in the extractor limits rects and patches to tu
 (generic props whose cells open onto another piece, bridges included);
 `"all"` would also flatten under pools and buildings.
 
+## Atmosphere: `<stem>.sky.json` (schema 3) and the lighting / fog model
+
+**The `.SKY` file is the atmosphere source of truth.** It holds the fog
+ranges, the fog and sky colours, the sun's colour, intensity and position
+on its arc, the ambient light, the cloud layer and the dome / sprite assets.
+The `.TRN` contributes only the terrain material (`[NormalView]
+DiffuseColor`); its `[Light]` and fog keys are legacy data the engine no
+longer reads, and the `.3d.json` `lighting` block built from them is kept
+only as a fallback for a map with no sidecar. Every value below was read
+back from the running game's console (2.0.206) on Remnant and Europa Night
+and the sun arc was probed live; the console queries are documented in
+[docs/reference/bzcc-console-reference.md](../../docs/reference/bzcc-console-reference.md)
+(`sky.*`, `sun.*`, `terrain.*`) and in the ODF Guide's **Console commands**
+group.
+
+### `.SKY` layout (version 4, 7068 bytes, 12 chunks)
+
+`SKY1` (212 bytes) is the atmosphere; `FOG ` (488 bytes) the local fog
+volumes. `DOME`, `RAIN`, `SPLT`, `MIRR`, `STAR`, `SPRT`, `WATR`, `BOLT`,
+`ENV_`, `ENVC` carry assets and effects (`extract_sky.py` reads `DOME` /
+`SPRT` for the dome mesh, cloud and sprite textures).
+
+| `SKY1` offset | Console variable | Meaning |
+|---|---|---|
+| `0x00` RGBA float | `sky.fogcolor` | fog colour (Remnant `120 110 80`, Europa Night `20 25 30`) |
+| `0x10 / 0x14 / 0x18` float | `sky.fogrange` start / end, `sky.visibilityrange` | linear fog ramp in metres; nothing is drawn past the visibility range (starts may be negative, e.g. Aussault `-30`) |
+| `0x1C` float | `sun.period` | real-time hours per revolution (24 on most maps, 1 on Bolt) |
+| `0x20` float | `sun.angle` | position on the arc in hours: 6 = east horizon, 12 = zenith, 18 = west horizon (probed live) |
+| `0x24` float | derived | `2 pi * angle / period` |
+| `0x2C` RGBA float | `sun.color` | sun colour; **alpha = intensity** (Remnant `255 230 150 200`, Europa Night `255 255 255 125`, Know Thyself 1.96, Lunar black) |
+| `0x3C` RGBA float | `sky.ambientcolor` | flat ambient; alpha = intensity (lunar maps are full white) |
+| `0x50` float, `0x54` char[32] | `sky.height`, `sky.texturename` | cloud layer height and texture |
+| `0x74` BGRA bytes | `sky.color` | clear colour behind the dome (Remnant `180 170 130`, Europa Night `40 55 60`), also the dome tint |
+| `0x78` int | `sky.modulate` | cloud modulate flag |
+| `0x7C` char[32] | `sun.texturename` | sun sprite (`dunesun`; Europa Night's "sun" is `dunemoonfull`) |
+| `0x9C / 0xA0 / 0xA4` float | `sky.uspeed / vspeed / tilesize` | cloud scroll and tiling |
+| `0xA8` int | `sky.flags` | dome / stars / flat / clouds toggles |
+| `0xB8 / 0xBC` float | `sun.size`, `sun.distance` | sprite span in degrees (30) and distance (200) |
+
+`FOG `: 16 local fog volumes of 7 floats `(x, y, z, rx, ry, rz, density)`
+(`-1` = unused), the count at `0x1C0`, then ground fog `(height start,
+height end, density, min dist 1000, max dist 2000)`. Decoded into the
+sidecar as `local_fog[]` / `ground_fog`; not rendered yet.
+
+### Sidecar `atmosphere` block
+
+```jsonc
+"atmosphere": {
+  "fog": { "color_hex": "#786e50", "start": 300, "end": 600, "visibility": 600,
+           "mode": "linear", "break": 0.5 },
+  "sky_color_hex": "#b4aa82",
+  "sun": { "period_h": 24, "angle_h": 16, "color_hex": "#ffe696", "intensity": 0.784,
+           "texture": "dunesun", "size_deg": 30, "distance": 200 },
+  "ambient": { "color_hex": "#375a78", "intensity": 1.0 },
+  "cloud": { "texture": "white_clouds", "height": 120, "tilesize": 300,
+             "uspeed": 6, "vspeed": 0, "modulate": 0 },
+  "flags": 49,
+  "layers": { "dome": true, "stars": false, "flat": false, "clouds": false,
+              "sprites": true, "sun": true },
+  "stars": { "color_hex": "#ffffff", "count": 128, "distance": 100, "size": 1.0,
+             "height": 0, "texture": "lightflare", "modulate": 0,
+             "azim_speed": 0, "elev_speed": 0 },
+  "dome": { "name": "miredome", "radius": 200, "type": 1, "height": 0,
+            "uspeed": 0, "vspeed": 0, "ambient_hex": "#643c14",
+            "light": { "azim_deg": 90, "elev_deg": 35, "dist": 300, "range": 400,
+                       "attenuation": 1, "color_hex": "#fac878" } },
+  "local_fog": [], "ground_fog": { "enabled": false, "...": "..." },
+  "terrain_material": { "diffuse_hex": "#b2b2b2", "specular_hex": "#ffffff",
+                        "specular_power": null, "emissive_hex": "#000000", "source": "default" }
+},
+"assets": { "dome_glb": "sky/miredome.glb", "dome_dds": "sky/miredome1.dds",
+            "cloud_dds": "sky/white_clouds.dds", "sun_dds": "sky/dunesun.dds",
+            "stars_dds": "sky/lightflare.dds", "...": "..." },
+"sprite_distance": 100, "sprite_height": 0,
+"sprites": [ { "name": "dunemoon", "blend": 1, "color": "#ffdcb4", "size": 40,
+               "azimuth": 0, "elevation": 20, "roll": -80, "texture": "sky/dunemoon.dds" },
+             "..." ]
+```
+
+Schema 4. `colors.sky` keeps the SKY1 fog colour for older readers. The
+`terrain_material` comes from the `.TRN` `[NormalView]` section; the diffuse
+default is `178 178 178` (console-confirmed on Remnant, whose `.TRN` has no
+`DiffuseColor`), not white. Regenerate with `python scripts/extract_sky.py`
+(colours need no game install; dome assets do) and bump the `?v=` key in
+`loader.js::loadSkySidecar` when the schema changes.
+
+### Sky layers: `sky.flags` decides what is drawn
+
+The template every VSR `.SKY` descends from names a dome, a cloud texture,
+44 sprite slots and a star field on **every** map; `sky.flags` is what
+switches them on. The bits come from the editor's six TOGGLE buttons bound
+to the variable (`bz2r_res/config/editor/bzeditor_sky.cfg`):
+
+| Bit | Editor | What the engine draws | How `sky-dome.js` draws it |
+|---|---|---|---|
+| `1` | Toggle Dome | the `dome.name` mesh (DOME chunk) with its texture | the baked GLB, texture × `sky.color` (fullbright when the material ambient is 0) |
+| `2` | Toggle Stars | `stars.count` points of `stars.size` m at `stars.distance` m, `stars.texture`, additive when `stars.modulate` is 1 | `THREE.Points`, seeded per map (the engine rolls positions at load), point size floored so the texture core covers 2 px |
+| `4` | Toggle Flat | the flat cloud plane: `sky.texturename` at `sky.height` m, tiled every `sky.tilesize` m, scrolling `sky.uspeed` / `sky.vspeed` m/s, `sky.modulate` 1 = Add / 0 = Blend | a camera-locked disc at that height, world-anchored UVs, × `sky.color`, fogged by distance |
+| `8` | Toggle Clouds | unknown (17 maps; the 4 lunar maps set it with no cloud texture at all) | not drawn |
+| `16` | Toggle Sprites | the SPRT billboards with `size` > 0 | quads on the sprite shell |
+| `32` | Toggle Sun | `sun.texturename` at the sun direction, `sun.size` degrees | the sun sprite |
+
+Bit `64` appears on six maps and has no editor button. Remnant is `49`
+(dome + sprites + sun); Europa Night is `54` (stars + flat + sprites +
+sun) — **no dome**, which is why its template `miredome` must never be
+drawn. Gating on the flags, not on an asset being present, is what keeps
+Europa Night's starry sky apart from Remnant's olive dome.
+
+Layouts (all console-confirmed on Europa Night):
+
+- `STAR` (64 B): `0x00` colour B,G,R,A bytes · `0x04` u32 `count` ·
+  `0x08` f32 `distance` · `0x0C` f32 `size` · `0x10` f32 `height` ·
+  `0x14` char[32] `texture` · `0x34` u32 `modulate` · `0x38`/`0x3C` f32
+  `azimspeed` / `elevspeed` (1000 on four maps, not applied yet).
+- `SPRT`: 12-byte header (u32 selected slot, f32 `sprites.distance` = 100
+  on every map, f32 `sprites.height`), then 56-byte records: name[32],
+  u32 `modulate` (1 = Add), B,G,R,A tint bytes, f32 `size`, `azimuth`,
+  `elevation`, `roll`. **`size` is metres at `sprites.distance`**: Remnant's
+  size-40 moon spans `2 atan(20 / 100)` = 22.6 degrees (the disc fills 0.75
+  of the quad), its size-10 companion 5.7 degrees. **Azimuth is a compass
+  bearing** (0 north, 90 east): the big moon at azimuth 0 sits due north in
+  the game and the small one at 30 to its right. The colour bytes are
+  B,G,R (the console reports the moon as `255 220 180` for file bytes
+  `b4 dc ff`).
+- `DOME` (1808 B, a raw struct with pointers): `0x0C` f32 `radius` ·
+  `0x10` char[32] `name` · `0x30` u32 `type` (editor "Dome" 0 on 74 maps,
+  "Planet" 1 on 64, 2 on four; no visible difference established) · `0x34`
+  f32 `height` (decoded, **not applied**: the sign and reference are
+  unverified and a wrong guess opens a seam at the rim; `DOME_HEIGHT_SCALE`
+  0) · `0x38`/`0x3C` f32 `uspeed` / `vspeed` (texture drift, applied) ·
+  `0x44` f32×3 `ambient` · `0x58..0x74` the first `dome.light` (azim / elev
+  in radians, dist, range, attenuation, colour; three more light blocks
+  follow at 0x144-byte strides). The dome mesh's own group texture
+  (`banedome` → `banesky.dds`) is the fallback when no `.material` or
+  sibling `.dds` exists.
+- Dome meshes with no baked `.msh` in the install (`earthdome2`,
+  `earthdome3`, `ultradome`, `vsrconscdome`) draw nothing; the clear colour
+  shows instead.
+
+**Sky fog.** The engine fogs the sky itself toward the horizon: in both
+reference frames the lower sky is the fog colour up to about 15 degrees and
+fades out by 30-40 degrees, which is distance fog on a layer `sky.height`
+metres up (`(h / sin e - fogstart) / (fogend - fogstart)`; Europa Night is
+fully fogged below 14 degrees and clear above 53, Remnant between 11.5 and
+24). `addFogSkirt()` overlays a camera-locked band carrying that fraction as
+alpha in the fog colour on every sky layer; terrain still occludes it.
+`sky.fogbreak` (0.5 everywhere) is not used for this.
+
+Mirroring: the replay and the explorer reflect the world on Z, so north is
+`-Z` there and `attachSky` takes `state.mirrorZ` (default true) for the
+sprite directions; the baked dome GLBs are pre-mirrored and the map
+viewer's unmirrored orbit scene flips the dome holder back.
+
+### Lighting model (`js/atmosphere.js`)
+
+The engine's terrain shading is the classic `albedo * material *
+(ambient + sun * saturate(N . L))`:
+
+- **Lights.** One flat `AmbientLight(sky.ambientcolor, alpha)` and one
+  `DirectionalLight(sun.color, alpha)`; no hemisphere term. three.js r170
+  normalises Lambert by `1 / pi`, so both intensities are multiplied by
+  `pi` to recover the plain multiplier the engine computes.
+- **Shader colour bytes are linear values.** The game's textures are sRGB
+  DDS (hardware-linearised) and its shaders carry no gamma code, so the
+  colour bytes feed the math as-is (`255 230 150` is `(1.0, 0.9, 0.59)`).
+  `engineColor()` sets the sun, ambient and the dome / cloud tint with
+  `LinearSRGBColorSpace` (no decode); textures and the sRGB output stay as
+  they were. **The two framebuffer colours display as their raw bytes**:
+  Europa Night's sky reads `40-56` for `sky.color` `40 55 60` and its fogged
+  horizon `13-24` for `sky.fogcolor` `20 25 30`, Remnant's horizon
+  `121 114 80` for `120 110 80`, so `displayColor()` sets the clear and fog
+  colours as sRGB and the output encode hands the bytes back.
+- **Sun arc.** `theta = 2 pi (angle + elapsed / 3600) / period`,
+  `dir = (sin theta, -cos theta, 0)`: rises in the east (+X), zenith at
+  12, sets in the west. The replay advances `elapsed` with match time, the
+  explorer and the map viewer with wall-clock time (static in practice on
+  24 h maps, a full cycle per hour on Bolt). Below the horizon the sun
+  fades out over the last few degrees instead of lighting from
+  underground. `SUN_ORBIT_AZIMUTH_DEG` rotates the arc (0 = engine-true);
+  Z is negated for scenes whose world group is mirrored (`mirrorZ`).
+- **Terrain material.** The game-tile floor is multiplied by the `.TRN`
+  diffuse (`178 / 255` by default, `240 / 255` on Europa Night). The
+  minimap drape and the height ramp are already-shaded fallbacks and keep
+  their colour.
+- **Sky.** `scene.background` is `sky.color`; the dome texture and the
+  flat cloud plane are modulated by `sky.color` (on Remnant the dome
+  texture `164 179 133` times `180 170 130` lands within a few levels of
+  the in-game sky `146 143 100`; the fog colour would be 45% too dark).
+  The sun / moon sprite spans `sun.size` degrees at the engine sun
+  direction, and the camera-locked rig is scaled to fit inside the camera
+  far plane. Which layers exist at all is the "Sky layers" section above.
+
+### Fog model and the camera policy
+
+Fog is a **linear** ramp (`sky.fogmode` 3, `sky.fogbreak` 0.5 on every map
+queried) from `fogstart` to `fogend` in the fog colour, and nothing is
+drawn beyond `visibilityrange`. `installLinearFog()` swaps the three.js
+smoothstep `fog_fragment` chunk for that ramp (it runs on import, before
+any material compiles); `applyEngineFog()` sets `camera.far =
+max(visibility, end) * 1.02` so fully fogged pixels, not a hard edge, hide
+the clip. Players can only shorten these ranges in-game
+(`GamePrefs.ini` `VisibilityMult`, `MaxVisibility`, `MinFogRange`,
+`MaxFogRange`), never extend them.
+
+| Surface | Lights | Fog |
+|---|---|---|
+| Game Explorer (`js/explorer/world.js`) | engine | exact engine fog + visibility clip, always (the camera is in the world) |
+| 3D replay, chase camera | engine (In-Game Lighting on) | engine fog + clip while the **Fog** setting is on |
+| 3D replay, free / cinema / top-down cameras | engine | none, far plane 8000 m |
+| 3D replay, In-Game Lighting off | studio stack | per camera as above |
+| Map viewer, orbit and embed | engine | none |
+| Map viewer, top-down capture (`?topdown=1`, batch) | studio stack | none (the committed `data/render/topdown/*.png` stay byte-stable) |
+
+The replay's quality panel (`js/replay-quality.js`) carries both switches:
+**In-Game Lighting** (default on; off restores the pre-atmosphere ambient 0.9
++ hemisphere 0.85 + directional 2.0 stack via `applyStudioLights()`) and
+**Fog** (default on; chase camera only). Settings saved before these
+switches existed have no `lighting` key and take the new defaults once.
+Changing either reloads the replay, as every quality setting does.
+
+### Calibration against the game
+
+Compared with in-game screenshots (2.0.206, mission time under 3 minutes,
+so the sun sits at the authored angle):
+
+- **Remnant**: sky dome `137 138 103` vs in-game `146 143 100`; flat ground
+  within 5-10% in sRGB; lit and shadowed mountain faces comparable;
+  the far ridge dissolves into the `120 110 80` haze and the dome shows
+  through at 600 m, with the palms and towers visible at 300-400 m.
+- **Europa Night**: the cast shadow of the tank is 5-6x darker than the lit
+  snow in linear light in both the game and the render, which pins the
+  ambient : sun ratio; the ground reads about 20% brighter than the game's
+  `95-100` in sRGB. Treating the sun alpha as intensity is what puts the
+  snow near the game (ignoring it would read about 175); the remaining
+  uniform factor is not attributed yet (candidates: the `.TER` vertex
+  colour layer, texture filtering) and is left alone rather than tuned.
+- Lunar / Lunix / Moonshroud come out flat-lit (black sun, white ambient),
+  Know Thyself under its 1.96-intensity orange sun, Aussault / Bolt fogged
+  from `-30` / `-50` m: that is the game's look, not a bug.
+- **Sky layers** (after the flags work): Europa Night's lower sky reads
+  `22-27 27-33 32-38` against the game's `13-18 18-24 24-31` (its own
+  `20 25 30` fog bytes; the JPEG sits a little darker than its bytes) with
+  the clear colour `40 55 60` above, the full-moon "sun" high in the west,
+  the nebula sprite beside it, 128 star points and the grey cloud wisps;
+  the `miredome` is gone. Remnant keeps its olive dome with the two
+  additive crescent moons due north and north-north-east (thin bright
+  arcs, as in the game) and no white-cloud plane. Star positions are a
+  per-map seed, not the game's roll; the Clouds bit (8) is still undrawn.
+
 ## v1 vs v2 scope split
 
 | Feature | v1 (this POC) | v2+ |
@@ -328,9 +588,9 @@ drawn surface. `OWNERSHIP_SCOPE` in the extractor limits rects and patches to tu
 | Color map | decoded but not used | per-cell baked vertex color as a fourth floor mode |
 | Floor texture | iondriver minimap PNG UV-mapped onto the terrain | actual `.tga` tile textures from `.TRN` (need pak access) |
 | Object primitives | cylinder / cone / box / sphere | real `.fbx` / `.xsi` meshes (need pak access) |
-| Sky | flat tint background + fog | full skybox from `.SKY` body decode |
+| Sky | done: dome, clouds and sprites from the `.SKY` decode (`sky-dome.js`) | `sky.flags` cloud / star toggles, `STAR` starfields |
 | Water | flat plane at `water_y_raw`, hidden by default | per-map "has_visible_water" flag from corpus tagging |
-| Lighting | hemi + directional, fixed | sun direction from `.SKY`, optional shadows |
+| Lighting | done: the engine's ambient + sun from `.SKY` (`atmosphere.js`, see below) | cast shadows (the engine runs 4 PCF cascades), local / ground fog volumes |
 | Object labels | none | CSS2DRenderer for hover-tooltips |
 | Maps | just `vsreuronig` (shipped JSON) | directory page + parametric viewer |
 | Axis flips | not handled (Europa Night is flip-free) | honor `x_flipped` / `y_flipped` from `.config.json` |

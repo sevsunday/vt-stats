@@ -1,23 +1,124 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "wintervalley",
   "dome": "banedome",
   "cloud": "banesky",
   "sun": "skymoon",
   "radius": 356.25,
   "colors": {
-    "sky": "#50466e",
-    "zenith": "#3c4b50",
-    "horizon": "#3c1e50"
+    "sky": "#50466e"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#50466e",
+      "start": 0.0,
+      "end": 390.0,
+      "visibility": 400.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#646478",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 16.0,
+      "color_hex": "#3c4b50",
+      "intensity": 0.588,
+      "texture": "skymoon",
+      "size_deg": 5.0,
+      "distance": 356.0
+    },
+    "ambient": {
+      "color_hex": "#3c1e50",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "banesky",
+      "height": 75.0,
+      "tilesize": 200.0,
+      "uspeed": 0.5,
+      "vspeed": 2.0,
+      "modulate": 1
+    },
+    "flags": 53,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#c8c8c8",
+      "count": 64,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 20.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 2,
+      "height": 20.0,
+      "uspeed": 0.002,
+      "vspeed": 0.002,
+      "ambient_hex": "#191464",
+      "light": {
+        "azim_deg": 90.0,
+        "elev_deg": 20.0,
+        "dist": 300.0,
+        "range": 0.0,
+        "attenuation": 1.0,
+        "color_hex": "#007fff"
+      },
+      "name": "banedome",
+      "radius": 356.25
+    },
+    "local_fog": [
+      {
+        "slot": 0,
+        "position": [
+          779.0,
+          140.0,
+          -825.0
+        ],
+        "radius": [
+          80.0,
+          10.0,
+          80.0
+        ],
+        "density": 1.0
+      }
+    ],
+    "ground_fog": {
+      "start": 141.0,
+      "end": 137.0,
+      "density": 0.4,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": true
+    },
+    "terrain_material": {
+      "diffuse_hex": "#cfcfcf",
+      "specular_hex": "#ffffff",
+      "specular_power": 10.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/banedome.glb",
-    "dome_dds": null,
+    "dome_dds": "sky/banesky.dds",
     "dome_ambient": null,
     "dome_emissive": null,
     "cloud_dds": "sky/banesky.dds",
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "lightflare",
@@ -42,7 +143,7 @@
     {
       "name": "aurora5",
       "blend": 1,
-      "color": "#0000ff",
+      "color": "#ff0000",
       "size": 75.0,
       "azimuth": -10.0,
       "elevation": 20.0,
@@ -52,7 +153,7 @@
     {
       "name": "aurora4",
       "blend": 1,
-      "color": "#0000ff",
+      "color": "#ff0000",
       "size": 50.0,
       "azimuth": 180.0,
       "elevation": 50.0,
@@ -62,7 +163,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#bee6ff",
+      "color": "#ffe6be",
       "size": 4.0,
       "azimuth": 90.0,
       "elevation": 30.0,
@@ -72,7 +173,7 @@
     {
       "name": "pscharon",
       "blend": 1,
-      "color": "#ffc8b4",
+      "color": "#b4c8ff",
       "size": 0.0,
       "azimuth": 60.0,
       "elevation": 20.0,
@@ -92,7 +193,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#64b4ff",
+      "color": "#ffb464",
       "size": 1.0,
       "azimuth": 120.0,
       "elevation": 20.0,
@@ -112,7 +213,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#ffc8b4",
+      "color": "#b4c8ff",
       "size": 1.5,
       "azimuth": -70.0,
       "elevation": 35.0,
@@ -122,7 +223,7 @@
     {
       "name": "aurora5",
       "blend": 1,
-      "color": "#82ff64",
+      "color": "#64ff82",
       "size": 80.0,
       "azimuth": -5.0,
       "elevation": 18.0,
@@ -132,7 +233,7 @@
     {
       "name": "aurora3",
       "blend": 1,
-      "color": "#0032ff",
+      "color": "#ff3200",
       "size": 50.0,
       "azimuth": -5.0,
       "elevation": 80.0,

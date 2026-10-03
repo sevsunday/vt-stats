@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "cpcauldron",
   "dome": "plutodome",
   "cloud": null,
   "sun": null,
   "radius": 275.0,
   "colors": {
-    "sky": "#460000",
-    "zenith": "#c8c8c8",
-    "horizon": "#ffffff"
+    "sky": "#460000"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#460000",
+      "start": -100.0,
+      "end": 500.0,
+      "visibility": 700.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#000000",
+    "sun": {
+      "period_h": 22.0,
+      "angle_h": 16.0,
+      "color_hex": "#c8c8c8",
+      "intensity": 1.0,
+      "texture": null,
+      "size_deg": 0.0,
+      "distance": 275.0
+    },
+    "ambient": {
+      "color_hex": "#ffffff",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": null,
+      "height": 100.0,
+      "tilesize": 100.0,
+      "uspeed": 50.0,
+      "vspeed": 0.0,
+      "modulate": 0
+    },
+    "flags": 19,
+    "layers": {
+      "dome": true,
+      "stars": true,
+      "flat": false,
+      "clouds": false,
+      "sprites": true,
+      "sun": false
+    },
+    "stars": {
+      "color_hex": "#5050a0",
+      "count": 64,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 1,
+      "height": 0.0,
+      "uspeed": 0.002,
+      "vspeed": 0.002,
+      "ambient_hex": "#000000",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 55.0,
+        "dist": 800.0,
+        "range": 1000.0,
+        "attenuation": 1.0,
+        "color_hex": "#00407f"
+      },
+      "name": "plutodome",
+      "radius": 275.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#cccccc",
+      "specular_hex": "#0a0a0a",
+      "specular_power": 1024.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/plutodome.glb",
@@ -16,13 +99,16 @@
     "dome_ambient": 0.0,
     "dome_emissive": 0.5,
     "cloud_dds": null,
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#002850",
+      "color": "#502800",
       "size": 70.0,
       "azimuth": 20.0,
       "elevation": 45.0,
@@ -32,7 +118,7 @@
     {
       "name": "pscomet1",
       "blend": 1,
-      "color": "#0050a0",
+      "color": "#a05000",
       "size": 20.0,
       "azimuth": -42.0,
       "elevation": 40.099998474121094,
@@ -42,7 +128,7 @@
     {
       "name": "psnebu02",
       "blend": 1,
-      "color": "#146496",
+      "color": "#966414",
       "size": 60.0,
       "azimuth": -130.0,
       "elevation": 20.0,
@@ -52,7 +138,7 @@
     {
       "name": "pscharon",
       "blend": 0,
-      "color": "#325abe",
+      "color": "#be5a32",
       "size": 20.0,
       "azimuth": 90.0,
       "elevation": 30.0,
@@ -62,7 +148,7 @@
     {
       "name": "pscomet1",
       "blend": 1,
-      "color": "#9682ff",
+      "color": "#ff8296",
       "size": 5.0,
       "azimuth": -52.5,
       "elevation": 36.29999923706055,
@@ -72,7 +158,7 @@
     {
       "name": "psnebu04",
       "blend": 1,
-      "color": "#3264c8",
+      "color": "#c86432",
       "size": 10.0,
       "azimuth": 209.0,
       "elevation": 25.0,
@@ -82,7 +168,7 @@
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#3264c8",
+      "color": "#c86432",
       "size": 70.0,
       "azimuth": 180.0,
       "elevation": 20.0,
@@ -92,7 +178,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#32b4ff",
+      "color": "#ffb432",
       "size": 5.0,
       "azimuth": 0.0,
       "elevation": 18.0,
@@ -102,7 +188,7 @@
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#2846be",
+      "color": "#be4628",
       "size": 40.0,
       "azimuth": 0.0,
       "elevation": 20.0,
@@ -112,7 +198,7 @@
     {
       "name": "psnebu03",
       "blend": 1,
-      "color": "#0064b4",
+      "color": "#b46400",
       "size": 80.0,
       "azimuth": 100.0,
       "elevation": 20.0,
@@ -122,7 +208,7 @@
     {
       "name": "psnebu03",
       "blend": 1,
-      "color": "#32b4ff",
+      "color": "#ffb432",
       "size": 80.0,
       "azimuth": -65.0,
       "elevation": 35.0,
@@ -132,7 +218,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#32b4ff",
+      "color": "#ffb432",
       "size": 12.0,
       "azimuth": -82.0,
       "elevation": 23.0,
@@ -142,7 +228,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#3c78ff",
+      "color": "#ff783c",
       "size": 3.0,
       "azimuth": -82.0,
       "elevation": 23.0,
@@ -152,7 +238,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#2828ff",
+      "color": "#ff2828",
       "size": 1.5,
       "azimuth": 115.0,
       "elevation": 10.0,
@@ -162,7 +248,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#ffb4b4",
+      "color": "#b4b4ff",
       "size": 15.0,
       "azimuth": 265.0,
       "elevation": 32.0,
@@ -172,7 +258,7 @@
     {
       "name": "lightflare",
       "blend": 1,
-      "color": "#ffb4b4",
+      "color": "#b4b4ff",
       "size": 5.0,
       "azimuth": 265.0,
       "elevation": 32.0,

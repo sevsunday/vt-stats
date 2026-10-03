@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrtrinity",
   "dome": "miredome",
   "cloud": "white_clouds",
   "sun": null,
   "radius": 760.0,
   "colors": {
-    "sky": "#2d2819",
-    "zenith": "#c8c8c8",
-    "horizon": "#414141"
+    "sky": "#2d2819"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#2d2819",
+      "start": 200.0,
+      "end": 500.0,
+      "visibility": 500.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#80785a",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 10.0,
+      "color_hex": "#c8c8c8",
+      "intensity": 0.784,
+      "texture": null,
+      "size_deg": 30.0,
+      "distance": 760.0
+    },
+    "ambient": {
+      "color_hex": "#414141",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "white_clouds",
+      "height": 100.0,
+      "tilesize": 500.0,
+      "uspeed": 3.0,
+      "vspeed": 1.0,
+      "modulate": 0
+    },
+    "flags": 53,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 0,
+      "height": 20.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#323228",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 90.0,
+        "dist": 600.0,
+        "range": 730.005,
+        "attenuation": 1.0,
+        "color_hex": "#e2ba1a"
+      },
+      "name": "miredome",
+      "radius": 760.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#b2b2b2",
+      "specular_hex": "#ffffff",
+      "specular_power": null,
+      "emissive_hex": "#000000",
+      "source": "default"
+    }
   },
   "assets": {
     "dome_glb": "sky/miredome.glb",
@@ -16,13 +99,16 @@
     "dome_ambient": 1.0,
     "dome_emissive": 0.0,
     "cloud_dds": "sky/white_clouds.dds",
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 50.0,
   "sprites": [
     {
       "name": "dunesun",
       "blend": 1,
-      "color": "#6e8c96",
+      "color": "#968c6e",
       "size": 50.0,
       "azimuth": -270.0,
       "elevation": 40.0,
@@ -52,7 +138,7 @@
     {
       "name": "godlight2",
       "blend": 1,
-      "color": "#64dcff",
+      "color": "#ffdc64",
       "size": 0.0,
       "azimuth": 90.0,
       "elevation": 40.0,

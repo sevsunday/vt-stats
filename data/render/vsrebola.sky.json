@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrebola",
   "dome": null,
   "cloud": "sky",
   "sun": null,
   "radius": 342.0,
   "colors": {
-    "sky": "#52525a",
-    "zenith": "#ffc8c8",
-    "horizon": "#aab4aa"
+    "sky": "#52525a"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#52525a",
+      "start": 120.0,
+      "end": 500.0,
+      "visibility": 450.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#ffffff",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 81.0,
+      "color_hex": "#ffc8c8",
+      "intensity": 1.0,
+      "texture": null,
+      "size_deg": 0.0,
+      "distance": 342.0
+    },
+    "ambient": {
+      "color_hex": "#aab4aa",
+      "intensity": 0.4
+    },
+    "cloud": {
+      "texture": "sky",
+      "height": 40.0,
+      "tilesize": 740.0,
+      "uspeed": 6.0,
+      "vspeed": 0.0,
+      "modulate": 1
+    },
+    "flags": 21,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": false
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 0,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 0,
+      "height": -200.0,
+      "uspeed": 0.0,
+      "vspeed": -0.0,
+      "ambient_hex": "#ffffff",
+      "light": {
+        "azim_deg": 90.0,
+        "elev_deg": 45.0,
+        "dist": 300.0,
+        "range": 600.0,
+        "attenuation": 1.0,
+        "color_hex": "#ffc864"
+      },
+      "name": null,
+      "radius": 342.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 5.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#b2b2b2",
+      "specular_hex": "#ffffff",
+      "specular_power": null,
+      "emissive_hex": "#000000",
+      "source": "default"
+    }
   },
   "assets": {
     "dome_glb": null,
@@ -16,8 +99,11 @@
     "dome_ambient": null,
     "dome_emissive": null,
     "cloud_dds": "sky/sky.dds",
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 20.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "earthsun",

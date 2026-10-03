@@ -13,7 +13,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js?v=terrain1';
-import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
+import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-atmo3';
+import {
+  resolveAtmosphere,
+  applyEngineLights,
+  applyStudioLights,
+  removeLights,
+  applyEngineFog,
+  clearFog,
+  applyTerrainMaterial,
+  resetTerrainMaterial,
+  updateSun,
+  sunDirectionAt,
+} from './atmosphere.js?v=atmo1';
 import { buildPropsGroup } from './props.js?v=terrain1';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface, buildTunnelIndex, tunnelAt } from './terrain-owners.js?v=3';
@@ -68,7 +80,7 @@ import {
   ENHANCED_PACK_IDS,
   LEGO_SET_ID,
   TEXTURE_PACKS,
-} from '../../../js/replay-quality.js?v=fog1';
+} from '../../../js/replay-quality.js?v=atmo1';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -147,6 +159,17 @@ const STATE = {
   lavaMesh: null,
   hqOn: false,
   hqLoad: null,
+  // Atmosphere (atmosphere.js): resolved .sky values, the active light set
+  // ('engine' | 'studio'), the Fog setting (chase camera only), and the
+  // sun direction the dome's sun sprite follows. `mirrorZ` tells the sky
+  // (sky-dome.js) that the world group is reflected on Z.
+  atmo: null,
+  lights: null,
+  lightingMode: 'engine',
+  chaseFog: true,
+  sun: null,
+  sunDir: null,
+  mirrorZ: true,
   actorsGroup: null,
   actors: null,
   trailsGroup: null,
@@ -518,17 +541,14 @@ function initRenderer() {
 
 function initScene(mapData) {
   const scene = new THREE.Scene();
-  const lighting = mapData.lighting || {};
-  scene.background = new THREE.Color(mapData.skyTint || '#1a2030');
-
-  if (readSettings().fog) {
-    const hm = mapData.heightmap;
-    const worldExtent = Math.max(hm.cellsX * hm.cellMetersX, hm.cellsZ * hm.cellMetersZ);
-    const fogColorHex = lighting.fog_color_hex || mapData.skyTint || '#1a2030';
-    const fogStart = Number.isFinite(lighting.fog_start) ? lighting.fog_start : worldExtent * 1.5;
-    const fogEnd = Number.isFinite(lighting.fog_end) ? lighting.fog_end : worldExtent * 3.0;
-    scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
-  }
+  // Atmosphere from the .sky sidecar (fog ranges, sun, ambient, terrain
+  // material). "In-Game Lighting" off keeps the pre-atmosphere studio stack;
+  // fog is applied per camera mode (chase only) in applyCameraFog().
+  const quality = readSettings();
+  STATE.atmo = resolveAtmosphere(mapData);
+  STATE.lightingMode = quality.lighting === 'studio' ? 'studio' : 'engine';
+  STATE.chaseFog = quality.fog !== false;
+  scene.background = sceneBackground(mapData);
   STATE.scene = scene;
 
   // Reflect the whole world across the Z axis so the replay reads north-up /
@@ -549,33 +569,60 @@ function initScene(mapData) {
   STATE.worldGroup = worldGroup;
 }
 
+/** Clear colour: the .sky `sky.color` under engine lighting, the legacy tint otherwise. */
+function sceneBackground(mapData) {
+  if (STATE.lightingMode === 'engine' && STATE.atmo) return STATE.atmo.skyColor.clone();
+  return new THREE.Color((mapData && mapData.skyTint) || '#1a2030');
+}
+
 function initLights(mapData) {
-  const lighting = mapData.lighting || {};
-  const ambHex = lighting.ambient_color_hex || '#888899';
-  const ambient = new THREE.AmbientLight(new THREE.Color(ambHex), 0.9);
-  STATE.scene.add(ambient);
+  removeLights(STATE.scene, STATE.lights);
+  // Lights stay on the (unreflected) scene, so the sun's Z is negated to
+  // match the world-reflect group (scale.z = -1): `mirrorZ`.
+  STATE.lights = STATE.lightingMode === 'engine'
+    ? applyEngineLights(STATE.scene, STATE.atmo, { mirrorZ: true })
+    : applyStudioLights(STATE.scene, mapData, { mirrorZ: true });
+  STATE.sun = STATE.lights.sun;
+  // Engine mode advances the sun with match time (updateSun in renderFrame);
+  // the sky dome reads STATE.sunDir for its sun sprite. Studio mode leaves
+  // it null so the dome falls back to the studio sun's position.
+  STATE.sunDir = STATE.lightingMode === 'engine'
+    ? sunDirectionAt(STATE.atmo, STATE.progressSec || 0, true)
+    : null;
+}
 
-  const skyTop = new THREE.Color(mapData.skyTint || '#aaaaff')
-    .lerp(new THREE.Color(0xffffff), 0.5);
-  const groundCol = new THREE.Color(ambHex)
-    .lerp(new THREE.Color(0x554433), 0.5);
-  const hemi = new THREE.HemisphereLight(skyTop, groundCol, 0.85);
-  STATE.scene.add(hemi);
+/**
+ * Fog follows the camera: the chase camera is in the world, so it gets the
+ * engine's linear fog and visibility clip (when the Fog setting is on);
+ * free / cinema / top-down are out-of-world views and stay clear.
+ */
+function applyCameraFog() {
+  if (!STATE.scene || !STATE.camera || !STATE.atmo) return;
+  if (STATE.camMode === 'chase' && STATE.chaseFog) {
+    applyEngineFog(STATE.scene, STATE.camera, STATE.atmo);
+  } else {
+    clearFog(STATE.scene, STATE.camera);
+  }
+}
 
-  const sunHex = lighting.sun_color_hex || '#fff5e0';
-  const sunAngle = (lighting.sun_angle_deg != null ? lighting.sun_angle_deg : 30.0);
-  const sunAngleRad = sunAngle * Math.PI / 180.0;
-  const sunDist = 2000;
-  const sun = new THREE.DirectionalLight(new THREE.Color(sunHex), 2.0);
-  // Sun stays on the (unreflected) scene, so negate its Z to match the
-  // world-reflect group (scale.z = -1) and keep the lighting direction stable.
-  sun.position.set(
-    Math.cos(sunAngleRad) * sunDist * 0.7,
-    Math.sin(sunAngleRad) * sunDist,
-    -(Math.cos(sunAngleRad) * sunDist * 0.7),
-  );
-  STATE.scene.add(sun);
-  STATE.sun = sun;
+/**
+ * The game tiles take the .trn material diffuse under engine lighting. The
+ * minimap drape and the height ramp are already-shaded fallbacks, so they
+ * keep their own colour.
+ */
+function syncTerrainMaterial() {
+  const mesh = STATE.terrainMesh;
+  if (!mesh) return;
+  const onTiles = !!STATE.terrainTileMat && mesh.material === STATE.terrainTileMat;
+  if (onTiles && STATE.lightingMode === 'engine' && STATE.atmo) applyTerrainMaterial(mesh, STATE.atmo);
+  else resetTerrainMaterial(mesh);
+}
+
+/** detachSky() restores the pre-dome background; put the atmosphere's back. */
+function detachSkyKeepAtmosphere() {
+  detachSky(STATE);
+  if (STATE.scene) STATE.scene.background = sceneBackground(STATE.mapData);
+  applyCameraFog();
 }
 
 // ============================================================================
@@ -839,6 +886,7 @@ function initCamera(mapData) {
     return { floor: ground, ceiling: null };
   });
   STATE.camMode = 'free';
+  applyCameraFog();
   // Cinema needs read access to the kill index + current playback time.
   STATE.cameraCtl.setCinemaInputs({
     killIndex: STATE.killIndex,
@@ -940,6 +988,7 @@ function applyFloorMode(mode) {
       if (STATE.terrainTileMat) STATE.terrainMesh.material = STATE.terrainTileMat;
       break;
   }
+  syncTerrainMaterial();
 }
 
 function syncHqButton() {
@@ -1203,7 +1252,7 @@ function wireHqToggle(resolvedFloor) {
       if (STATE.terrainTileMat) applyFloorMode('tiles');
       else void loadHqFloor();
     } else {
-      detachSky(STATE);
+      detachSkyKeepAtmosphere();
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
     }
   });
@@ -1230,7 +1279,7 @@ function loadHqFloor() {
     if (!STATE.hqOn) return mat;
     if (!mat) {
       STATE.hqOn = false;
-      detachSky(STATE);
+      detachSkyKeepAtmosphere();
       patchFromTransport({ ground: 'minimap' });
       syncHqButton();
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
@@ -1242,7 +1291,7 @@ function loadHqFloor() {
     STATE.hqLoad = null;
     console.error('failed to load tile textures:', err);
     STATE.hqOn = false;
-    detachSky(STATE);
+    detachSkyKeepAtmosphere();
     patchFromTransport({ ground: 'minimap' });
     syncHqButton();
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
@@ -1658,6 +1707,7 @@ function setCameraMode(mode) {
   if (!['free', 'chase', 'topdown', 'cinema'].includes(mode)) return;
   STATE.camMode = mode;
   if (STATE.cameraCtl) STATE.cameraCtl.setMode(mode);
+  applyCameraFog();
   syncViewRows();
   document.body.classList.toggle('replay-chase-active', mode === 'chase');
   pushReplayUrlState({ cam: mode === 'free' ? null : mode });
@@ -2211,6 +2261,7 @@ function flyToFocus(hit, distOverride) {
   document.querySelectorAll('.roster-row').forEach((li) => li.classList.remove('is-focused'));
   STATE.cameraCtl.setFocusActor(null);
   STATE.camMode = 'free';
+  applyCameraFog();
   syncViewRows();
   document.body.classList.remove('replay-chase-active');
   pushReplayUrlState({ cam: null, focus: null });
@@ -2564,7 +2615,14 @@ function tick(timeMs) {
 
 function renderFrame(dtSec = 0) {
   if (!STATE.scene || !STATE.camera || !STATE.renderer) return;
-  syncSky(STATE.skyRig, STATE.camera);
+  // Engine lighting: the sun walks its east-west arc with match time
+  // (`sun.period` real-time hours per revolution), and the dome's sun
+  // sprite follows it.
+  if (STATE.lights && STATE.lights.mode === 'engine' && STATE.atmo) {
+    const dir = updateSun(STATE.lights, STATE.atmo, STATE.progressSec, { mirrorZ: true });
+    if (dir) STATE.sunDir = dir;
+  }
+  syncSky(STATE.skyRig, STATE.camera, STATE.sunDir || null);
 
   // 1. Update actor positions first (everyone reads from lastValidPos).
   if (STATE.actors) {

@@ -4,7 +4,17 @@
 
     const RESULT_LIMIT = 20;
     const DATA_URL = '../../data/odf-guide.json';
+    // Second book, merged into the same TOC/search as one top-level group.
+    // Built by scripts/extract_console_reference.py; 404-safe.
+    const CONSOLE_DATA_URL = '../../data/console-reference.json?v=console1';
     const ODF_DATA_URL = '../../data/odf.min.json';
+    const TIER_LABELS = {
+        verified: 'Verified in-game',
+        engine: 'Engine text',
+        usage: 'Usage context',
+        inferred: 'Inferred, unverified',
+        unverified: 'Community knowledge, unverified',
+    };
     const SHOTS_BASE = '../../data/models/shots/';
     const THUMB_BASE = '../../data/models/thumbnails/';
     const TOKEN_RE = /\*[A-Za-z][A-Za-z0-9_]*\.odf|[A-Za-z][A-Za-z0-9_]*\.odf|"[A-Za-z][A-Za-z0-9_]*(?:\.odf)?"|[A-Za-z][A-Za-z0-9_]*/g;
@@ -29,9 +39,15 @@
     const railEl = document.getElementById('guide-rail');
 
     let doc = null;
+    let consoleDoc = null;
     let sectionById = new Map();
     let sectionOrder = [];
     let activeId = '';
+    // Console sections set `linkify: false`: their names (`ivar1`, `svar82`)
+    // are filename-shaped and would otherwise become ODF-browser links.
+    let linkifyEnabled = true;
+    const creditEl = document.getElementById('guide-credit');
+    const creditDefaultHtml = creditEl ? creditEl.innerHTML : '';
     let resultIndex = 0;
     let hits = [];
     let applyingHistory = false;
@@ -81,7 +97,7 @@
 
     function linkify(text) {
         const src = String(text == null ? '' : text);
-        if (!odfIndex.size) return escapeHtml(src);
+        if (!odfIndex.size || !linkifyEnabled) return escapeHtml(src);
         let out = '';
         let last = 0;
         TOKEN_RE.lastIndex = 0;
@@ -100,14 +116,21 @@
     }
 
     function inline(text) {
-        const parts = String(text == null ? '' : text).split(/(\[[^\]]+\]\(https:\/\/[^)\s]+\))/g);
-        return parts.map(function (part) {
-            const link = part.match(/^\[([^\]]+)\]\((https:\/\/[^)\s]+)\)$/);
-            if (link) {
-                return '<a href="' + escapeHtml(link[2]) + '" target="_blank" rel="noopener">' +
-                    escapeHtml(link[1]) + '</a>';
+        // Backtick spans (used by the console book) render as code and are
+        // never linkified or bolded.
+        return String(text == null ? '' : text).split(/(`[^`]+`)/g).map(function (chunk) {
+            if (chunk.length > 2 && chunk.charAt(0) === '`' && chunk.charAt(chunk.length - 1) === '`') {
+                return '<code>' + escapeHtml(chunk.slice(1, -1)) + '</code>';
             }
-            return linkify(part).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            const parts = chunk.split(/(\[[^\]]+\]\(https:\/\/[^)\s]+\))/g);
+            return parts.map(function (part) {
+                const link = part.match(/^\[([^\]]+)\]\((https:\/\/[^)\s]+)\)$/);
+                if (link) {
+                    return '<a href="' + escapeHtml(link[2]) + '" target="_blank" rel="noopener">' +
+                        escapeHtml(link[1]) + '</a>';
+                }
+                return linkify(part).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            }).join('');
         }).join('');
     }
 
@@ -135,12 +158,23 @@
         const chip = block.default
             ? '<span class="vt-guide-default vt-mono">' + escapeHtml(block.default) + '</span>'
             : '';
+        // Console entries carry an evidence tier; the badge replaces the
+        // `Evidence:` note the data also carries for the markdown twin.
+        const tier = block.tier && TIER_LABELS[block.tier]
+            ? '<span class="vt-guide-tier vt-guide-tier-' + escapeHtml(block.tier) + '" title="Where this explanation comes from">' +
+                escapeHtml(TIER_LABELS[block.tier]) + '</span>'
+            : '';
+        const body = tier
+            ? (block.blocks || []).filter(function (inner) {
+                return !(inner.kind === 'note' && /^Evidence:/.test(String(inner.text || '')));
+            })
+            : block.blocks;
         return '<section class="vt-guide-prop vt-guide-anchor" id="' + escapeHtml(block.anchor) + '">' +
             '<div class="vt-guide-prop-head">' +
             '<code class="vt-guide-prop-name vt-mono">' + escapeHtml(block.label) + '</code>' +
-            chip +
+            chip + tier +
             '</div>' +
-            '<div class="vt-guide-prop-body">' + renderBlocks(block.blocks) + '</div>' +
+            '<div class="vt-guide-prop-body">' + renderBlocks(body) + '</div>' +
             '</section>';
     }
 
@@ -422,9 +456,29 @@
             articleEl.innerHTML = '<p class="text-secondary mb-0">That section is not in the guide.</p>';
             return;
         }
+        linkifyEnabled = section.linkify !== false;
+        renderCredit(section);
         articleEl.innerHTML =
             '<h1 id="guide-title">' + escapeHtml(section.title) + '</h1>' +
             '<div class="vt-guide-article-body">' + renderBlocks(section.blocks) + '</div>';
+    }
+
+    // The credit box names the source of whichever book is open: the Steam
+    // guide, or the console capture for the Console commands group.
+    function renderCredit(section) {
+        if (!creditEl) return;
+        const isConsole = consoleDoc && section.group === (consoleDoc.groups && consoleDoc.groups[0]);
+        if (!isConsole) {
+            creditEl.innerHTML = creditDefaultHtml;
+            return;
+        }
+        const src = consoleDoc.source || {};
+        const version = src.game_version ? ' ' + src.game_version : '';
+        const intro = consoleDoc.sections && consoleDoc.sections[0] ? consoleDoc.sections[0].id : '';
+        creditEl.innerHTML = '<p>Console commands captured from the in-game console of Battlezone: Combat Commander' +
+            escapeHtml(version) + ' and cross-checked against the game files. ' +
+            (intro ? '<a href="?section=' + encodeURIComponent(intro) + '">How to read this and where it comes from</a>' : '') +
+            '</p>';
     }
 
     function renderRail() {
@@ -885,13 +939,32 @@
         });
     }
 
+    // Append the console book: one more TOC group after the guide's own,
+    // its sections and search entries alongside the guide's. Ids are
+    // prefixed `console-` by the builder so they cannot collide.
+    function mergeConsoleBook(book) {
+        if (!book || !Array.isArray(book.sections) || !book.sections.length) return;
+        consoleDoc = book;
+        const known = new Set(doc.sections.map(function (section) { return section.id; }));
+        const groups = Array.isArray(book.groups) ? book.groups : [];
+        groups.forEach(function (group) {
+            if (doc.groups.indexOf(group) < 0) doc.groups.push(group);
+        });
+        book.sections.forEach(function (section) {
+            if (!known.has(section.id)) doc.sections.push(section);
+        });
+        (book.entries || []).forEach(function (entry) { doc.entries.push(entry); });
+    }
+
     Promise.all([
         loadJson(DATA_URL),
         loadJson(ODF_DATA_URL).catch(function () { return null; }),
+        loadJson(CONSOLE_DATA_URL).catch(function () { return null; }),
     ])
         .then(function (payloads) {
             doc = payloads[0];
             if (payloads[1]) indexOdfDatabase(payloads[1]);
+            mergeConsoleBook(payloads[2]);
             sectionOrder = doc.sections.map(function (section) { return section.id; });
             doc.sections.forEach(function (section) { sectionById.set(section.id, section); });
             applyLocation('replace');

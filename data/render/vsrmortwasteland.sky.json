@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrmortwasteland",
   "dome": "titandome",
   "cloud": "mortmarssky",
   "sun": "earthsun",
   "radius": 200.0,
   "colors": {
-    "sky": "#643228",
-    "zenith": "#ff644b",
-    "horizon": "#ccafcc"
+    "sky": "#643228"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#643228",
+      "start": 300.0,
+      "end": 500.0,
+      "visibility": 600.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#964b3c",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 7.0,
+      "color_hex": "#ff644b",
+      "intensity": 0.784,
+      "texture": "earthsun",
+      "size_deg": 0.0,
+      "distance": 100.0
+    },
+    "ambient": {
+      "color_hex": "#ccafcc",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "mortmarssky",
+      "height": 75.0,
+      "tilesize": 250.0,
+      "uspeed": 2.0,
+      "vspeed": 0.0,
+      "modulate": 0
+    },
+    "flags": 53,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 0,
+      "height": 0.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#963c96",
+      "light": {
+        "azim_deg": 90.0,
+        "elev_deg": 90.0,
+        "dist": 300.0,
+        "range": 600.0,
+        "attenuation": 1.0,
+        "color_hex": "#ff7f00"
+      },
+      "name": "titandome",
+      "radius": 200.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#ffffff",
+      "specular_hex": "#ffffff",
+      "specular_power": null,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/titandome.glb",
@@ -16,8 +99,11 @@
     "dome_ambient": 1.0,
     "dome_emissive": 0.0,
     "cloud_dds": null,
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "earthsun",
@@ -32,7 +118,7 @@
     {
       "name": "saturn",
       "blend": 1,
-      "color": "#3296c8",
+      "color": "#c89632",
       "size": 0.0,
       "azimuth": 180.0,
       "elevation": 30.0,

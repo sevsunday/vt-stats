@@ -13,7 +13,10 @@
  *     elevated to avoid z-fighting with the terrain. Toggled by the HUD.
  *   - Water and lava: masked planes from liquids.js, always on when cells exist.
  *   - Objects group: built by objects.js, one InstancedMesh per kind.
- *   - Lights: HemisphereLight + DirectionalLight.
+ *   - Lights: the engine's flat ambient + sun from the map's .sky sidecar
+ *     (atmosphere.js) for the interactive and embed views. The top-down
+ *     thumbnail capture keeps the older studio stack so the committed
+ *     PNGs stay byte-stable. No distance fog: these are orbit cameras.
  *
  * Camera target = world_rect center. OrbitControls handles input.
  */
@@ -24,7 +27,15 @@ import { createCameraController } from './replay-cameras.js';
 import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=terrain1';
 import { buildObjectsGroup } from './objects.js?v=terrain1';
 import { buildTileFloorMaterial } from './tile-floor.js?v=terrain1';
-import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
+import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-atmo3';
+import {
+  resolveAtmosphere,
+  applyEngineLights,
+  applyStudioLights,
+  applyTerrainMaterial,
+  updateSun,
+  sunDirectionAt,
+} from './atmosphere.js?v=atmo1';
 import { buildPropsGroup } from './props.js?v=terrain1';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface } from './terrain-owners.js?v=3';
@@ -57,6 +68,17 @@ const STATE = {
   // are drawn into it. Loose scrap and spawn markers are not.
   topdown: false,
   worldGroup: null,
+  // Atmosphere (atmosphere.js): resolved .sky values, the mounted light set
+  // ('engine' | 'studio'), the sun direction the dome's sprite follows, and
+  // the mount time the wall-clock sun arc counts from.
+  atmo: null,
+  lights: null,
+  sun: null,
+  sunDir: null,
+  mountedAt: 0,
+  // Sky sprites use compass azimuths; only the embed / top-down scenes
+  // reflect the world on Z (set at boot from the URL params).
+  mirrorZ: false,
   // FPS tracking:
   fpsAvg: 0,
   lastTime: 0,
@@ -89,6 +111,7 @@ const urlParams = readUrlParams();
 const stem = urlParams.stem;
 STATE.embed = urlParams.embed;
 STATE.topdown = urlParams.topdown;
+STATE.mirrorZ = !!(STATE.embed || STATE.topdown);
 const hasMapParam = new URL(location.href).searchParams.has('map');
 
 if (urlParams.batch) {
@@ -295,6 +318,10 @@ function disposeMounted() {
   STATE.waterMesh = null;
   STATE.lavaMesh = null;
   STATE.skyRig = null;
+  STATE.lights = null;
+  STATE.sun = null;
+  STATE.sunDir = null;
+  STATE.atmo = null;
   THREE.Cache.clear();
 }
 
@@ -305,6 +332,7 @@ async function bootBatch() {
   document.getElementById('batch').classList.remove('hidden');
   document.getElementById('scene').classList.remove('hidden');
   STATE.topdown = true;
+  STATE.mirrorZ = true;
   const btn = document.getElementById('batch-start');
   btn.addEventListener('click', () => {
     runBatch().catch(err => {
@@ -407,28 +435,24 @@ function initRenderer() {
   window.addEventListener('resize', onWindowResize);
 }
 
+/** Engine lighting everywhere except the byte-stable top-down capture. */
+function engineLit() {
+  return !STATE.topdown;
+}
+
+/** Clear colour: the .sky `sky.color` under engine lighting, the legacy tint otherwise. */
+function sceneBackground(data) {
+  if (engineLit() && STATE.atmo) return STATE.atmo.skyColor.clone();
+  return new THREE.Color((data && data.skyTint) || '#1a2030');
+}
+
 function initScene(data) {
   const scene = new THREE.Scene();
-  const lighting = data.lighting || {};
-  scene.background = new THREE.Color(data.skyTint || '#1a2030');
-
-  // Fog distances derived from MAP WORLD EXTENT, not from the engine's
-  // .TRN values. The engine fog is tuned for in-game first-person view
-  // (Remnant's FogStart=150m for PvP visibility balance), which would
-  // bury the entire terrain at orbital camera distances. We only borrow
-  // the FogColor from .TRN as an atmospheric cue.
-  const hm = data.heightmap;
-  const worldExtent = Math.max(
-    hm.cellsX * hm.cellMetersX,
-    hm.cellsZ * hm.cellMetersZ,
-  );
-  // Fog tuned for an orbit camera washes out a straight-down photo.
-  if (!STATE.topdown) {
-    const fogColorHex = lighting.fog_color_hex || data.skyTint || '#1a2030';
-    const fogStart = worldExtent * 1.5;
-    const fogEnd   = worldExtent * 3.0;
-    scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
-  }
+  STATE.atmo = resolveAtmosphere(data);
+  scene.background = sceneBackground(data);
+  // No distance fog here: the orbit and embed cameras are out-of-world
+  // views (the engine's 300-600 m ramps would bury the terrain), and the
+  // top-down capture is a straight-down photo.
   STATE.scene = scene;
 
   // Same north-up mirror the replay uses. Terrain, tiles, pools, and loose
@@ -447,44 +471,38 @@ function contentParent() {
 }
 
 function initLights(data) {
-  const lighting = data.lighting || {};
+  // The sun's Z is negated when the world group is mirrored so the key
+  // light stays on the same hills.
+  const mirrorZ = !!(STATE.embed || STATE.topdown);
+  STATE.mountedAt = performance.now();
+  if (engineLit()) {
+    // The engine's lights from the .sky sidecar: flat ambient + the sun on
+    // its east-west arc, advanced with wall-clock time in tick().
+    STATE.lights = applyEngineLights(STATE.scene, STATE.atmo, { mirrorZ });
+    STATE.sunDir = sunDirectionAt(STATE.atmo, 0, mirrorZ);
+  } else {
+    // Top-down capture: the pre-atmosphere studio stack (ambient 0.9 +
+    // hemisphere 0.85 + directional 2.0 at the TRN elevation) so the
+    // committed thumbnails stay byte-stable.
+    STATE.lights = applyStudioLights(STATE.scene, data, { mirrorZ });
+    STATE.sunDir = null;
+  }
+  STATE.sun = STATE.lights.sun;
+}
 
-  // Ambient floor lift -- prevents shadow areas from going black. The
-  // engine's AmbientColor is bright (Remnant: 180/180/180 = ~0.7 each
-  // channel) so we use it directly at intensity 1.0.
-  const ambHex = lighting.ambient_color_hex || '#888899';
-  const ambient = new THREE.AmbientLight(new THREE.Color(ambHex), 0.9);
-  STATE.scene.add(ambient);
+/** The game tiles take the .trn material diffuse under engine lighting. */
+function syncTerrainMaterial() {
+  const mesh = STATE.terrainMesh;
+  if (!mesh || !engineLit() || !STATE.atmo) return;
+  if (STATE.terrainTileMat && mesh.material === STATE.terrainTileMat) {
+    applyTerrainMaterial(mesh, STATE.atmo);
+  }
+}
 
-  // Hemisphere: subtle gradient from sky-tinted dome to a complementary
-  // ground term. Lifts everything to a usable brightness.
-  const skyTop = new THREE.Color(data.skyTint || '#aaaaff')
-    .lerp(new THREE.Color(0xffffff), 0.5);
-  const groundCol = new THREE.Color(ambHex)
-    .lerp(new THREE.Color(0x554433), 0.5);
-  const hemi = new THREE.HemisphereLight(skyTop, groundCol, 0.85);
-  STATE.scene.add(hemi);
-
-  // Directional "sun" using the .TRN SunColor + SunAngle for elevation.
-  // Lifted to intensity 2.0 since most maps' SunColor is white-ish 200/255
-  // (~0.78) and we want clear normal-based shading. Position vector
-  // matches the engine's sun angle above horizon (azimuth picked for
-  // visually pleasant cross-light from the SE).
-  const sunHex = lighting.sun_color_hex || '#fff5e0';
-  const sunAngle = (lighting.sun_angle_deg != null
-                    ? lighting.sun_angle_deg : 30.0);
-  const sunAngleRad = sunAngle * Math.PI / 180.0;
-  const sunDist = 2000;
-  const sun = new THREE.DirectionalLight(new THREE.Color(sunHex), 2.0);
-  // Negate Z when the world is mirrored so the key light stays on the same hills.
-  const sunZ = ((STATE.embed || STATE.topdown) ? -1 : 1) * Math.cos(sunAngleRad) * sunDist * 0.7;
-  sun.position.set(
-    Math.cos(sunAngleRad) * sunDist * 0.7,    // east-ish azimuth
-    Math.sin(sunAngleRad) * sunDist,          // elevation
-    sunZ,
-  );
-  STATE.scene.add(sun);
-  STATE.sun = sun;
+/** detachSky() restores the pre-dome background; put the atmosphere's back. */
+function detachSkyKeepAtmosphere() {
+  detachSky(STATE);
+  if (STATE.scene) STATE.scene.background = sceneBackground(STATE.mapData);
 }
 
 // ---------------- Terrain + floor ----------------
@@ -971,7 +989,7 @@ function wireHud(data) {
       if (input.value === 'tiles') {
         attachSky(STATE).catch((err) => console.warn('sky dome', err));
       } else {
-        detachSky(STATE);
+        detachSkyKeepAtmosphere();
       }
     });
   });
@@ -1039,6 +1057,7 @@ async function activateTileMode() {
     STATE.terrainMesh.material = STATE.terrainTileMat;
     STATE.terrainMesh.visible = true;
     STATE.terrainWireframe.visible = false;
+    syncTerrainMaterial();
     return;
   }
   // Slow path: first select. Show status while PNG + DDS files fetch.
@@ -1052,6 +1071,7 @@ async function activateTileMode() {
     STATE.terrainMesh.material = mat;
     STATE.terrainMesh.visible = true;
     STATE.terrainWireframe.visible = false;
+    syncTerrainMaterial();
     setStatus(null);
   } catch (err) {
     console.error('failed to load tile textures:', err);
@@ -1121,6 +1141,13 @@ function tick(timeMs) {
   const dtSec = Math.min(0.05, Math.max(0, dt) / 1000);
   if (STATE.camCtrl) STATE.camCtrl.update(dtSec, []);
   else if (STATE.controls) STATE.controls.update();
-  syncSky(STATE.skyRig, STATE.camera);
+  // Engine lighting: the sun walks its arc with wall-clock time since the
+  // map was mounted (`sun.period` real-time hours per revolution).
+  if (STATE.lights && STATE.lights.mode === 'engine' && STATE.atmo) {
+    const elapsed = (timeMs - STATE.mountedAt) / 1000;
+    const dir = updateSun(STATE.lights, STATE.atmo, elapsed, { mirrorZ: !!STATE.embed });
+    if (dir) STATE.sunDir = dir;
+  }
+  syncSky(STATE.skyRig, STATE.camera, STATE.sunDir || null);
   STATE.renderer.render(STATE.scene, STATE.camera);
 }

@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrfisle",
   "dome": "rendsky",
   "cloud": "sky",
   "sun": "rendsun",
   "radius": 400.0,
   "colors": {
-    "sky": "#280a0a",
-    "zenith": "#ff460a",
-    "horizon": "#964b28"
+    "sky": "#280a0a"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#280a0a",
+      "start": 75.0,
+      "end": 350.0,
+      "visibility": 1000.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#400000",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 8.0,
+      "color_hex": "#ff460a",
+      "intensity": 0.588,
+      "texture": "rendsun",
+      "size_deg": 0.0,
+      "distance": 400.0
+    },
+    "ambient": {
+      "color_hex": "#964b28",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "sky",
+      "height": 20.0,
+      "tilesize": 300.0,
+      "uspeed": 2.0,
+      "vspeed": 2.0,
+      "modulate": 1
+    },
+    "flags": 55,
+    "layers": {
+      "dome": true,
+      "stars": true,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#787878",
+      "count": 132,
+      "distance": 100.0,
+      "size": 0.5,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 1,
+      "height": 0.0,
+      "uspeed": 0.002,
+      "vspeed": 0.0,
+      "ambient_hex": "#000000",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 0.0,
+        "dist": 0.0,
+        "range": 0.0,
+        "attenuation": 0.0,
+        "color_hex": "#000000"
+      },
+      "name": "rendsky",
+      "radius": 400.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#ffffff",
+      "specular_hex": "#0a0a0a",
+      "specular_power": 1024.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/rendsky.glb",
@@ -16,8 +99,11 @@
     "dome_ambient": null,
     "dome_emissive": null,
     "cloud_dds": "sky/sky.dds",
-    "sun_dds": "sky/rendsun.dds"
+    "sun_dds": "sky/rendsun.dds",
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "psnebu03",
@@ -62,7 +148,7 @@
     {
       "name": "rendmoon",
       "blend": 0,
-      "color": "#28283c",
+      "color": "#3c2828",
       "size": 20.0,
       "azimuth": -90.0,
       "elevation": 40.0,

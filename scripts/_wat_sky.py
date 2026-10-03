@@ -1,20 +1,28 @@
-"""`.WAT`, `.SKY`, and `.TRN` lighting / atmosphere decoders.
+"""`.WAT`, `.SKY`, and `.TRN` decoders for the map renderers.
 
-The `.WAT` and `.SKY` formats are partially binary; we extract the
-water plane height (.WAT byte 16 float32), a fallback sky tint
-(first plausible RGB triple of .SKY, via `parse_sky_header`), and the
-dome / cloud / sun parameters (`parse_sky`).
+The `.SKY` file is the engine's atmosphere source. BZCC's editor
+documentation: "SKY: This file contains all the information regarding
+atmosphere, weather, fog and effects, sun angle and time of day, sky
+graphics, ambient color, and visibility distance." `parse_sky()` decodes
+it: fog colour / range / visibility, the sun light (colour, intensity,
+hour and period), the ambient light, the clear colour, the cloud layer,
+the dome mesh, the sun sprite, the SPRT billboards, and the FOG chunk's
+local and ground fog. The field names mirror the in-game console variables
+(`sky.fogstart`, `sun.angle`, ...), which is how the layout was confirmed.
 
-The `.TRN` is an INI text file that carries the engine's lighting model
-in human-readable blocks: `[Light]`, `[Sky]`, `[Water]`, `[NormalView]`.
-This module's `parse_trn_lighting()` extracts:
+The `.TRN` is an INI text file. Its `[NormalView]` material keys
+(`DiffuseColor`, `SpecularColor`, `SpecularPower`, `EmissiveColor`) are
+still what the engine applies to the terrain; `parse_trn_terrain_material()`
+reads those, with the engine defaults the console reports when a key is
+absent (diffuse `178 178 178`). Its `[Light]`, `[Sky]` and `[NormalView]`
+fog keys are BZ2-era leftovers that BZCC no longer renders (only a few maps
+carry them and they disagree with the `.SKY`); `parse_trn_lighting()` still
+reads them for the legacy `.3d.json` `lighting` block, which the renderers
+use only as a fallback when a sky sidecar is missing.
 
-- sun color, ambient color, sun-angle-above-horizon (for directional light)
-- sky color (overrides the binary .SKY fallback when present)
-- water color + alpha (the actual engine water tint, not a generic blue)
-- fog color, fog start/end, visibility range (atmospheric falloff)
-
-When fields are missing the helper falls back to reasonable defaults.
+The `.WAT` is partially binary; `parse_wat_header()` extracts the water
+plane height (byte 16 float32). `parse_sky_header()` is the older tint-only
+`.SKY` read that `extract_3d.py` still uses for `sky_tint`.
 """
 from __future__ import annotations
 
@@ -187,21 +195,236 @@ def _rgba_hex(blob: bytes, off: int) -> str | None:
     return f"#{ch(r):02x}{ch(g):02x}{ch(b):02x}"
 
 
+# SKY1 payload layout (212 bytes), confirmed against the in-game console
+# (`sky`, `sun` listings) and the editor panel bindings. Names are the
+# console variables.
+#   0x00 f32x4 sky.fogcolor RGBA   (fog colour; also the clear colour behind the dome)
+#   0x10 f32   sky.fogstart        0x14 f32 sky.fogend   0x18 f32 sky.visibilityrange
+#   0x1C f32   sun.period (realtime hours)   0x20 f32 sun.angle (hours along the arc)
+#   0x24 f32   2*pi*angle/period (derived)
+#   0x2C f32x4 sun.color RGBA      (alpha = light intensity)
+#   0x3C f32x4 sky.ambientcolor RGBA (alpha = intensity)
+#   0x50 f32   sky.height          0x54 char[32] sky.texturename (cloud layer)
+#   0x74 u8x4  sky.color as B,G,R,A   0x78 u32 sky.modulate
+#   0x7C char[32] sun.texturename
+#   0x9C f32   sky.uspeed   0xA0 f32 sky.vspeed   0xA4 f32 sky.tilesize
+#   0xA8 u32   sky.flags    0xB8 f32 sun.size (degrees)   0xBC f32 sun.distance
+_SKY1_MIN_LEN = 0xC0
+# `sky.flags` bits, from the editor's six TOGGLE buttons bound to the
+# variable (bz2r_res/config/editor/bzeditor_sky.cfg: Toggle Dome 1, Stars 2,
+# Flat 4, Clouds 8, Sprites 16, Sun 32). They decide which layers the engine
+# draws: Remnant 49 = dome + sprites + sun; Europa Night 54 = stars + flat
+# + sprites + sun, so its template dome name is never rendered. Bit 64
+# appears on six maps and has no editor button.
+SKY_FLAG_BITS = {
+    "dome": 1,
+    "stars": 2,
+    "flat": 4,
+    "clouds": 8,
+    "sprites": 16,
+    "sun": 32,
+}
+# STAR payload (64 bytes), confirmed against the console `stars` listing:
+#   0x00 u8x4 stars.color (B,G,R,A)   0x04 u32 stars.count   0x08 f32 stars.distance
+#   0x0C f32  stars.size (metres at that distance)   0x10 f32 stars.height
+#   0x14 char[32] stars.texture   0x34 u32 stars.modulate (1 = add)
+#   0x38 f32  stars.azimspeed     0x3C f32 stars.elevspeed
+# Star positions are not stored; the engine scatters them at load.
+_STAR_MIN_LEN = 0x40
+# DOME payload (1808 bytes): a raw struct with embedded pointers. The fields
+# the console confirms (`dome` listing, Europa Night):
+#   0x0C f32 dome.radius   0x10 char[32] dome.name   0x30 u32 dome.type
+#   (editor: 0 "Dome", 1 "Planet")   0x34 f32 dome.height
+#   0x38 f32 dome.uspeed   0x3C f32 dome.vspeed   0x44 f32x3 dome.ambient
+#   0x58 f32 dome.light.azim (rad)   0x5C f32 dome.light.elev (rad)
+#   0x60 f32 dist   0x64 f32 range   0x68 f32 attenuation   0x6C f32x3 colour
+_DOME_MIN_LEN = 0x78
+# FOG payload (488 bytes): 16 local fog volumes of 7 floats
+# (x, y, z, rx, ry, rz, density; density -1 = unused), then u32 count,
+# then the height (ground) fog band: start, end, density, min dist, max dist.
+_FOG_SLOTS = 16
+_FOG_SLOT_FLOATS = 7
+
+
+def _f32(blob: bytes, off: int) -> float | None:
+    if off + 4 > len(blob):
+        return None
+    value = struct.unpack_from("<f", blob, off)[0]
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return float(value)
+
+
+def _u32(blob: bytes, off: int) -> int | None:
+    if off + 4 > len(blob):
+        return None
+    return struct.unpack_from("<I", blob, off)[0]
+
+
+def _rgb_hex_floats(blob: bytes, off: int) -> str | None:
+    if off + 12 > len(blob):
+        return None
+    r, g, b = struct.unpack_from("<3f", blob, off)
+    if any(v != v for v in (r, g, b)):
+        return None
+
+    def ch(v: float) -> int:
+        return int(round(max(0.0, min(1.0, v)) * 255))
+
+    return f"#{ch(r):02x}{ch(g):02x}{ch(b):02x}"
+
+
+def _bgra_hex(blob: bytes, off: int) -> str | None:
+    if off + 4 > len(blob):
+        return None
+    b, g, r, _a = blob[off:off + 4]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _round(value: float | None, digits: int = 3) -> float | None:
+    return None if value is None else round(value, digits)
+
+
+def _sky1_atmosphere(sky1: bytes) -> dict | None:
+    """Fog, sun, ambient, clear colour and cloud layer from a SKY1 payload."""
+    if len(sky1) < _SKY1_MIN_LEN:
+        return None
+    return {
+        "fog": {
+            "color_hex": _rgb_hex_floats(sky1, 0x00),
+            "start": _round(_f32(sky1, 0x10)),
+            "end": _round(_f32(sky1, 0x14)),
+            "visibility": _round(_f32(sky1, 0x18)),
+            # Not stored in the file; the engine default, confirmed on every
+            # map checked (`sky.fogmode` 3, `sky.fogbreak` 0.5).
+            "mode": "linear",
+            "break": 0.5,
+        },
+        "sky_color_hex": _bgra_hex(sky1, 0x74),
+        # `sun` / `cloud` at the top level stay the asset stems; the light
+        # and the cloud layer get their own keys.
+        "sun_light": {
+            "period_h": _round(_f32(sky1, 0x1C)),
+            "angle_h": _round(_f32(sky1, 0x20)),
+            "color_hex": _rgb_hex_floats(sky1, 0x2C),
+            "intensity": _round(_f32(sky1, 0x38)),
+            "texture": sky_asset_stem(_zstr(sky1, 0x7C, 32)),
+            "size_deg": _round(_f32(sky1, 0xB8)),
+            "distance": _round(_f32(sky1, 0xBC)),
+        },
+        "ambient": {
+            "color_hex": _rgb_hex_floats(sky1, 0x3C),
+            "intensity": _round(_f32(sky1, 0x48)),
+        },
+        "cloud_layer": {
+            "texture": sky_asset_stem(_zstr(sky1, 0x54, 32)),
+            "height": _round(_f32(sky1, 0x50)),
+            "tilesize": _round(_f32(sky1, 0xA4)),
+            "uspeed": _round(_f32(sky1, 0x9C), 4),
+            "vspeed": _round(_f32(sky1, 0xA0), 4),
+            "modulate": _u32(sky1, 0x78),
+        },
+        "flags": _u32(sky1, 0xA8),
+    }
+
+
+def decode_sky_flags(flags: int | None) -> dict:
+    """`sky.flags` -> {dome, stars, flat, clouds, sprites, sun} booleans."""
+    value = int(flags or 0)
+    return {name: bool(value & bit) for name, bit in SKY_FLAG_BITS.items()}
+
+
+def _star_chunk(blob: bytes) -> dict | None:
+    """The starfield parameters from a STAR payload (positions are random)."""
+    if len(blob) < _STAR_MIN_LEN:
+        return None
+    return {
+        "color_hex": _bgra_hex(blob, 0x00),
+        "count": _u32(blob, 0x04),
+        "distance": _round(_f32(blob, 0x08)),
+        "size": _round(_f32(blob, 0x0C), 4),
+        "height": _round(_f32(blob, 0x10)),
+        "texture": sky_asset_stem(_zstr(blob, 0x14, 32)),
+        "modulate": _u32(blob, 0x34),
+        "azim_speed": _round(_f32(blob, 0x38), 4),
+        "elev_speed": _round(_f32(blob, 0x3C), 4),
+    }
+
+
+def _dome_chunk(blob: bytes) -> dict | None:
+    """Dome type, placement, texture drift, ambient and first light."""
+    if len(blob) < _DOME_MIN_LEN:
+        return None
+    azim = _f32(blob, 0x58)
+    elev = _f32(blob, 0x5C)
+    return {
+        "type": _u32(blob, 0x30),
+        "height": _round(_f32(blob, 0x34)),
+        "uspeed": _round(_f32(blob, 0x38), 5),
+        "vspeed": _round(_f32(blob, 0x3C), 5),
+        "ambient_hex": _rgb_hex_floats(blob, 0x44),
+        "light": {
+            "azim_deg": None if azim is None else round(azim * 180.0 / 3.141592653589793, 2),
+            "elev_deg": None if elev is None else round(elev * 180.0 / 3.141592653589793, 2),
+            "dist": _round(_f32(blob, 0x60)),
+            "range": _round(_f32(blob, 0x64)),
+            "attenuation": _round(_f32(blob, 0x68)),
+            "color_hex": _rgb_hex_floats(blob, 0x6C),
+        },
+    }
+
+
+def _fog_chunk(blob: bytes) -> dict:
+    """Local fog volumes and the ground fog band from a FOG payload."""
+    volumes: list[dict] = []
+    for i in range(_FOG_SLOTS):
+        base = i * _FOG_SLOT_FLOATS * 4
+        if base + _FOG_SLOT_FLOATS * 4 > len(blob):
+            break
+        x, y, z, rx, ry, rz, density = struct.unpack_from("<7f", blob, base)
+        if density < 0 or density != density:
+            continue
+        volumes.append({
+            "slot": i,
+            "position": [_round(x), _round(y), _round(z)],
+            "radius": [_round(rx), _round(ry), _round(rz)],
+            "density": _round(density),
+        })
+    tail = _FOG_SLOTS * _FOG_SLOT_FLOATS * 4
+    density = _f32(blob, tail + 0x0C)
+    ground = {
+        "start": _round(_f32(blob, tail + 0x04)),
+        "end": _round(_f32(blob, tail + 0x08)),
+        "density": _round(density),
+        "min_dist": _round(_f32(blob, tail + 0x10)),
+        "max_dist": _round(_f32(blob, tail + 0x14)),
+        "enabled": bool(density is not None and density > 0),
+    }
+    return {"local_fog": volumes, "ground_fog": ground}
+
+
 def parse_sky(path: Path | None) -> dict | None:
-    """Decode the dome / cloud / sun parameters from a `.SKY` file.
+    """Decode a `.SKY` file: dome, clouds, sun sprite, billboards, and the
+    atmosphere the engine actually renders (fog, sun light, ambient).
 
     Returns None when the file is missing or not the version-4 chunk
-    layout. Colors are the three SKY1 RGBA triples, clamped to 8-bit:
-
-        sky      payload 0x00  (the tint `parse_sky_header` already uses)
-        zenith   payload 0x2C
-        horizon  payload 0x3C
+    layout. `colors.sky` is the SKY1 colour at payload 0x00, which the
+    console reports as `sky.fogcolor`; it is kept under that name for the
+    existing sidecar readers. The earlier `zenith` / `horizon` keys were a
+    mislabel of the sun and ambient colours and are gone; those live in
+    `sun.color_hex` and `ambient.color_hex`.
 
     `dome`, `cloud`, and `sun` are lowercase stems with the extension
     stripped (`miredome.fbx` -> `miredome`). `radius` is the DOME float
     at payload 0x0C (engine meters; the viewer does not use it as the
     on-screen size). `sprites` is the SPRT billboard list from
-    `parse_sky_sprites`.
+    `parse_sky_sprites`, with the header's shared `sprite_distance` /
+    `sprite_height` beside it (`sprites.distance` 100 on every map; a
+    sprite's `size` is metres at that distance). `fog` / `sun_light` /
+    `ambient` / `sky_color_hex` / `cloud_layer` / `flags` follow the SKY1
+    layout documented above; `layers` is `flags` decoded per
+    `SKY_FLAG_BITS`; `stars` is the STAR chunk; `dome_params` the DOME
+    extras; `local_fog` / `ground_fog` come from the FOG chunk.
     """
     if path is None or not path.is_file():
         return None
@@ -220,7 +443,8 @@ def parse_sky(path: Path | None) -> dict | None:
             radius_f = None
         if radius_f is not None and radius_f == radius_f and 1.0 <= radius_f <= 10000.0:
             radius = float(radius_f)
-    return {
+    sprt = chunks.get("SPRT", b"")
+    out = {
         "version": version,
         "dome": sky_asset_stem(_zstr(dome, 0x10, 48)),
         "cloud": sky_asset_stem(_zstr(sky1, 0x54, 40)),
@@ -228,16 +452,27 @@ def parse_sky(path: Path | None) -> dict | None:
         "radius": radius,
         "colors": {
             "sky": _rgba_hex(sky1, 0x00),
-            "zenith": _rgba_hex(sky1, 0x2C),
-            "horizon": _rgba_hex(sky1, 0x3C),
         },
-        "sprites": parse_sky_sprites(chunks.get("SPRT", b"")),
+        "sprites": parse_sky_sprites(sprt),
+        "sprite_distance": _round(_f32(sprt, 0x04)) if len(sprt) >= _SPRT_HEADER else None,
+        "sprite_height": _round(_f32(sprt, 0x08)) if len(sprt) >= _SPRT_HEADER else None,
+        "stars": _star_chunk(chunks.get("STAR", b"")),
+        "dome_params": _dome_chunk(dome),
     }
+    atmosphere = _sky1_atmosphere(sky1)
+    if atmosphere:
+        out.update(atmosphere)
+    out["layers"] = decode_sky_flags(out.get("flags"))
+    out.update(_fog_chunk(chunks.get("FOG ", b"")))
+    return out
 
 
-# SPRT: 12-byte header, then 56-byte records. Confirmed on the version-4
-# files (payload length == 12 + N*56). The name is a 32-byte cstring; the
-# rest is blend mode, an RGBA tint, and size / azimuth / elevation / roll.
+# SPRT: 12-byte header (u32 selected index, f32 sprites.distance, f32
+# sprites.height), then 56-byte records. Confirmed on the version-4 files
+# (payload length == 12 + N*56) and the console `sprites` listing. The name
+# is a 32-byte cstring; the rest is blend mode, a B,G,R,A tint (the console
+# reports Remnant's moon as `255 220 180` for file bytes `b4 dc ff`), and
+# size / azimuth / elevation / roll.
 _SPRT_HEADER = 12
 _SPRT_RECORD = 56
 
@@ -252,8 +487,11 @@ def parse_sky_sprites(blob: bytes) -> list[dict]:
     """Billboards from a SPRT payload. Empty names are skipped.
 
     `blend` 0 is an alpha disc (Earth). `blend` 1 is additive (moons,
-    galaxies, lens flares). `color` is the record's RGB bytes as #rrggbb.
-    Angles are degrees, as stored.
+    galaxies, lens flares). `color` is the record's B,G,R bytes as #rrggbb.
+    `size` is metres at the header's `sprites.distance` (100 m), so
+    Remnant's size-40 moon spans `2 * atan(20 / 100)` = 22.6 degrees; 0
+    hides the sprite (the stock template carries 44 slots, most of them 0).
+    Angles are degrees, as stored: azimuth 0 is north, 90 east.
     """
     if not blob or len(blob) < _SPRT_HEADER + _SPRT_RECORD:
         return []
@@ -266,7 +504,7 @@ def parse_sky_sprites(blob: bytes) -> list[dict]:
         if not name:
             continue
         blend = struct.unpack_from("<I", rec, 32)[0]
-        red, green, blue = rec[36], rec[37], rec[38]
+        blue, green, red = rec[36], rec[37], rec[38]
         size, azimuth, elevation, roll = struct.unpack_from("<4f", rec, 40)
         out.append({
             "name": name,
@@ -338,8 +576,61 @@ def _parse_ini(path: Path) -> dict[str, dict[str, str]]:
     return out
 
 
+# Engine defaults when the .TRN omits the key, as the console reports them
+# on Remnant (`terrain.diffusecolor` -> 178 178 178 255, `terrain.specularcolor`
+# -> 255 255 255 255). Not white: a map without `DiffuseColor` renders its
+# terrain at 70% of the texture brightness.
+TERRAIN_DIFFUSE_DEFAULT_HEX = "#b2b2b2"
+TERRAIN_SPECULAR_DEFAULT_HEX = "#ffffff"
+TERRAIN_EMISSIVE_DEFAULT_HEX = "#000000"
+
+
+def parse_trn_terrain_material(trn_path: Path | None) -> dict:
+    """The terrain material the engine still reads from `.TRN [NormalView]`.
+
+    Returns `diffuse_hex`, `specular_hex`, `specular_power` (float or None)
+    and `emissive_hex`, with the engine defaults where a key is absent. Keys
+    are matched case-insensitively (`DiffuseColor`, `Diffusecolor`,
+    `diffusecolor` all occur in the corpus).
+    """
+    out = {
+        "diffuse_hex": TERRAIN_DIFFUSE_DEFAULT_HEX,
+        "specular_hex": TERRAIN_SPECULAR_DEFAULT_HEX,
+        "specular_power": None,
+        "emissive_hex": TERRAIN_EMISSIVE_DEFAULT_HEX,
+        "source": "default",
+    }
+    if trn_path is None or not trn_path.is_file():
+        return out
+    nv = {k.lower(): v for k, v in _parse_ini(trn_path).get("NormalView", {}).items()}
+    diffuse = _parse_rgba(nv.get("diffusecolor"))
+    specular = _parse_rgba(nv.get("specularcolor"))
+    emissive = _parse_rgba(nv.get("emissivecolor"))
+    if diffuse:
+        out["diffuse_hex"] = _rgb_to_hex(diffuse)
+        out["source"] = "trn"
+    if specular:
+        out["specular_hex"] = _rgb_to_hex(specular)
+        out["source"] = "trn"
+    if emissive:
+        out["emissive_hex"] = _rgb_to_hex(emissive)
+    power = nv.get("specularpower")
+    if power is not None:
+        try:
+            out["specular_power"] = float(str(power).strip().strip('"').strip("'"))
+        except ValueError:
+            pass
+    return out
+
+
 def parse_trn_lighting(trn_path: Path | None) -> dict:
-    """Pull lighting/atmosphere settings from `.TRN`.
+    """Legacy: the BZ2-era `[Light]` / `[Sky]` / `[NormalView]` fog keys.
+
+    BZCC renders the `.SKY` values instead (see `parse_sky`); only 9-11 of
+    142 VSR maps still carry these keys and where they do they disagree
+    with the `.SKY`. Kept because `extract_3d.py` writes them to the
+    `.3d.json` `lighting` block, which the renderers use only as a fallback
+    when a sky sidecar is missing.
 
     Returns a dict with normalized values:
         sun_color:       (r, g, b, a) in [0,1]   or default (1, 1, 1, 1)

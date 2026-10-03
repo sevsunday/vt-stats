@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrphazon",
   "dome": "miredome",
   "cloud": "sky",
   "sun": null,
   "radius": 200.0,
   "colors": {
-    "sky": "#000040",
-    "zenith": "#002040",
-    "horizon": "#8080ff"
+    "sky": "#000040"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#000040",
+      "start": 50.0,
+      "end": 550.0,
+      "visibility": 600.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#4040c8",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 0.0,
+      "color_hex": "#002040",
+      "intensity": 1.0,
+      "texture": null,
+      "size_deg": 0.0,
+      "distance": 200.0
+    },
+    "ambient": {
+      "color_hex": "#8080ff",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "sky",
+      "height": 50.0,
+      "tilesize": 500.0,
+      "uspeed": 6.0,
+      "vspeed": 0.0,
+      "modulate": 1
+    },
+    "flags": 5,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": false,
+      "sun": false
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 0,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 0,
+      "height": 0.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#0a0a3c",
+      "light": {
+        "azim_deg": 90.0,
+        "elev_deg": 25.0,
+        "dist": 0.0,
+        "range": 600.0,
+        "attenuation": 1.0,
+        "color_hex": "#c86464"
+      },
+      "name": "miredome",
+      "radius": 200.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#ffffff",
+      "specular_hex": "#ffffff",
+      "specular_power": 1024.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/miredome.glb",
@@ -16,8 +99,11 @@
     "dome_ambient": 1.0,
     "dome_emissive": 0.0,
     "cloud_dds": "sky/sky.dds",
-    "sun_dds": null
+    "sun_dds": null,
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "godlight2",

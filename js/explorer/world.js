@@ -15,7 +15,11 @@ import {
 import { buildTileFloorMaterial } from '../../_map-analysis/render/js/tile-floor.js?v=terrain1';
 import { buildPropsGroup } from '../../_map-analysis/render/js/props.js?v=terrain1';
 import { mountLiquids } from '../../_map-analysis/render/js/liquids.js?v=terrain1';
-import { attachSky, syncSky } from '../../_map-analysis/render/js/sky-dome.js?v=sky-hq';
+import { attachSky, syncSky } from '../../_map-analysis/render/js/sky-dome.js?v=sky-atmo3';
+import {
+  resolveAtmosphere, applyEngineLights, applyEngineFog, applyTerrainMaterial,
+  updateSun, sunDirectionAt,
+} from '../../_map-analysis/render/js/atmosphere.js?v=atmo1';
 
 const RENDER_PAGE = new URL('../../_map-analysis/render/', import.meta.url);
 
@@ -115,7 +119,6 @@ export async function loadWorld(stem, renderer, opts) {
   geom.computeVertexNormals();
 
   const scene = new THREE.Scene();
-  const lighting = mapData.lighting || {};
   scene.background = new THREE.Color(mapData.skyTint || '#1a2030');
   const worldGroup = new THREE.Group();
   worldGroup.name = 'world-reflect';
@@ -130,10 +133,14 @@ export async function loadWorld(stem, renderer, opts) {
   worldGroup.add(mesh);
 
   const wantTiles = !opts || opts.tiles !== false;
+  let onTiles = false;
   if (wantTiles && mapData.tileComposite) {
     try {
       const built = await buildTileFloorMaterial(renderer, mapData);
-      if (built && built.material) mesh.material = built.material;
+      if (built && built.material) {
+        mesh.material = built.material;
+        onTiles = true;
+      }
     } catch (err) {
       console.warn('tile floor', err);
     }
@@ -153,31 +160,29 @@ export async function loadWorld(stem, renderer, opts) {
     }
   }
 
-  const amb = new THREE.AmbientLight(lighting.ambient_color_hex || '#888899', 0.85);
-  scene.add(amb);
-  const hemi = new THREE.HemisphereLight(mapData.skyTint || '#9bb', '#554433', 0.75);
-  scene.add(hemi);
-  const sunAngle = ((lighting.sun_angle_deg != null ? lighting.sun_angle_deg : 32) * Math.PI) / 180;
-  const sun = new THREE.DirectionalLight(lighting.sun_color_hex || '#fff4d8', 2.1);
-  sun.position.set(Math.cos(sunAngle) * 1400, Math.sin(sunAngle) * 1800, -Math.cos(sunAngle) * 1400);
-  scene.add(sun);
+  // Engine lighting from the .sky sidecar: a flat ambient plus the sun on
+  // its east-west arc (the world group is Z-mirrored, hence mirrorZ). The
+  // game tiles take the .trn material diffuse (178/255 by default); the
+  // minimap drape is an already-shaded fallback and keeps its colour.
+  const atmo = resolveAtmosphere(mapData);
+  const lights = applyEngineLights(scene, atmo, { mirrorZ: true });
+  if (onTiles) applyTerrainMaterial(mesh, atmo);
+  const sunDir = sunDirectionAt(atmo, 0, true);
 
   const wr = mapData.worldRect;
   const camera = new THREE.PerspectiveCamera(62, 1, 0.15, 8000);
   camera.position.set(wr.centerX, 80, -wr.centerZ + 40);
-  const skyState = { scene, camera, mapData, renderer };
+  // mirrorZ: the world group is reflected on Z, so sky sprites authored
+  // with compass azimuths (0 = north) point at -Z here.
+  const skyState = { scene, camera, mapData, renderer, sun: lights.sun, sunDir, mirrorZ: true };
   try { await attachSky(skyState); }
   catch (err) { console.warn('sky', err); }
 
-  if (opts && opts.fog !== false) {
-    const extent = Math.max(hm.cellsX * hm.cellMetersX, hm.cellsZ * hm.cellMetersZ);
-    const fogHex = lighting.fog_color_hex || mapData.skyTint || '#1a2030';
-    scene.fog = new THREE.Fog(
-      new THREE.Color(fogHex),
-      Number.isFinite(lighting.fog_start) ? lighting.fog_start : extent * 0.55,
-      Number.isFinite(lighting.fog_end) ? lighting.fog_end : extent * 1.15,
-    );
-  }
+  // The explorer is always on the ground, so it gets the engine's exact
+  // distance fog and visibility clip (nothing drawn past `visibilityrange`).
+  // `attachSky` already set the clear colour; the fog keeps its own colour.
+  if (opts && opts.fog !== false) applyEngineFog(scene, camera, atmo);
+  const startedAt = performance.now();
 
   const tunnelIndex = buildTunnelIndex(mapData.props);
 
@@ -215,12 +220,20 @@ export async function loadWorld(stem, renderer, opts) {
     mapData,
     mesh,
     skyState,
+    atmosphere: atmo,
+    lights,
     spawns,
     probe,
     groundAt(x, z) { return probe(x, z).height; },
+    // Per frame: the sun advances along its arc in real time (`sun.period`
+    // is in real-time hours), the sprite follows it, and the dome rig is
+    // re-fitted to the camera's far plane.
     syncSky(camera) {
       skyState.camera = camera;
-      if (skyState.skyRig) syncSky(skyState.skyRig, camera);
+      const elapsed = (performance.now() - startedAt) / 1000;
+      const dir = updateSun(lights, atmo, elapsed, { mirrorZ: true }) || sunDir;
+      skyState.sunDir = dir;
+      if (skyState.skyRig) syncSky(skyState.skyRig, camera, dir);
     },
   };
 }

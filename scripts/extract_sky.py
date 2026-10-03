@@ -3,16 +3,25 @@
 Standalone. Not invoked by process_stats.py, and it does not rewrite
 the heightmap `*.3d.json` files.
 
-The `.SKY` file names a dome mesh, cloud / sun textures, and SPRT
-billboards. The pixels live in the BZCC install as baked `.msh` + `.dds`
-under `bz2r_res/baked/Worlds/<biome>/Sky/`, shared sky art under
+The `.SKY` file is the engine's atmosphere source: fog colour and range,
+visibility, the sun light (colour, intensity, hour, period), the ambient
+light, the clear colour, the cloud layer, the dome mesh, the sun sprite and
+the SPRT billboards. The pixels live in the BZCC install as baked `.msh` +
+`.dds` under `bz2r_res/baked/Worlds/<biome>/Sky/`, shared sky art under
 `Worlds/Textures/` (stars, earth, banesky, darkflat3), and a few effect
 textures such as `blast.dds`. This script:
 
-1. Decodes every ingested `.SKY` via `parse_sky`.
-2. Writes `data/render/<stem>.sky.json`.
+1. Decodes every ingested `.SKY` via `parse_sky`, plus the terrain material
+   from the sibling `.TRN` (`parse_trn_terrain_material`).
+2. Writes `data/render/<stem>.sky.json` (schema 4) with an `atmosphere`
+   block the renderers light and fog the world from, including the
+   `sky.flags` layer switches (dome / stars / flat / clouds / sprites /
+   sun), the STAR parameters and the DOME extras.
 3. Copies only the referenced `.dds` files and a static GLB of each
    referenced dome `.msh` into `data/render/sky/`.
+
+The colours need no game install; without one the sidecars are written
+with `assets` left null.
 
     python scripts/extract_sky.py
     python scripts/extract_sky.py --stem vsrvegan
@@ -32,12 +41,20 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "object-render"))
 
 from _paths import RENDER_DATA_DIR, VSRMAPLIST_DIR  # noqa: E402
-from _wat_sky import parse_sky  # noqa: E402
+from _wat_sky import parse_sky, parse_trn_terrain_material  # noqa: E402
 from msh_parser import parse_msh  # noqa: E402
 
 SKY_DIR = RENDER_DATA_DIR / "sky"
 DEFAULT_BZ2R = Path(r"C:\Program Files (x86)\Steam\steamapps\common\BZ2R")
-SCHEMA_VERSION = 2
+# 3: `atmosphere` block (fog / sun / ambient / clear colour / cloud layer /
+#    flags from SKY1, local + ground fog from the FOG chunk, terrain material
+#    from the .TRN); `colors` keeps only `sky` (the fog colour).
+# 4: `atmosphere.layers` (sky.flags decoded), `atmosphere.stars` (STAR
+#    chunk), `atmosphere.dome` (type / height / uv drift / ambient / light),
+#    `sprite_distance` + `sprite_height` (SPRT header), `assets.stars_dds`;
+#    sprite colours read as B,G,R (they were swapped), sprite `size` is
+#    metres at `sprite_distance`.
+SCHEMA_VERSION = 4
 
 
 def _mirror_z(v):
@@ -267,12 +284,28 @@ def _index_baked(bz2r: Path):
     return dds, msh
 
 
+def _mesh_texture_stem(msh_path: Path) -> str | None:
+    """The texture a baked dome mesh names in its own groups, if any
+    (banedome -> `banesky.dds`, rendsky -> `rendsky.dds`); None when the
+    groups only name a `.material`."""
+    try:
+        for mesh in parse_msh(msh_path):
+            for group in mesh.groups:
+                tex = getattr(group, "texture", None)
+                if tex:
+                    return Path(str(tex)).stem.lower()
+    except Exception:
+        return None
+    return None
+
+
 def _dome_surface(msh_path: Path, stem: str, dds: dict[str, Path]) -> dict:
-    """Material diffuse + lighting, or a sibling `<stem>.dds` with no lighting.
+    """Material diffuse + lighting, else the texture the mesh itself names,
+    else a sibling `<stem>.dds`, all with no lighting.
 
     `ambient` / `emissive` stay None when there is no material. The viewer
-    treats that as "tint the texture" (rendsky). A material with ambient 0
-    is a self-lit dome (stars, DarkSkyS) and must not be tinted.
+    treats that as "tint the texture" (rendsky, banedome). A material with
+    ambient 0 is a self-lit dome (stars, DarkSkyS) and must not be tinted.
     """
     parent = msh_path.parent
     if parent.is_dir():
@@ -285,6 +318,9 @@ def _dome_surface(msh_path: Path, stem: str, dds: dict[str, Path]) -> dict:
             found = _material_surface(path)
             if found and found.get("diffuse"):
                 return found
+    embedded = _mesh_texture_stem(msh_path)
+    if embedded and embedded in dds:
+        return {"diffuse": embedded, "ambient": None, "emissive": None}
     sibling = msh_path.with_suffix(".dds")
     if sibling.is_file() or stem in dds:
         return {"diffuse": stem, "ambient": None, "emissive": None}
@@ -324,15 +360,24 @@ def _bzn_stem(folder: Path) -> str | None:
     return None
 
 
-def _sky_path(folder: Path) -> Path | None:
+def _first_with_suffix(folder: Path, *patterns: str) -> Path | None:
     seen = set()
-    for path in list(folder.glob("*.sky")) + list(folder.glob("*.SKY")):
-        key = str(path.resolve()).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        return path
+    for pattern in patterns:
+        for path in folder.glob(pattern):
+            key = str(path.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            return path
     return None
+
+
+def _sky_path(folder: Path) -> Path | None:
+    return _first_with_suffix(folder, "*.sky", "*.SKY")
+
+
+def _trn_path(folder: Path) -> Path | None:
+    return _first_with_suffix(folder, "*.trn", "*.TRN")
 
 
 def _iter_maps(only: str | None):
@@ -354,7 +399,7 @@ def _iter_maps(only: str | None):
         sky = _sky_path(folder)
         if sky is None:
             continue
-        yield stem, sky
+        yield stem, sky, _trn_path(folder)
 
 
 def _rel_for_stem(table: dict[str, Path], stem: str | None, cache: dict[str, str | None]) -> str | None:
@@ -385,7 +430,7 @@ def extract(bz2r: Path, only: str | None) -> int:
     empty_surface = {"diffuse": None, "ambient": None, "emissive": None}
     RENDER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    for stem, sky_path in _iter_maps(only):
+    for stem, sky_path, trn_path in _iter_maps(only):
         parsed = parse_sky(sky_path)
         if parsed is None:
             print(f"  skip {stem}: SKY did not parse")
@@ -423,6 +468,10 @@ def extract(bz2r: Path, only: str | None) -> int:
             row = dict(rec)
             row["texture"] = _rel_for_stem(dds, rec.get("name"), dds_cache)
             sprites.append(row)
+        stars = parsed.get("stars")
+        dome_params = dict(parsed.get("dome_params") or {})
+        dome_params["name"] = dome
+        dome_params["radius"] = parsed.get("radius")
         doc = {
             "schema_version": SCHEMA_VERSION,
             "map_stem": stem,
@@ -431,6 +480,27 @@ def extract(bz2r: Path, only: str | None) -> int:
             "sun": parsed.get("sun"),
             "radius": parsed.get("radius"),
             "colors": parsed.get("colors") or {},
+            # What the engine renders. Field names mirror the console
+            # variables (sky.fogstart, sun.angle, ...). The renderers read
+            # this first and fall back to the .3d.json `lighting` block.
+            "atmosphere": {
+                "fog": parsed.get("fog"),
+                "sky_color_hex": parsed.get("sky_color_hex"),
+                "sun": parsed.get("sun_light"),
+                "ambient": parsed.get("ambient"),
+                "cloud": parsed.get("cloud_layer"),
+                "flags": parsed.get("flags"),
+                # Which layers the engine draws (sky.flags decoded). The
+                # dome name below is a stock-template leftover on maps whose
+                # `dome` switch is off (Europa Night), so the renderers must
+                # gate on these, not on the asset being present.
+                "layers": parsed.get("layers"),
+                "stars": stars,
+                "dome": dome_params,
+                "local_fog": parsed.get("local_fog") or [],
+                "ground_fog": parsed.get("ground_fog"),
+                "terrain_material": parse_trn_terrain_material(trn_path),
+            },
             "assets": {
                 "dome_glb": glb_rel,
                 "dome_dds": dome_dds_rel,
@@ -438,7 +508,12 @@ def extract(bz2r: Path, only: str | None) -> int:
                 "dome_emissive": surface.get("emissive"),
                 "cloud_dds": _rel_for_stem(dds, parsed.get("cloud"), dds_cache),
                 "sun_dds": _rel_for_stem(dds, parsed.get("sun"), dds_cache),
+                "stars_dds": _rel_for_stem(dds, stars.get("texture") if stars else None, dds_cache),
             },
+            # SPRT header: every sprite sits `sprite_distance` metres out
+            # (100 on every map) and its `size` is metres at that distance.
+            "sprite_distance": parsed.get("sprite_distance"),
+            "sprite_height": parsed.get("sprite_height"),
             "sprites": sprites,
         }
         out = RENDER_DATA_DIR / f"{stem}.sky.json"

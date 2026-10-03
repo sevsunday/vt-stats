@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsriceage",
   "dome": "dunedome",
   "cloud": "white_clouds",
   "sun": "dunesun",
   "radius": 261.25,
   "colors": {
-    "sky": "#323c64",
-    "zenith": "#ffffff",
-    "horizon": "#1e465a"
+    "sky": "#323c64"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#323c64",
+      "start": 225.0,
+      "end": 450.0,
+      "visibility": 450.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#a08c46",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 9.0,
+      "color_hex": "#ffffff",
+      "intensity": 1.0,
+      "texture": "dunesun",
+      "size_deg": 20.0,
+      "distance": 261.0
+    },
+    "ambient": {
+      "color_hex": "#1e465a",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "white_clouds",
+      "height": 70.0,
+      "tilesize": 250.0,
+      "uspeed": 3.0,
+      "vspeed": 1.0,
+      "modulate": 1
+    },
+    "flags": 53,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 0,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 1,
+      "height": 20.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#ffffff",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 90.0,
+        "dist": 600.0,
+        "range": 1000.0,
+        "attenuation": 1.0,
+        "color_hex": "#ffc800"
+      },
+      "name": "dunedome",
+      "radius": 261.25
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#c8c8c8",
+      "specular_hex": "#ffffff",
+      "specular_power": 0.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/dunedome.glb",
@@ -16,8 +99,11 @@
     "dome_ambient": 1.0,
     "dome_emissive": 0.0,
     "cloud_dds": "sky/white_clouds.dds",
-    "sun_dds": "sky/dunesun.dds"
+    "sun_dds": "sky/dunesun.dds",
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "lightflare",
@@ -52,7 +138,7 @@
     {
       "name": "godlight2",
       "blend": 1,
-      "color": "#64dcff",
+      "color": "#ffdc64",
       "size": 0.0,
       "azimuth": 90.0,
       "elevation": 40.0,

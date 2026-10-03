@@ -1,14 +1,97 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrdc",
   "dome": "plutodome",
   "cloud": null,
   "sun": "lightflare",
   "radius": 275.0,
   "colors": {
-    "sky": "#403278",
-    "zenith": "#808080",
-    "horizon": "#7f507f"
+    "sky": "#403278"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#403278",
+      "start": 50.0,
+      "end": 500.0,
+      "visibility": 600.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#808080",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 9.0,
+      "color_hex": "#808080",
+      "intensity": 1.0,
+      "texture": "lightflare",
+      "size_deg": 10.0,
+      "distance": 100.0
+    },
+    "ambient": {
+      "color_hex": "#7f507f",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": null,
+      "height": 50.0,
+      "tilesize": 100.0,
+      "uspeed": 50.0,
+      "vspeed": 0.0,
+      "modulate": 0
+    },
+    "flags": 19,
+    "layers": {
+      "dome": true,
+      "stars": true,
+      "flat": false,
+      "clouds": false,
+      "sprites": true,
+      "sun": false
+    },
+    "stars": {
+      "color_hex": "#646464",
+      "count": 64,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 1,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 1,
+      "height": 0.0,
+      "uspeed": 0.002,
+      "vspeed": 0.002,
+      "ambient_hex": "#000000",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 55.0,
+        "dist": 800.0,
+        "range": 1000.0,
+        "attenuation": 1.0,
+        "color_hex": "#00407f"
+      },
+      "name": "plutodome",
+      "radius": 275.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#b2b2b2",
+      "specular_hex": "#ffffff",
+      "specular_power": 1024.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/plutodome.glb",
@@ -16,13 +99,16 @@
     "dome_ambient": 0.0,
     "dome_emissive": 0.5,
     "cloud_dds": null,
-    "sun_dds": "sky/lightflare.dds"
+    "sun_dds": "sky/lightflare.dds",
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 100.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#402000",
+      "color": "#002040",
       "size": 70.0,
       "azimuth": 0.0,
       "elevation": 70.0,
@@ -42,7 +128,7 @@
     {
       "name": "psnebu02",
       "blend": 1,
-      "color": "#640040",
+      "color": "#400064",
       "size": 60.0,
       "azimuth": -130.0,
       "elevation": 60.0,
@@ -82,7 +168,7 @@
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#803228",
+      "color": "#283280",
       "size": 60.0,
       "azimuth": 180.0,
       "elevation": 50.0,
@@ -102,7 +188,7 @@
     {
       "name": "psnebu01",
       "blend": 1,
-      "color": "#804000",
+      "color": "#004080",
       "size": 40.0,
       "azimuth": 0.0,
       "elevation": 50.0,

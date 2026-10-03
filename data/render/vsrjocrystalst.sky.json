@@ -1,23 +1,109 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "map_stem": "vsrjocrystalst",
   "dome": "banedome",
   "cloud": "banesky",
   "sun": "banesun",
   "radius": 206.0,
   "colors": {
-    "sky": "#553950",
-    "zenith": "#a78773",
-    "horizon": "#2f192a"
+    "sky": "#553950"
+  },
+  "atmosphere": {
+    "fog": {
+      "color_hex": "#553950",
+      "start": 0.0,
+      "end": 512.0,
+      "visibility": 544.0,
+      "mode": "linear",
+      "break": 0.5
+    },
+    "sky_color_hex": "#8d4552",
+    "sun": {
+      "period_h": 24.0,
+      "angle_h": 8.0,
+      "color_hex": "#a78773",
+      "intensity": 0.694,
+      "texture": "banesun",
+      "size_deg": 25.0,
+      "distance": 2.0
+    },
+    "ambient": {
+      "color_hex": "#2f192a",
+      "intensity": 1.0
+    },
+    "cloud": {
+      "texture": "banesky",
+      "height": 25.0,
+      "tilesize": 400.0,
+      "uspeed": 12.0,
+      "vspeed": 0.0,
+      "modulate": 0
+    },
+    "flags": 53,
+    "layers": {
+      "dome": true,
+      "stars": false,
+      "flat": true,
+      "clouds": false,
+      "sprites": true,
+      "sun": true
+    },
+    "stars": {
+      "color_hex": "#ffffff",
+      "count": 128,
+      "distance": 100.0,
+      "size": 1.0,
+      "height": 0.0,
+      "texture": "lightflare",
+      "modulate": 0,
+      "azim_speed": 0.0,
+      "elev_speed": 0.0
+    },
+    "dome": {
+      "type": 0,
+      "height": 0.0,
+      "uspeed": 0.0,
+      "vspeed": 0.0,
+      "ambient_hex": "#5a3764",
+      "light": {
+        "azim_deg": 0.0,
+        "elev_deg": 0.0,
+        "dist": 0.0,
+        "range": 0.0,
+        "attenuation": 0.0,
+        "color_hex": "#000000"
+      },
+      "name": "banedome",
+      "radius": 206.0
+    },
+    "local_fog": [],
+    "ground_fog": {
+      "start": 0.0,
+      "end": 0.0,
+      "density": -1.0,
+      "min_dist": 1000.0,
+      "max_dist": 2000.0,
+      "enabled": false
+    },
+    "terrain_material": {
+      "diffuse_hex": "#cccccc",
+      "specular_hex": "#0a0a0a",
+      "specular_power": 1024.0,
+      "emissive_hex": "#000000",
+      "source": "trn"
+    }
   },
   "assets": {
     "dome_glb": "sky/banedome.glb",
-    "dome_dds": null,
+    "dome_dds": "sky/banesky.dds",
     "dome_ambient": null,
     "dome_emissive": null,
     "cloud_dds": "sky/banesky.dds",
-    "sun_dds": "sky/banesun.dds"
+    "sun_dds": "sky/banesun.dds",
+    "stars_dds": "sky/lightflare.dds"
   },
+  "sprite_distance": 3.0,
+  "sprite_height": 0.0,
   "sprites": [
     {
       "name": "pscharon",
@@ -52,7 +138,7 @@
     {
       "name": "aurora3",
       "blend": 1,
-      "color": "#c86496",
+      "color": "#9664c8",
       "size": 60.0,
       "azimuth": 120.0,
       "elevation": 5.0,
@@ -72,7 +158,7 @@
     {
       "name": "aurora5",
       "blend": 1,
-      "color": "#c8c832",
+      "color": "#32c8c8",
       "size": 50.0,
       "azimuth": 25.0,
       "elevation": 10.0,

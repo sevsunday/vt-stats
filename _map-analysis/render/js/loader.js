@@ -257,11 +257,13 @@ function decodeHiresBlocks(blocks) {
   return out;
 }
 
-/** Per-map sky sidecar. Null when the extract has not been run. */
+/** Per-map sky sidecar (schema 4: dome / star / sprite assets, the
+ *  `sky.flags` layer switches, and the `atmosphere` block the renderers
+ *  light and fog from). Null when the extract has not been run. */
 export async function loadSkySidecar(stem) {
   if (!stem) return null;
   try {
-    const res = await fetch(dataUrl(`${stem}.sky.json?v=sky-sprites2`));
+    const res = await fetch(dataUrl(`${stem}.sky.json?v=sky-atmo4`));
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {

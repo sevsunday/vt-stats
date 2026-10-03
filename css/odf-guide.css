@@ -313,6 +313,37 @@
     font-size: 0.82rem;
 }
 
+/* Evidence tier of a Console commands entry (data/console-reference.json
+   `tier`). One quiet pill per entry; the colour says how far to trust the
+   explanation, so a name-only guess never reads like a verified fact. */
+.vt-guide-tier {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.02rem 0.5rem;
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid var(--kb-border-subtle);
+    color: var(--kb-text-secondary);
+    background: var(--kb-bg-subtle);
+}
+
+.vt-guide-tier-verified {
+    color: var(--kb-success);
+    border-color: var(--kb-success);
+}
+
+.vt-guide-tier-engine {
+    color: var(--kb-info);
+    border-color: var(--kb-info);
+}
+
+.vt-guide-tier-inferred,
+.vt-guide-tier-unverified {
+    color: var(--kb-warning);
+    border-color: var(--kb-warning);
+}
+
 /* Property bodies read as a dense reference list, so they run tighter than
    docs-prose's article rhythm. Everything else inherits it untouched. */
 .vt-guide-prop-body > p,
