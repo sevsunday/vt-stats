@@ -440,9 +440,10 @@ function engineLit() {
   return !STATE.topdown;
 }
 
-/** Clear colour: the .sky `sky.color` under engine lighting, the legacy tint otherwise. */
+/** Clear colour: the .sky fog colour under engine lighting (what the game
+ *  shows wherever no sky layer draws), the legacy tint otherwise. */
 function sceneBackground(data) {
-  if (engineLit() && STATE.atmo) return STATE.atmo.skyColor.clone();
+  if (engineLit() && STATE.atmo) return STATE.atmo.clearColor.clone();
   return new THREE.Color((data && data.skyTint) || '#1a2030');
 }
 

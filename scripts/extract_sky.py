@@ -54,7 +54,12 @@ DEFAULT_BZ2R = Path(r"C:\Program Files (x86)\Steam\steamapps\common\BZ2R")
 #    `sprite_distance` + `sprite_height` (SPRT header), `assets.stars_dds`;
 #    sprite colours read as B,G,R (they were swapped), sprite `size` is
 #    metres at `sprite_distance`.
-SCHEMA_VERSION = 4
+# 5: the alpha bytes -- `atmosphere.sky_color_alpha` (`sky.colora`, the flat
+#    cloud layer's opacity), `atmosphere.stars.alpha` (`stars.colora`) and
+#    `sprites[].alpha` (`sprites.colora`), all 0..1. `sky.color` is
+#    documented as the dome / cloud-layer tint, not the clear colour: the
+#    game shows the fog colour wherever no sky layer draws.
+SCHEMA_VERSION = 5
 
 
 def _mirror_z(v):
@@ -485,7 +490,11 @@ def extract(bz2r: Path, only: str | None) -> int:
             # this first and fall back to the .3d.json `lighting` block.
             "atmosphere": {
                 "fog": parsed.get("fog"),
+                # `sky.color`: the dome / flat-layer tint and (alpha) the
+                # flat layer's opacity. The clear colour behind a dome-off
+                # sky is `fog.color_hex`, not this.
                 "sky_color_hex": parsed.get("sky_color_hex"),
+                "sky_color_alpha": parsed.get("sky_color_alpha"),
                 "sun": parsed.get("sun_light"),
                 "ambient": parsed.get("ambient"),
                 "cloud": parsed.get("cloud_layer"),

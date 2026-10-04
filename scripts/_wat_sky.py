@@ -205,7 +205,12 @@ def _rgba_hex(blob: bytes, off: int) -> str | None:
 #   0x2C f32x4 sun.color RGBA      (alpha = light intensity)
 #   0x3C f32x4 sky.ambientcolor RGBA (alpha = intensity)
 #   0x50 f32   sky.height          0x54 char[32] sky.texturename (cloud layer)
-#   0x74 u8x4  sky.color as B,G,R,A   0x78 u32 sky.modulate
+#   0x74 u8x4  sky.color as B,G,R,A -- the "Sky Color" of the editor's Sky
+#              Texture group: it tints the dome and the flat cloud layer and
+#              its alpha is that layer's opacity. It is NOT the clear colour;
+#              where no layer draws the game shows the fog colour (Europa
+#              Night's dome-off sky is 20 25 30 between the cloud wisps).
+#   0x78 u32   sky.modulate
 #   0x7C char[32] sun.texturename
 #   0x9C f32   sky.uspeed   0xA0 f32 sky.vspeed   0xA4 f32 sky.tilesize
 #   0xA8 u32   sky.flags    0xB8 f32 sun.size (degrees)   0xBC f32 sun.distance
@@ -281,6 +286,13 @@ def _bgra_hex(blob: bytes, off: int) -> str | None:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _byte_alpha(blob: bytes, off: int) -> float | None:
+    """The A of a B,G,R,A byte colour as 0..1 (`sky.colora`, `sprites.colora`)."""
+    if off + 4 > len(blob):
+        return None
+    return round(blob[off + 3] / 255.0, 4)
+
+
 def _round(value: float | None, digits: int = 3) -> float | None:
     return None if value is None else round(value, digits)
 
@@ -301,6 +313,9 @@ def _sky1_atmosphere(sky1: bytes) -> dict | None:
             "break": 0.5,
         },
         "sky_color_hex": _bgra_hex(sky1, 0x74),
+        # `sky.colora`: opacity of the flat cloud layer (255 on 106 of the
+        # 157 VSR skies, 50-200 on the rest).
+        "sky_color_alpha": _byte_alpha(sky1, 0x74),
         # `sun` / `cloud` at the top level stay the asset stems; the light
         # and the cloud layer get their own keys.
         "sun_light": {
@@ -340,6 +355,7 @@ def _star_chunk(blob: bytes) -> dict | None:
         return None
     return {
         "color_hex": _bgra_hex(blob, 0x00),
+        "alpha": _byte_alpha(blob, 0x00),
         "count": _u32(blob, 0x04),
         "distance": _round(_f32(blob, 0x08)),
         "size": _round(_f32(blob, 0x0C), 4),
@@ -421,8 +437,8 @@ def parse_sky(path: Path | None) -> dict | None:
     `parse_sky_sprites`, with the header's shared `sprite_distance` /
     `sprite_height` beside it (`sprites.distance` 100 on every map; a
     sprite's `size` is metres at that distance). `fog` / `sun_light` /
-    `ambient` / `sky_color_hex` / `cloud_layer` / `flags` follow the SKY1
-    layout documented above; `layers` is `flags` decoded per
+    `ambient` / `sky_color_hex` + `sky_color_alpha` / `cloud_layer` /
+    `flags` follow the SKY1 layout documented above; `layers` is `flags` decoded per
     `SKY_FLAG_BITS`; `stars` is the STAR chunk; `dome_params` the DOME
     extras; `local_fog` / `ground_fog` come from the FOG chunk.
     """
@@ -486,8 +502,12 @@ def _finite(value: float) -> float | None:
 def parse_sky_sprites(blob: bytes) -> list[dict]:
     """Billboards from a SPRT payload. Empty names are skipped.
 
-    `blend` 0 is an alpha disc (Earth). `blend` 1 is additive (moons,
-    galaxies, lens flares). `color` is the record's B,G,R bytes as #rrggbb.
+    `blend` is `sprites.modulate`: 0 is the editor's "Blend" (an alpha
+    disc, Earth), 1 is "Add" (additive: moons, galaxies, lens flares; the
+    dark body of a moon texture adds nothing, so only the lit crescent
+    shows). `color` is the record's B,G,R bytes as #rrggbb and `alpha` the
+    A byte as 0..1 (`sprites.colora`; 255 on both Remnant moons, 100 on the
+    template's hidden godlight slot).
     `size` is metres at the header's `sprites.distance` (100 m), so
     Remnant's size-40 moon spans `2 * atan(20 / 100)` = 22.6 degrees; 0
     hides the sprite (the stock template carries 44 slots, most of them 0).
@@ -504,12 +524,13 @@ def parse_sky_sprites(blob: bytes) -> list[dict]:
         if not name:
             continue
         blend = struct.unpack_from("<I", rec, 32)[0]
-        blue, green, red = rec[36], rec[37], rec[38]
+        blue, green, red, alpha = rec[36], rec[37], rec[38], rec[39]
         size, azimuth, elevation, roll = struct.unpack_from("<4f", rec, 40)
         out.append({
             "name": name,
             "blend": int(blend),
             "color": f"#{red:02x}{green:02x}{blue:02x}",
+            "alpha": round(alpha / 255.0, 4),
             "size": _finite(size),
             "azimuth": _finite(azimuth),
             "elevation": _finite(elevation),

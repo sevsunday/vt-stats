@@ -203,7 +203,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Flips one `sky.flags` layer bit (the editor's Toggle Dome / Stars / Flat / Clouds / Sprites / Sun buttons write through it)."
+       "text": "Flips one `sky.flags` layer bit (the editor's Toggle Dome / Stars / Flat / Clouds / Sprites / Sun buttons write through it) and prints the six switches as `DOME=%d STARS=%d FLAT=%d CLOUDS=%d SPRITES=%d SUN=%d`."
       },
       {
        "kind": "code",
@@ -229,7 +229,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Sky type selector written by the editor's Sky panel (`SkyType` in the legacy `.trn`); every VSR map uses the dome type."
+       "text": "Sky type selector written by the editor's Sky panel (`SkyType` in the legacy `.trn`); prints `sky type = %d`. Every VSR map uses the dome type."
       },
       {
        "kind": "para",
@@ -417,7 +417,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "The sky's clear colour, drawn behind the dome and seen where the dome does not cover. Stored in the `.sky` as a BGRA byte colour (`SKY1` offset 0x74). Europa Night `40 55 60`, Remnant `180 170 130`. Distinct from `fogcolor`."
+       "text": "The editor's \"Sky Color\" in the Sky Texture group: the tint of the dome and of the flat cloud layer (`sky.texturename`), whose alpha (`sky.colora`) is that layer's opacity. Stored in the `.sky` as a BGRA byte colour (`SKY1` offset 0x74). Europa Night `40 55 60`, Remnant `180 170 130`. It is NOT a clear colour: where no sky layer draws the game shows `fogcolor` (Europa Night's dome-off sky reads the fully fogged value between its cloud wisps up to 30 degrees)."
       },
       {
        "kind": "para",
@@ -515,7 +515,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Bit field of the sky layers the engine draws, one bit per editor toggle (`bzeditor_sky.cfg`): `1` Dome, `2` Stars, `4` Flat (the scrolling cloud plane), `8` Clouds, `16` Sprites, `32` Sun. Remnant `49` = dome + sprites + sun; Europa Night `54` = stars + flat + sprites + sun, so its template dome name is never drawn and the sky is the clear colour with stars. Bit `64` appears on six maps and has no toggle."
+       "text": "Bit field of the sky layers the engine draws, one bit per editor toggle (`bzeditor_sky.cfg`), named the same way by the engine's own `sky.toggle` print-out (`DOME= STARS= FLAT= CLOUDS= SPRITES= SUN=`): `1` Dome, `2` Stars, `4` Flat (the `sky.texturename` cloud plane -- the legacy `.trn` `[Sky] SkyTexture / SkyHeight / SkyColor` section), `8` Clouds (the legacy `[Clouds] Count / TextureN / SizeN / HeightN` cloud billboards; `Count = 0` on every VSR map, so nothing is drawn), `16` Sprites, `32` Sun. Remnant `49` = dome + sprites + sun; Europa Night `54` = stars + flat + sprites + sun, so its template dome name is never drawn and the sky is the fog colour with stars, the full-moon sun and faint cloud wisps. Bit `64` appears on six maps and has no toggle."
       },
       {
        "kind": "para",
@@ -1101,7 +1101,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Alpha channel of `sky.color`."
+       "text": "Alpha channel of `sky.color`: the opacity of the flat cloud layer (255 on 106 of 157 VSR skies, 50-200 on the rest)."
       },
       {
        "kind": "para",
@@ -3601,7 +3601,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Dome mesh file (`miredome.fbx` on 46 VSR maps, `dunedome` 25, `plutodome` 15, `banedome` 14, `marsdome` 10, `rendsky.xsi` 8, `darkdome` 7, a few others), baked by the game to `.msh`. It is only drawn when `sky.flags` has the Dome bit (1): Europa Night names `miredome.fbx` but has the bit off, so its sky is stars over the clear colour."
+       "text": "Dome mesh file (`miredome.fbx` on 46 VSR maps, `dunedome` 25, `plutodome` 15, `banedome` 14, `marsdome` 10, `rendsky.xsi` 8, `darkdome` 7, a few others), baked by the game to `.msh`. It is only drawn when `sky.flags` has the Dome bit (1): Europa Night names `miredome.fbx` but has the bit off, so its sky is stars and faint cloud wisps over the fog colour."
       },
       {
        "kind": "para",
@@ -4300,7 +4300,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Sets the star tint (`R G B A`); white everywhere."
+       "text": "Sets the star tint (`R G B A`); white everywhere, alpha 255 on most maps (100 on a few)."
       },
       {
        "kind": "code",
@@ -4742,7 +4742,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Sets the selected sprite's tint (`R G B A`). Remnant's moon is `255 220 180`; the `.sky` stores the bytes as B,G,R,A."
+       "text": "Sets the selected sprite's tint (`R G B A`). Remnant's moon is `255 220 180 255`; the `.sky` stores the bytes as B,G,R,A."
       },
       {
        "kind": "para",
@@ -4870,7 +4870,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Blend mode of the selected sprite: `1` is the editor's \"Add\" (the moons and nebulae; Remnant's crescent is an additive thin arc in the game), `0` \"Blend\"."
+       "text": "Blend mode of the selected sprite: `1` is the editor's \"Add\" -- additive, so a moon texture's black body adds nothing and only the lit crescent shows (Remnant's crescent adds about `+100 +85 +80` to the dome in the game, well under a full additive draw); `0` \"Blend\" -- an alpha disc (Earth on the lunar maps)."
       },
       {
        "kind": "para",
@@ -4958,10 +4958,14 @@
      "label": "sprites.colora",
      "default": "255",
      "anchor": "console-sprites-colora",
-     "tier": "engine",
+     "tier": "verified",
      "entry_kind": "variable",
      "value_type": "int",
      "blocks": [
+      {
+       "kind": "para",
+       "text": "Alpha of the selected sprite's tint (its opacity): 255 on both Remnant moons, 100 on the template's hidden godlight slot."
+      },
       {
        "kind": "para",
        "text": "Editor sprites panel control \"Alpha\"."
@@ -4976,7 +4980,7 @@
       },
       {
        "kind": "note",
-       "text": "Evidence: engine text."
+       "text": "Evidence: verified in-game."
       }
      ]
     },
@@ -35919,7 +35923,7 @@
    ],
    "label": "sky.toggle",
    "default": "command",
-   "text": "Flips one `sky.flags` layer bit (the editor's Toggle Dome / Stars / Flat / Clouds / Sprites / Sun buttons write through it).",
+   "text": "Flips one `sky.flags` layer bit (the editor's Toggle Dome / Stars / Flat / Clouds / Sprites / Sun buttons write through it) and prints the six switches as `DOME=%d STARS=%d FLAT=%d CLOUDS=%d SPRITES=%d SUN=%d`.",
    "anchor": "console-sky-toggle",
    "section": "console-sky"
   },
@@ -35930,7 +35934,7 @@
    ],
    "label": "sky.type",
    "default": "command",
-   "text": "Sky type selector written by the editor's Sky panel (`SkyType` in the legacy `.trn`); every VSR map uses the dome type. Prints `sky type = %d`.",
+   "text": "Sky type selector written by the editor's Sky panel (`SkyType` in the legacy `.trn`); prints `sky type = %d`. Every VSR map uses the dome type. Prints `sky type = %d`.",
    "anchor": "console-sky-type",
    "section": "console-sky"
   },
@@ -35996,7 +36000,7 @@
    ],
    "label": "sky.color",
    "default": "command",
-   "text": "The sky's clear colour, drawn behind the dome and seen where the dome does not cover. Stored in the `.sky` as a BGRA byte colour (`SKY1` offset 0x74). Europa Night `40 55 60`, Remnant `180 170 130`. Distinct from `fogcolor`. Prints `sky color = %d %d %d %d RGBA`. Shell config: invoked in editor/bzeditor_sky.cfg.",
+   "text": "The editor's \"Sky Color\" in the Sky Texture group: the tint of the dome and of the flat cloud layer (`sky.texturename`), whose alpha (`sky.colora`) is that layer's opacity. Stored in the `.sky` as a BGRA byte colour (`SKY1` offset 0x74). Europa Night `40 55 60`, Remnant `180 170 130`. It is NOT a clear colour: where no sky layer draws the game shows `fogcolor` (Europa Night's dome-off sky reads the fully fogged value between its cloud wisps up to 30 degrees). Prints `sky color = %d %d %d %d RGBA`. Shell config: invoked in editor/bzeditor_sky.cfg.",
    "anchor": "console-sky-color",
    "section": "console-sky"
   },
@@ -36029,7 +36033,7 @@
    ],
    "label": "sky.flags",
    "default": "54",
-   "text": "Bit field of the sky layers the engine draws, one bit per editor toggle (`bzeditor_sky.cfg`): `1` Dome, `2` Stars, `4` Flat (the scrolling cloud plane), `8` Clouds, `16` Sprites, `32` Sun. Remnant `49` = dome + sprites + sun; Europa Night `54` = stars + flat + sprites + sun, so its template dome name is never drawn and the sky is the clear colour with stars. Bit `64` appears on six maps and has no toggle. Editor sky panel control \"Toggle Dome / Toggle Stars / Toggle Flat / Toggle Clouds\". Shell config: bound to a control in editor/bzeditor_sky.cfg, editor/bzeditor_sprites.cfg, editor/bzeditor_stars.cfg, editor/bzeditor_sun.cfg.",
+   "text": "Bit field of the sky layers the engine draws, one bit per editor toggle (`bzeditor_sky.cfg`), named the same way by the engine's own `sky.toggle` print-out (`DOME= STARS= FLAT= CLOUDS= SPRITES= SUN=`): `1` Dome, `2` Stars, `4` Flat (the `sky.texturename` cloud plane -- the legacy `.trn` `[Sky] SkyTexture / SkyHeight / SkyColor` section), `8` Clouds (the legacy `[Clouds] Count / TextureN / SizeN / HeightN` cloud billboards; `Count = 0` on every VSR map, so nothing is drawn), `16` Sprites, `32` Sun. Remnant `49` = dome + sprites + sun; Europa Night `54` = stars + flat + sprites + sun, so its template dome name is never drawn and the sky is the fog colour with stars, the full-moon sun and faint cloud wisps. Bit `64` appears on six maps and has no toggle. Editor sky panel control \"Toggle Dome / Toggle Stars / Toggle Flat / Toggle Clouds\". Shell config: bound to a control in editor/bzeditor_sky.cfg, editor/bzeditor_sprites.cfg, editor/bzeditor_stars.cfg, editor/bzeditor_sun.cfg.",
    "anchor": "console-sky-flags",
    "section": "console-sky"
   },
@@ -36216,7 +36220,7 @@
    ],
    "label": "sky.colora",
    "default": "255",
-   "text": "Alpha channel of `sky.color`. Editor sky panel control \"Alpha\". Shell config: bound to a control in editor/bzeditor_sky.cfg.",
+   "text": "Alpha channel of `sky.color`: the opacity of the flat cloud layer (255 on 106 of 157 VSR skies, 50-200 on the rest). Editor sky panel control \"Alpha\". Shell config: bound to a control in editor/bzeditor_sky.cfg.",
    "anchor": "console-sky-colora",
    "section": "console-sky"
   },
@@ -37063,7 +37067,7 @@
    ],
    "label": "dome.name",
    "default": "miredome.fbx",
-   "text": "Dome mesh file (`miredome.fbx` on 46 VSR maps, `dunedome` 25, `plutodome` 15, `banedome` 14, `marsdome` 10, `rendsky.xsi` 8, `darkdome` 7, a few others), baked by the game to `.msh`. It is only drawn when `sky.flags` has the Dome bit (1): Europa Night names `miredome.fbx` but has the bit off, so its sky is stars over the clear colour. Editor sky panel control \"Dome Name\". Shell config: invoked in editor/bzeditor_sky.cfg.",
+   "text": "Dome mesh file (`miredome.fbx` on 46 VSR maps, `dunedome` 25, `plutodome` 15, `banedome` 14, `marsdome` 10, `rendsky.xsi` 8, `darkdome` 7, a few others), baked by the game to `.msh`. It is only drawn when `sky.flags` has the Dome bit (1): Europa Night names `miredome.fbx` but has the bit off, so its sky is stars and faint cloud wisps over the fog colour. Editor sky panel control \"Dome Name\". Shell config: invoked in editor/bzeditor_sky.cfg.",
    "anchor": "console-dome-name",
    "section": "console-dome"
   },
@@ -37305,7 +37309,7 @@
    ],
    "label": "stars.color",
    "default": "command",
-   "text": "Sets the star tint (`R G B A`); white everywhere.",
+   "text": "Sets the star tint (`R G B A`); white everywhere, alpha 255 on most maps (100 on a few).",
    "anchor": "console-stars-color",
    "section": "console-stars"
   },
@@ -37448,7 +37452,7 @@
    ],
    "label": "sprites.color",
    "default": "command",
-   "text": "Sets the selected sprite's tint (`R G B A`). Remnant's moon is `255 220 180`; the `.sky` stores the bytes as B,G,R,A. Shell config: invoked in editor/bzeditor_sprites.cfg.",
+   "text": "Sets the selected sprite's tint (`R G B A`). Remnant's moon is `255 220 180 255`; the `.sky` stores the bytes as B,G,R,A. Shell config: invoked in editor/bzeditor_sprites.cfg.",
    "anchor": "console-sprites-color",
    "section": "console-sprites"
   },
@@ -37492,7 +37496,7 @@
    ],
    "label": "sprites.modulate",
    "default": "1",
-   "text": "Blend mode of the selected sprite: `1` is the editor's \"Add\" (the moons and nebulae; Remnant's crescent is an additive thin arc in the game), `0` \"Blend\". Editor sprites panel control \"Modulation / Blend\". Shell config: bound to a control in editor/bzeditor_sprites.cfg.",
+   "text": "Blend mode of the selected sprite: `1` is the editor's \"Add\" -- additive, so a moon texture's black body adds nothing and only the lit crescent shows (Remnant's crescent adds about `+100 +85 +80` to the dome in the game, well under a full additive draw); `0` \"Blend\" -- an alpha disc (Earth on the lunar maps). Editor sprites panel control \"Modulation / Blend\". Shell config: bound to a control in editor/bzeditor_sprites.cfg.",
    "anchor": "console-sprites-modulate",
    "section": "console-sprites"
   },
@@ -37525,7 +37529,7 @@
    ],
    "label": "sprites.colora",
    "default": "255",
-   "text": "Editor sprites panel control \"Alpha\". Shell config: bound to a control in editor/bzeditor_sprites.cfg.",
+   "text": "Alpha of the selected sprite's tint (its opacity): 255 on both Remnant moons, 100 on the template's hidden godlight slot. Editor sprites panel control \"Alpha\". Shell config: bound to a control in editor/bzeditor_sprites.cfg.",
    "anchor": "console-sprites-colora",
    "section": "console-sprites"
   },
@@ -51120,8 +51124,8 @@
   "variables": 1605,
   "scopes": 171,
   "tiers": {
-   "verified": 143,
-   "engine": 175,
+   "verified": 144,
+   "engine": 174,
    "unverified": 144,
    "usage": 513,
    "inferred": 190

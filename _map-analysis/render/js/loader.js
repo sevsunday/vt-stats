@@ -263,7 +263,7 @@ function decodeHiresBlocks(blocks) {
 export async function loadSkySidecar(stem) {
   if (!stem) return null;
   try {
-    const res = await fetch(dataUrl(`${stem}.sky.json?v=sky-atmo4`));
+    const res = await fetch(dataUrl(`${stem}.sky.json?v=sky-atmo5`));
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {

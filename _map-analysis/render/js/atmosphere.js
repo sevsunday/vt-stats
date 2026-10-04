@@ -30,12 +30,16 @@
  * normalises Lambert by 1/pi, so light intensities are multiplied by pi to
  * recover the plain `albedo * (ambient + sun * N.L)` the engine computes.
  *
- * The two framebuffer colours are different: the clear colour (`sky.color`)
- * and the fog colour display as their raw bytes in the game (Europa Night's
- * sky reads `40-56` for `40 55 60`, its fogged horizon `13-24` for
- * `20 25 30`; Remnant's fogged horizon `121 114 80` for `120 110 80`), so
- * `displayColor()` sets those with `SRGBColorSpace` and the output encode
- * hands the bytes back unchanged.
+ * The framebuffer colours are different: the fog colour displays as its
+ * raw bytes in the game (Remnant's fogged horizon reads `120 109 78` for
+ * `120 110 80`, Europa Night's `13 18 24` for `20 25 30`), so
+ * `displayColor()` sets it with `SRGBColorSpace` and the output encode
+ * hands the bytes back unchanged. The fog colour is also the clear colour:
+ * wherever no sky layer draws (all of a dome-off sky such as Europa Night)
+ * the game shows it -- the in-game frame reads exactly the fully fogged
+ * value between the cloud wisps up to 30 degrees. `sky.color` is not a
+ * clear colour at all; it is the tint of the dome and the flat cloud
+ * layer (`skyColor` below, kept for the sky renderer).
  *
  * `THREE.Fog` is a smoothstep ramp; `installLinearFog()` swaps the shader
  * chunk for the engine's linear ramp. It runs on import, before any material
@@ -112,7 +116,7 @@ function num(value, fallback) {
  *
  * @returns {{
  *   source: 'sky'|'legacy'|'default',
- *   skyColor: THREE.Color, fogColor: THREE.Color,
+ *   skyColor: THREE.Color, fogColor: THREE.Color, clearColor: THREE.Color,
  *   fog: {start: number, end: number, visibility: number}|null,
  *   sun: {angleH: number, periodH: number, color: THREE.Color, intensity: number,
  *         sizeDeg: number, distance: number, texture: string|null, elevationDeg: number|null},
@@ -135,8 +139,11 @@ export function resolveAtmosphere(mapData) {
     const material = atmo.terrain_material || {};
     return {
       source: 'sky',
+      // `sky.color`: the dome / cloud-layer tint, not what the sky clears to.
       skyColor: displayColor(atmo.sky_color_hex, fogHex),
       fogColor: displayColor(fogHex, tint),
+      // What shows where nothing is drawn: the fog colour (see the header).
+      clearColor: displayColor(fogHex, tint),
       fog: start != null && end != null ? {
         start,
         end: Math.max(end, start + 1),
@@ -176,6 +183,8 @@ export function resolveAtmosphere(mapData) {
     source: hasLegacy ? 'legacy' : 'default',
     skyColor: displayColor(tint, '#1a2030'),
     fogColor: displayColor(fogHex, '#1a2030'),
+    // No .sky: keep the legacy tint as the backdrop (the pre-atmosphere look).
+    clearColor: displayColor(tint, '#1a2030'),
     fog: start != null && end != null ? {
       start, end: Math.max(end, start + 1),
       visibility: num(legacy.visibility_range, Math.max(end, start + 1)),

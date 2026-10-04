@@ -132,7 +132,7 @@ scripts/                     PIPELINE (lives at project root, not under
   verify_terrain_scale.py    proves every .3d.json is 1:1 engine meters
   _wat_sky.py                .WAT decoder + full .SKY decode (SKY1 atmosphere,
                              FOG volumes, dome / sprite assets) + .TRN material
-  extract_sky.py             writes data/render/<stem>.sky.json (schema 3) and
+  extract_sky.py             writes data/render/<stem>.sky.json (schema 5) and
                              the dome GLBs / textures under data/render/sky/
   _corpus_stats.py           dev utility (corpus-wide audits)
   _paths.py                  shared path constants (canonical home)
@@ -151,9 +151,9 @@ data/render/                 EXTRACTION OUTPUTS (all tracked in git;
   <stem>.alpha2.png          tier-3 composite input: alpha layer 2
   <stem>.alpha3.png          tier-3 composite input: alpha layer 3
   <stem>.sky.json            per-map .SKY decode: `atmosphere` block (fog, sun,
-                             ambient, sky colour, layer switches, stars, dome,
-                             terrain material) + dome / cloud / sun / star /
-                             sprite asset references (schema 4)
+                             ambient, sky colour + alpha, layer switches, stars,
+                             dome, terrain material) + dome / cloud / sun / star /
+                             sprite asset references (schema 5)
   sky/                       dome GLBs and cloud / sun / sprite textures
   tiles/                     tier-3 floor textures
     _manifest.json           tile inventory + per-map slot mapping
@@ -330,7 +330,7 @@ drawn surface. `OWNERSHIP_SCOPE` in the extractor limits rects and patches to tu
 (generic props whose cells open onto another piece, bridges included);
 `"all"` would also flatten under pools and buildings.
 
-## Atmosphere: `<stem>.sky.json` (schema 3) and the lighting / fog model
+## Atmosphere: `<stem>.sky.json` (schema 5) and the lighting / fog model
 
 **The `.SKY` file is the atmosphere source of truth.** It holds the fog
 ranges, the fog and sky colours, the sun's colour, intensity and position
@@ -362,8 +362,8 @@ volumes. `DOME`, `RAIN`, `SPLT`, `MIRR`, `STAR`, `SPRT`, `WATR`, `BOLT`,
 | `0x2C` RGBA float | `sun.color` | sun colour; **alpha = intensity** (Remnant `255 230 150 200`, Europa Night `255 255 255 125`, Know Thyself 1.96, Lunar black) |
 | `0x3C` RGBA float | `sky.ambientcolor` | flat ambient; alpha = intensity (lunar maps are full white) |
 | `0x50` float, `0x54` char[32] | `sky.height`, `sky.texturename` | cloud layer height and texture |
-| `0x74` BGRA bytes | `sky.color` | clear colour behind the dome (Remnant `180 170 130`, Europa Night `40 55 60`), also the dome tint |
-| `0x78` int | `sky.modulate` | cloud modulate flag |
+| `0x74` BGRA bytes | `sky.color` | the editor's "Sky Color" of the Sky Texture group: tint of the dome and the flat cloud layer (Remnant `180 170 130`, Europa Night `40 55 60`); its alpha (`sky.colora`, 255 on 106 of 157 VSR skies, 50-200 on the rest) is the cloud layer's opacity. **Not** the clear colour: where no layer draws the game shows the fog colour |
+| `0x78` int | `sky.modulate` | cloud layer blend: 1 = editor "Add" (additive), 0 = "Blend" (alpha) |
 | `0x7C` char[32] | `sun.texturename` | sun sprite (`dunesun`; Europa Night's "sun" is `dunemoonfull`) |
 | `0x9C / 0xA0 / 0xA4` float | `sky.uspeed / vspeed / tilesize` | cloud scroll and tiling |
 | `0xA8` int | `sky.flags` | dome / stars / flat / clouds toggles |
@@ -380,7 +380,7 @@ sidecar as `local_fog[]` / `ground_fog`; not rendered yet.
 "atmosphere": {
   "fog": { "color_hex": "#786e50", "start": 300, "end": 600, "visibility": 600,
            "mode": "linear", "break": 0.5 },
-  "sky_color_hex": "#b4aa82",
+  "sky_color_hex": "#b4aa82", "sky_color_alpha": 1.0,
   "sun": { "period_h": 24, "angle_h": 16, "color_hex": "#ffe696", "intensity": 0.784,
            "texture": "dunesun", "size_deg": 30, "distance": 200 },
   "ambient": { "color_hex": "#375a78", "intensity": 1.0 },
@@ -389,8 +389,8 @@ sidecar as `local_fog[]` / `ground_fog`; not rendered yet.
   "flags": 49,
   "layers": { "dome": true, "stars": false, "flat": false, "clouds": false,
               "sprites": true, "sun": true },
-  "stars": { "color_hex": "#ffffff", "count": 128, "distance": 100, "size": 1.0,
-             "height": 0, "texture": "lightflare", "modulate": 0,
+  "stars": { "color_hex": "#ffffff", "alpha": 1.0, "count": 128, "distance": 100,
+             "size": 1.0, "height": 0, "texture": "lightflare", "modulate": 0,
              "azim_speed": 0, "elev_speed": 0 },
   "dome": { "name": "miredome", "radius": 200, "type": 1, "height": 0,
             "uspeed": 0, "vspeed": 0, "ambient_hex": "#643c14",
@@ -404,12 +404,13 @@ sidecar as `local_fog[]` / `ground_fog`; not rendered yet.
             "cloud_dds": "sky/white_clouds.dds", "sun_dds": "sky/dunesun.dds",
             "stars_dds": "sky/lightflare.dds", "...": "..." },
 "sprite_distance": 100, "sprite_height": 0,
-"sprites": [ { "name": "dunemoon", "blend": 1, "color": "#ffdcb4", "size": 40,
+"sprites": [ { "name": "dunemoon", "blend": 1, "color": "#ffdcb4", "alpha": 1.0, "size": 40,
                "azimuth": 0, "elevation": 20, "roll": -80, "texture": "sky/dunemoon.dds" },
              "..." ]
 ```
 
-Schema 4. `colors.sky` keeps the SKY1 fog colour for older readers. The
+Schema 5 (the alpha bytes `sky_color_alpha` / `stars.alpha` /
+`sprites[].alpha` joined in 5). `colors.sky` keeps the SKY1 fog colour for older readers. The
 `terrain_material` comes from the `.TRN` `[NormalView]` section; the diffuse
 default is `178 178 178` (console-confirmed on Remnant, whose `.TRN` has no
 `DiffuseColor`), not white. Regenerate with `python scripts/extract_sky.py`
@@ -421,22 +422,35 @@ default is `178 178 178` (console-confirmed on Remnant, whose `.TRN` has no
 The template every VSR `.SKY` descends from names a dome, a cloud texture,
 44 sprite slots and a star field on **every** map; `sky.flags` is what
 switches them on. The bits come from the editor's six TOGGLE buttons bound
-to the variable (`bz2r_res/config/editor/bzeditor_sky.cfg`):
+to the variable (`bz2r_res/config/editor/bzeditor_sky.cfg`), and the
+engine names them the same way: `sky.toggle` prints `DOME=%d STARS=%d
+FLAT=%d CLOUDS=%d SPRITES=%d SUN=%d`. The legacy BZ2 `.TRN` sections pin
+the two ambiguous names: `[Sky] SkyTexture / SkyHeight / SkyColor` is the
+FLAT layer, `[Clouds] Count / TextureN / SizeN / HeightN` the CLOUDS
+billboard system.
 
-| Bit | Editor | What the engine draws | How `sky-dome.js` draws it |
+| Bit | Editor / engine | What the engine draws | How `sky-dome.js` draws it |
 |---|---|---|---|
-| `1` | Toggle Dome | the `dome.name` mesh (DOME chunk) with its texture | the baked GLB, texture × `sky.color` (fullbright when the material ambient is 0) |
-| `2` | Toggle Stars | `stars.count` points of `stars.size` m at `stars.distance` m, `stars.texture`, additive when `stars.modulate` is 1 | `THREE.Points`, seeded per map (the engine rolls positions at load), point size floored so the texture core covers 2 px |
-| `4` | Toggle Flat | the flat cloud plane: `sky.texturename` at `sky.height` m, tiled every `sky.tilesize` m, scrolling `sky.uspeed` / `sky.vspeed` m/s, `sky.modulate` 1 = Add / 0 = Blend | a camera-locked disc at that height, world-anchored UVs, × `sky.color`, fogged by distance |
-| `8` | Toggle Clouds | unknown (17 maps; the 4 lunar maps set it with no cloud texture at all) | not drawn |
-| `16` | Toggle Sprites | the SPRT billboards with `size` > 0 | quads on the sprite shell |
-| `32` | Toggle Sun | `sun.texturename` at the sun direction, `sun.size` degrees | the sun sprite |
+| `1` | Toggle Dome / DOME | the `dome.name` mesh (DOME chunk) with its texture | the baked GLB, texture × `sky.color` (fullbright when the material ambient is 0) |
+| `2` | Toggle Stars / STARS | `stars.count` points of `stars.size` m at `stars.distance` m, `stars.texture`, additive when `stars.modulate` is 1, `stars.colora` | `THREE.Points`, seeded per map (the engine rolls positions at load), point size floored so the texture core covers 2 px |
+| `4` | Toggle Flat / FLAT | the flat cloud plane: `sky.texturename` at `sky.height` m, tiled every `sky.tilesize` m, scrolling `sky.uspeed` / `sky.vspeed` m/s, `sky.modulate` 1 = Add / 0 = Blend, opacity `sky.colora` | a camera-locked disc at that height, world-anchored UVs, × `sky.color` as a display-space product (the engine's `default` shader, see below), alpha × `sky.colora`, fogged by the sky fog skirt |
+| `8` | Toggle Clouds / CLOUDS | the legacy `[Clouds]` cloud billboards (`Count = 0` on every VSR `.TRN`, so nothing; 17 maps set the bit) | not drawn |
+| `16` | Toggle Sprites / SPRITES | the SPRT billboards with `size` > 0 | quads on the sprite shell |
+| `32` | Toggle Sun / SUN | `sun.texturename` at the sun direction, `sun.size` degrees | the sun sprite |
 
 Bit `64` appears on six maps and has no editor button. Remnant is `49`
 (dome + sprites + sun); Europa Night is `54` (stars + flat + sprites +
 sun) — **no dome**, which is why its template `miredome` must never be
 drawn. Gating on the flags, not on an asset being present, is what keeps
 Europa Night's starry sky apart from Remnant's olive dome.
+
+**Where no layer draws, the game shows the fog colour.** In the Europa
+Night frame the sky between the faint cloud wisps reads exactly the fully
+fogged `13 18 24` right up to 30 degrees (block medians, G channel 17-18
+with smooth blobs to 39), so `scene.background` is the fog colour on every
+surface; `sky.color` never appears on screen by itself. (The earlier
+reading of "clear colour 40-56 in the upper sky" was the fogged terrain
+band and the moon's glow.)
 
 Layouts (all console-confirmed on Europa Night):
 
@@ -452,8 +466,20 @@ Layouts (all console-confirmed on Europa Night):
   of the quad), its size-10 companion 5.7 degrees. **Azimuth is a compass
   bearing** (0 north, 90 east): the big moon at azimuth 0 sits due north in
   the game and the small one at 30 to its right. The colour bytes are
-  B,G,R (the console reports the moon as `255 220 180` for file bytes
-  `b4 dc ff`).
+  B,G,R,A (the console reports the moon as `255 220 180` for file bytes
+  `b4 dc ff`; A is `sprites.colora`, 255 on both moons). **"Add" sprites
+  are additive**: the moon texture is a black-backed disc whose lit arc sits
+  at the TOP of the image, so only the crescent shows and the roll turns it
+  (-80 puts Remnant's lit edge on the right, as in the game). The game draws
+  them faint: the crescent adds `+100 +85 +80` to the `135 133 92` dome,
+  which `sky-dome.js` reproduces as `encode(texel × tint × 0.135)` added on
+  the display-encoded canvas (`SPRITE_ADDITIVE_GAIN`; why the engine
+  attenuates them is unknown -- alpha is 255 and the 100 m shell is inside
+  the fog start). The sun sprite is not attenuated. **DDS V flip**: DDS rows
+  are stored top-first and compressed textures cannot be flipped on upload,
+  so sprite / sun / star textures get `repeat.y = -1` -- without it the
+  upside-down moon plus the authored roll reads as a left/right mirror of
+  the game.
 - `DOME` (1808 B, a raw struct with pointers): `0x0C` f32 `radius` ·
   `0x10` char[32] `name` · `0x30` u32 `type` (editor "Dome" 0 on 74 maps,
   "Planet" 1 on 64, 2 on four; no visible difference established) · `0x34`
@@ -466,22 +492,104 @@ Layouts (all console-confirmed on Europa Night):
   (`banedome` → `banesky.dds`) is the fallback when no `.material` or
   sibling `.dds` exists.
 - Dome meshes with no baked `.msh` in the install (`earthdome2`,
-  `earthdome3`, `ultradome`, `vsrconscdome`) draw nothing; the clear colour
+  `earthdome3`, `ultradome`, `vsrconscdome`) draw nothing; the fog colour
   shows instead.
 
-**Sky fog.** The engine fogs the sky itself toward the horizon: in both
-reference frames the lower sky is the fog colour up to about 15 degrees and
-fades out by 30-40 degrees, which is distance fog on a layer `sky.height`
-metres up (`(h / sin e - fogstart) / (fogend - fogstart)`; Europa Night is
-fully fogged below 14 degrees and clear above 53, Remnant between 11.5 and
-24). `addFogSkirt()` overlays a camera-locked band carrying that fraction as
-alpha in the fog colour on every sky layer; terrain still occludes it.
-`sky.fogbreak` (0.5 everywhere) is not used for this.
+**Sky fog.** The engine fogs the sky layers toward the horizon: in both
+reference frames the stars and cloud wisps vanish into the fog colour below
+about 15 degrees and reappear by 30-40 degrees, which is distance fog on a
+layer `sky.height` metres up (`(h / sin e - fogstart) / (fogend -
+fogstart)`; Europa Night is fully fogged below 14 degrees and clear above
+53, Remnant between 11.5 and 24). `addFogSkirt()` overlays a camera-locked
+band carrying that fraction as alpha in the fog colour on every sky layer
+(the cloud plane carries no fog of its own, so it is fogged exactly once);
+terrain still occludes it. `sky.fogbreak` (0.5 everywhere) is not used for
+this. The dome is also lit by `dome.light` in the game (Remnant's east sky
+reads `193 184 121` against `118 121 89` in the west at the same
+elevation); that term is decoded but not applied yet.
+
+**Draw order.** The dome and the legacy gradient sit in the opaque pass
+with the depth test off, so the terrain simply overwrites them. Stars,
+sprites, the sun, the cloud plane and the fog skirt need real blending,
+which three.js only enables on `transparent` materials, so they draw in
+the transparent pass (`renderOrder` -18 … -9), depth-tested against the
+terrain, single-pass (`forceSinglePass`, or a DoubleSide additive quad is
+added twice) and at the far edge of the rig (`SKY_FAR_FRACTION` 0.995,
+shells 0.96-0.99) so every hill inside the visibility range is in front of
+them.
 
 Mirroring: the replay and the explorer reflect the world on Z, so north is
 `-Z` there and `attachSky` takes `state.mirrorZ` (default true) for the
 sprite directions; the baked dome GLBs are pre-mirrored and the map
 viewer's unmirrored orbit scene flips the dome holder back.
+
+### What the engine's shaders say
+
+The game ships its compiled DX11 shaders in
+`bz2r_res/baked/shaders/*.fxc` (DXBC containers): a `default` family
+(`dx11_default_psh_<n><flags>.fxc`, 2,000-odd permutations over the flag
+letters `c d e l n o p s t x y z`), plus `terrain`, `water` and
+`local_fog`. There is no sky-specific shader: the dome, the cloud plane,
+the sprites and the sun all render with `default`. `D3DDisassemble` from
+the Windows `d3dcompiler_47.dll` reads them (Python `ctypes`: load the
+DLL, call `D3DDisassemble(bytes, len, 0, None, &blob)`, read the blob
+through its vtable; the RDEF chunk also lists the constant buffers).
+What the disassembly establishes:
+
+- **Unlit textured (`0pd`)**: `out.rgb = lerp(texel.rgb *
+  g_MaterialDiffuse.rgb, g_FogColor.rgb, fog)`, `out.a = texel.a *
+  g_MaterialDiffuse.a`. **No gamma / pow anywhere.** There is no vertex
+  colour input; every tint reaches the pixel as the `g_MaterialDiffuse`
+  constant (cbuffer `psfloats`: `g_FogColor`, `g_FogParams`,
+  `g_MaterialDiffuse`, `g_MaterialSpecular`, `g_MaterialEmissive`,
+  `g_LightAmbient`, `g_LightCount`, `g_TeamColor`, `g_EnvironmentColor`,
+  `g_HeightFogParams`, `g_HeightFogParams2`, `g_SoftnessThreshold`,
+  `g_ModulateBlending`).
+- **Fog** is range fog on `|viewPos|`: 0 below `fogstart`, `g_FogParams.x`
+  (full) past `fogend`, and between them a two-segment ramp through
+  `fogbreak` (`(1-b) * t / b` below the break, `(1-b) + b * (t-b) / (1-b)`
+  above; `b` outside 0.01..0.99 falls back to 0.5, which makes the ramp
+  plain linear). A height / ground fog term (`g_HeightFogParams*`:
+  enable, height start / end, density, curve exponent, min / max distance)
+  combines as `1 - (1-f)(1-g)`; it is off on the VSR maps. A layer
+  `sky.height` metres up therefore fogs by exactly `h / sin e` -- the fog
+  skirt's rule.
+- **Lit textured (`0pdl`)**: `texel * g_MaterialDiffuse * (g_LightAmbient
+  + sum over lights of m_Color * (1 - (d / range)^2) / (a0 + a1 d + a2 d^2)
+  * spot * saturate(N . L)) + specular`, then the same fog lerp (lights in
+  cbuffer `pslights`: `m_Pos`, `m_Dir`, `m_Color`, `m_Attenuation`,
+  `m_Spot`). This is the form the dome's `dome.ambient` / `dome.light`
+  would take if the dome is lit.
+- The sky textures are declared sRGB (`white_clouds.dds` and
+  `dunemoon.dds` DXGI format 78 = BC3_UNORM_SRGB, `miredome1.dds` 72 =
+  BC1_UNORM_SRGB).
+
+Put together with the measured fact that the fog constant displays as its
+bytes (Remnant's horizon `120 109 78` for `120 110 80`), only two
+pipelines are possible -- everything UNORM, or sRGB views with constants
+decoded on the CPU -- and in both a `texel x constant` product lands on
+screen as `texel_byte * byte / 255` (within the sRGB round-trip). That
+pins the **cloud plane**: `addFlatClouds` tints with the decoded
+`sky.color` (`displayColor`), so Europa Night's `white_clouds x 40 55 60`
+peaks at display (36,50,54) -- +20..30 over the fog unfogged, +11 at the
+95th percentile and about +20 at the brightest texels through the skirt
+fog at 28-30 degrees, against the in-game frame's +20 / +24. The raw
+byte-as-linear tint the renderer used before put the same wisps at +70.
+
+What the shaders do **not** settle, and what therefore stays as a
+frame-matched calibration rather than an engine rule: which constants the
+engine binds for the **dome** (its `.material` diffuse is white and the
+DOME chunk carries its own ambient and light, so `sky.color` is probably
+not its tint at all; the raw-as-linear `sky.color` tint is kept because it
+lands on the in-game Remnant average, while a fit of the frame's NW..NE
+band against the `miredome1` texture -- which is itself brighter to the
+east, luma 190 at azimuth 45-105 against 120-130 west -- was not
+decisive); the **sprite attenuation** (`SPRITE_ADDITIVE_GAIN`, the shader
+has no attenuation term, so the cause is blend state or fog on a farther
+shell); and whether **stars** fog by elevation (the frame says so, the
+shader would fog them at their 200 m shell; the skirt matches the frame).
+`dome.u` / `dome.v` static texture offsets (DOME chunk 0x04 / 0x08; Giza
+0.0475, Lunar 0.168, Aussault -0.25) are decoded but not applied.
 
 ### Lighting model (`js/atmosphere.js`)
 
@@ -495,13 +603,16 @@ The engine's terrain shading is the classic `albedo * material *
 - **Shader colour bytes are linear values.** The game's textures are sRGB
   DDS (hardware-linearised) and its shaders carry no gamma code, so the
   colour bytes feed the math as-is (`255 230 150` is `(1.0, 0.9, 0.59)`).
-  `engineColor()` sets the sun, ambient and the dome / cloud tint with
+  `engineColor()` sets the sun, ambient and the dome / sprite tints with
   `LinearSRGBColorSpace` (no decode); textures and the sRGB output stay as
-  they were. **The two framebuffer colours display as their raw bytes**:
-  Europa Night's sky reads `40-56` for `sky.color` `40 55 60` and its fogged
-  horizon `13-24` for `sky.fogcolor` `20 25 30`, Remnant's horizon
-  `121 114 80` for `120 110 80`, so `displayColor()` sets the clear and fog
-  colours as sRGB and the output encode hands the bytes back.
+  they were. The one shader-verified exception is the cloud plane's
+  `sky.color`, a display-space product (see "What the engine's shaders
+  say"). **The fog colour displays as its raw bytes**: Remnant's
+  fogged horizon reads `120 109 78` for `120 110 80`, Europa Night's
+  `13 18 24` for `20 25 30`, so `displayColor()` sets it as sRGB and the
+  output encode hands the bytes back. It is also the clear colour
+  (`resolveAtmosphere().clearColor`): the game shows it wherever no sky
+  layer draws.
 - **Sun arc.** `theta = 2 pi (angle + elapsed / 3600) / period`,
   `dir = (sin theta, -cos theta, 0)`: rises in the east (+X), zenith at
   12, sets in the west. The replay advances `elapsed` with match time, the
@@ -514,10 +625,14 @@ The engine's terrain shading is the classic `albedo * material *
   diffuse (`178 / 255` by default, `240 / 255` on Europa Night). The
   minimap drape and the height ramp are already-shaded fallbacks and keep
   their colour.
-- **Sky.** `scene.background` is `sky.color`; the dome texture and the
-  flat cloud plane are modulated by `sky.color` (on Remnant the dome
-  texture `164 179 133` times `180 170 130` lands within a few levels of
-  the in-game sky `146 143 100`; the fog colour would be 45% too dark).
+- **Sky.** `scene.background` is the fog colour; the flat cloud plane is
+  `texel x sky.color` as a display-space product (shader-verified), the
+  dome texture is modulated by `sky.color` taken raw-as-linear (a
+  calibration: on Remnant the dome texture `164 179 133` times
+  `180 170 130` lands within a few levels of the in-game sky `146 143 100`;
+  the fog colour would be 45% too dark, the display-space product 20% too
+  dark on average -- the engine very likely lights the dome by
+  `dome.ambient` / `dome.light` instead, which is not modelled yet).
   The sun / moon sprite spans `sun.size` degrees at the engine sun
   direction, and the camera-locked rig is scaled to fit inside the camera
   far plane. Which layers exist at all is the "Sky layers" section above.
@@ -569,15 +684,23 @@ so the sun sits at the authored angle):
 - Lunar / Lunix / Moonshroud come out flat-lit (black sun, white ambient),
   Know Thyself under its 1.96-intensity orange sun, Aussault / Bolt fogged
   from `-30` / `-50` m: that is the game's look, not a bug.
-- **Sky layers** (after the flags work): Europa Night's lower sky reads
-  `22-27 27-33 32-38` against the game's `13-18 18-24 24-31` (its own
-  `20 25 30` fog bytes; the JPEG sits a little darker than its bytes) with
-  the clear colour `40 55 60` above, the full-moon "sun" high in the west,
-  the nebula sprite beside it, 128 star points and the grey cloud wisps;
-  the `miredome` is gone. Remnant keeps its olive dome with the two
-  additive crescent moons due north and north-north-east (thin bright
-  arcs, as in the game) and no white-cloud plane. Star positions are a
-  per-map seed, not the game's roll; the Clouds bit (8) is still undrawn.
+- **Sky layers** (after the flags work, the sprite pass and the
+  shader-verified plane tint): Europa Night's sky is the fog colour
+  `20 25 30` (the game's frame shows `13 18 24`, its own display sitting 7
+  below its bytes) with the cloud wisps fading in above ~17 degrees as
+  faint light blobs -- at 28-30 degrees ours sit +11 over the fog at the
+  95th percentile (the display-space `texel x sky.color`; the raw tint put
+  them at +70) against the game's +20 / +24 at the brightest texels, with
+  an angular feature scale of ~1.4 degrees against the game's ~2.1 -- the
+  full-moon "sun"
+  high in the west reading 206 against the game's 250 peak, the nebula
+  sprite beside it and 128 star points; the `miredome` is gone. Remnant
+  keeps its olive dome with the two additive crescent moons due north and
+  north-north-east, lit on the right as in the game, the big crescent
+  adding `+91 +82 +75` to the dome against the game's `+100 +85 +80` and
+  the small one `+70 +70 +65` against `+72 +65 +64`, no dark disc, no
+  white-cloud plane. Star positions are a per-map seed, not the game's
+  roll; the Clouds bit (8) draws nothing (`[Clouds] Count = 0`).
 
 ## v1 vs v2 scope split
 

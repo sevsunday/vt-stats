@@ -1,22 +1,62 @@
 /* Camera-locked sky for the replay, the map viewer and the explorer.
  *
  * What is drawn is decided by the map's `sky.flags` (decoded into
- * `atmosphere.layers` by scripts/extract_sky.py, schema 4), exactly the
- * switches the editor exposes: dome (1), stars (2), flat cloud plane (4),
- * clouds (8, undecoded, not drawn), sprites (16), sun (32). A map such as
- * Europa Night names a dome in its template DOME chunk but has the dome
- * switch off, so the engine shows the clear colour, 128 star points, the
- * nebula sprite, the moon "sun" and a scrolling cloud plane; Remnant has
- * the dome on, the plane off and two authored moon sprites. Gating on the
+ * `atmosphere.layers` by scripts/extract_sky.py, schema 5), exactly the
+ * switches the editor exposes and the engine names in its `sky.toggle`
+ * print-out: DOME (1), STARS (2), FLAT (4, the `sky.texturename` cloud
+ * plane), CLOUDS (8, the legacy TRN `[Clouds]` billboard system -- Count 0
+ * on every VSR map, so nothing to draw), SPRITES (16), SUN (32). A map
+ * such as Europa Night names a dome in its template DOME chunk but has the
+ * dome switch off, so the engine shows the fog colour, 128 star points,
+ * the nebula sprite, the moon "sun" and faint cloud wisps; Remnant has the
+ * dome on, the plane off and two authored moon sprites. Gating on the
  * flags, not on the asset being present, is what keeps the two apart.
+ *
+ * Wherever no layer draws the game shows the FOG colour: in the Europa
+ * Night frame the sky between the cloud wisps is exactly the fully fogged
+ * value up to 30 degrees. `sky.color` is not a clear colour; it is the
+ * tint of the cloud plane (and, as a calibrated stand-in, of the dome),
+ * and its alpha (`sky.colora`) is the plane's opacity.
+ *
+ * What is verified against the engine and what is calibrated. The game's
+ * `default` pixel shader (bz2r_res/baked/shaders/dx11_default_psh_*.fxc,
+ * disassembled with d3dcompiler) is `lerp(texel * g_MaterialDiffuse,
+ * g_FogColor, fog)` with no gamma step, range fog through `fogbreak`, and
+ * for lit materials `texel * diffuse * (ambient + sum lights)`; the sky
+ * textures are sRGB DDS; the fog constant displays as its bytes. That
+ * pins the CLOUD PLANE tint as a display-space product (addFlatClouds)
+ * and the fog skirt's `h / sin e` ramp. NOT pinned, and therefore left as
+ * frame-matched calibrations: the dome tint (its material is white and
+ * the DOME chunk carries its own ambient / light, so `sky.color` is
+ * probably not its constant at all; the raw-as-linear tint matches the
+ * in-game Remnant average) and the sprite gain (SPRITE_ADDITIVE_GAIN).
  *
  * The rig is a child of the camera so it stays centered on the view, and
  * its quaternion is the inverse of the camera's so everything stays fixed
  * in the world as the view turns. It is not inside the Z-mirrored world
  * group; `state.mirrorZ` (default true) tells the sprite math and the
- * pre-mirrored dome GLB which way north points. Materials opt out of fog
- * (except the cloud plane, which the engine fogs): the scene fog is sized
- * for the terrain and would otherwise paint over the dome.
+ * pre-mirrored dome GLB which way north points. Materials opt out of the
+ * scene fog: the engine fogs the sky by elevation (the fog skirt below),
+ * and the scene fog is sized for the terrain.
+ *
+ * Draw order. The dome (and the legacy gradient) sit in the opaque pass
+ * with the depth test off, so the terrain simply overwrites them. Stars,
+ * sprites, the sun, the cloud plane and the fog skirt need real blending,
+ * which three.js only enables on `transparent` materials, so they draw in
+ * the transparent pass, depth-tested against the terrain and sitting at
+ * the far edge of the rig so every hill inside the visibility range is in
+ * front of them.
+ *
+ * Sprites follow the editor's `sprites.modulate`: "Add" (1) is additive --
+ * the black body of a moon texture adds nothing and only the lit crescent
+ * shows -- scaled by SPRITE_ADDITIVE_GAIN, calibrated on the in-game
+ * Remnant frame (a plain add saturates the crescent to yellow-white where
+ * the game shows a soft (235,218,172)); "Blend" (0) is an alpha disc.
+ * Sprite tints are the colour bytes as linear multipliers (the hue that
+ * fits the frame under that gain). DDS rows are stored top-first and compressed
+ * textures cannot be flipped on upload, so sprite / sun / star textures
+ * get their V flipped (flipDdsV); without it the authored roll turns the
+ * upside-down moon into a left/right mirror of the game.
  *
  * Units, confirmed against the console: a sprite's `size` is metres at
  * `sprite_distance` (100 m on every map), so size 40 spans 22.6 degrees;
@@ -50,15 +90,40 @@ function dataUrl(rel) {
 }
 // Geometry radius; the rig is scaled per frame to the camera's far plane.
 const SKY_RADIUS = 2800;
-// Fraction of the far plane the rig fills: inside the clip with margin.
-const SKY_FAR_FRACTION = 0.95;
+// Fraction of the far plane the rig fills. The blended layers are
+// depth-tested against the terrain, so they sit as far out as the clip
+// allows: terrain is only drawn to `visibilityrange` (far / 1.02), and
+// anything past the fog end is the fog colour anyway.
+const SKY_FAR_FRACTION = 0.995;
 // Sun sprite size when the sidecar carries no `sun.size_deg`.
 const SUN_SPRITE_FALLBACK = SKY_RADIUS * 0.16;
+// Sun sprite shell. A 30-degree quad's corners reach 3.5% past its
+// centre, so it sits a little inside the sprite shell.
+const SUN_SHELL = SKY_RADIUS * 0.96;
 // Sprites sit this far out in rig units (metres at `sprite_distance` are
-// rescaled onto this shell).
-const SPRITE_SHELL = SKY_RADIUS * 0.9;
+// rescaled onto this shell). A size-40 quad's corners reach 2% past it.
+const SPRITE_SHELL = SKY_RADIUS * 0.975;
+// Star points and the fog skirt (no extent to worry about).
+const STAR_SHELL = SKY_RADIUS * 0.99;
+const SKIRT_SHELL = SKY_RADIUS * 0.985;
 // Sprite distance the engine uses when the sidecar lacks the SPRT header.
 const SPRITE_DISTANCE_FALLBACK = 100;
+// Strength of "Add" (`sprites.modulate` 1) sprites. three.js encodes a
+// fragment to sRGB in the shader and blends it on the display-encoded
+// canvas, so an additive sprite ADDS DISPLAY VALUES: the canvas gains
+// encode(texel x tint x gain). Calibrated on the in-game Remnant frame,
+// where the big moon's crescent (texel 253, tint 255 220 180) adds
+// (+100, +85, +80) to the (135,133,92) dome -> (235,218,172):
+// encode(0.98 x (1, 0.863, 0.706) x 0.135) = (102, 95, 86), which the
+// rendered crescent reproduces within the thin-arc sampling error. A gain
+// of 1 saturates the crescent to (255,255,200) and loses the warm tint.
+// EMPIRICAL: the engine's default shader has no attenuation term, so the
+// cause lives in state the files do not carry (blend factors, the colour
+// alpha, or fog on a shell farther than 100 m); alpha is 255, the 100 m
+// sprite shell is inside the fog start, and the small moon at 30 degrees
+// shows the same factor. The sun sprite is NOT attenuated (Europa Night's
+// full moon reads 206-250 in both the game and here).
+const SPRITE_ADDITIVE_GAIN = 0.135;
 // Star points: the lightflare texture's bright core is about 27% of the
 // texel span, so a point is scaled up until that core covers at least
 // STAR_MIN_CORE_PX device pixels; the engine's 0.2 m stars would otherwise
@@ -86,23 +151,26 @@ function hexOr(value, fallback) {
 
 /**
  * `fog` is the SKY1 colour at 0x00 (`sky.fogcolor`, also `colors.sky` in
- * the sidecar), `sky` the clear colour behind the dome (`sky.color`,
- * `atmosphere.sky_color_hex`). Older sidecars carry only the first.
+ * the sidecar): the fog colour AND what the sky clears to. `sky` is
+ * `sky.color` (`atmosphere.sky_color_hex`), the tint of the dome and the
+ * cloud plane. Older sidecars carry only the first.
  */
 function skyColors(sky, tint) {
   const colors = (sky && sky.colors) || {};
   const atmo = (sky && sky.atmosphere) || {};
   const base = hexOr(tint, '#1a2030');
   const fog = hexOr(atmo.fog && atmo.fog.color_hex, hexOr(colors.sky, base));
-  const clear = hexOr(atmo.sky_color_hex, fog);
+  const layer = hexOr(atmo.sky_color_hex, fog);
   return {
     fog,
-    sky: clear,
+    sky: layer,
     // The dome texture is modulated by `sky.color`: on Remnant the texture
     // (164,179,133) times (180,170,130) in linear space lands within a few
     // levels of the in-game sky (146,143,100); the fog colour darkens it
-    // 45% too far. Older sidecars without the clear colour keep the SKY1 tint.
-    tint: clear,
+    // 45% too far. Older sidecars without `sky.color` keep the SKY1 tint.
+    tint: layer,
+    // `sky.colora`: the cloud plane's opacity (1 when the sidecar predates it).
+    layerAlpha: THREE.MathUtils.clamp(num(atmo.sky_color_alpha, 1), 0, 1),
   };
 }
 
@@ -128,10 +196,13 @@ function skyLayers(sky) {
 }
 
 /**
- * The clear colour and the fog colour display as their raw bytes in the
- * game (Europa Night's sky reads 40-56 for `40 55 60`), so they are set
- * as sRGB and the output encode hands the bytes back. Shader-side tints
- * (the dome / cloud modulation) stay raw-as-linear via srgbTint().
+ * A colour that displays as its raw bytes: the fog / clear colour
+ * (Remnant's fogged horizon reads 120 109 78 for `120 110 80`), and the
+ * cloud plane's `sky.color` tint, whose product with the sRGB texel is a
+ * display-space product in the engine (see addFlatClouds). Set as sRGB
+ * so three.js decodes it; the output encode hands the bytes back. The
+ * dome, sprite and star tints stay raw-as-linear via srgbTint() -- those
+ * are frame-matched calibrations, not shader-verified (see the header).
  */
 function displayColor(hex) {
   const n = parseInt(String(hex).replace('#', ''), 16);
@@ -176,7 +247,8 @@ function gradientGeometry(colors, flat) {
   // A flat fallback is white here. shadeSky multiplies by colors.tint,
   // so the hemisphere ends up that tint without applying it twice.
   // Otherwise the fog colour sits at the horizon (that is what fully
-  // fogged terrain meets) and the clear colour takes over overhead.
+  // fogged terrain meets) and `sky.color` takes over overhead (the
+  // pre-flags look, kept for schema-3 sidecars).
   const white = new THREE.Color('#ffffff');
   const overhead = flat ? white : displayColor(colors.sky);
   const horizon = flat ? white : displayColor(colors.fog);
@@ -238,8 +310,15 @@ function loadDds(rel, anisotropy) {
 }
 
 /**
- * Tint the dome (or the gradient fallback) by the clear colour. A self-lit
- * dome (material ambient 0: starfield, DarkSkyS) stays fullbright, since
+ * Tint the dome (or the gradient fallback) by `sky.color`, raw bytes as
+ * linear multipliers. CALIBRATED, not engine-verified: the dome's own
+ * `.material` diffuse is white and the DOME chunk carries `dome.ambient` /
+ * `dome.light`, so the engine very likely does not tint the dome by
+ * `sky.color` at all; this rule is kept because it lands on the in-game
+ * Remnant average (texture (164,179,133) x (180,170,130) -> within a few
+ * levels of the frame's (146,143,100)) while a fit of the frame's NW..NE
+ * band against the dome texture was not decisive. A self-lit dome
+ * (material ambient 0: starfield, DarkSkyS) stays fullbright, since
  * multiplying by a near-black tint would erase the stars. Stays opaque so
  * the draw stays in front of the terrain pass. The flat cloud layer is a
  * separate plane now, no longer composited into the dome texture.
@@ -265,10 +344,48 @@ function domeFullbright(sky) {
   return Number.isFinite(ambient) && ambient < 0.5;
 }
 
+/**
+ * Sprite / star tints are the engine's colour bytes taken as linear
+ * multipliers, like the dome tint and the lights (`engineColor` in
+ * atmosphere.js). With the display-space addition described at
+ * SPRITE_ADDITIVE_GAIN this reproduces the Remnant crescent's warm
+ * (+100, +85, +80) within a few levels; an sRGB-decoded tint lands the
+ * blue channel 10 levels low.
+ */
 function spriteColor(hex) {
   const tint = srgbTint(hexOr(hex, '#ffffff'));
-  if (Math.max(tint.x, tint.y, tint.z) < 0.08) return new THREE.Color(0xffffff);
   return new THREE.Color(tint.x, tint.y, tint.z);
+}
+
+/**
+ * DDS mip rows are stored top-first and compressed textures cannot be
+ * flipped on upload (`CompressedTexture.flipY` is false), so on a
+ * PlaneGeometry / Sprite / point (v = 1 at the top) they come out upside
+ * down. Flip V through the uv transform instead. Not for the dome: its
+ * MSH UVs were authored for that row order and already match.
+ */
+function flipDdsV(tex) {
+  if (!tex || tex.userData.vtFlippedV) return tex;
+  tex.repeat.y = -1;
+  tex.offset.y = 1;
+  tex.matrixAutoUpdate = true;
+  tex.userData.vtFlippedV = true;
+  return tex;
+}
+
+/** Shared settings of the blended sky layers (see the header: transparent
+ *  pass, depth-tested against the terrain, never writing depth, no scene
+ *  fog, no tone mapping). three.js renders a transparent DoubleSide
+ *  material in two passes (back faces, then front), which would add an
+ *  additive sprite twice; one pass is enough here. */
+function blendedLayer(mat) {
+  mat.transparent = true;
+  mat.depthTest = true;
+  mat.depthWrite = false;
+  mat.fog = false;
+  mat.toneMapped = false;
+  mat.forceSinglePass = true;
+  return mat;
 }
 
 /**
@@ -293,23 +410,15 @@ const SPRITE_GEO = new THREE.PlaneGeometry(1, 1);
 SPRITE_GEO.userData.vtShared = true;
 const SPRITE_FACING = new THREE.Vector3(0, 0, 1);
 
-/** Additive sky art is black-backed with a solid alpha. Drop the empty texels. */
-function punchDark(mat) {
-  mat.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <map_fragment>',
-      `#include <map_fragment>
-       if (dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)) < 0.04) discard;`,
-    );
-  };
-  mat.customProgramCacheKey = () => 'sky-sprite-punch';
-  return mat;
-}
-
 /**
  * SPRT billboards. A quad of `size` metres at `spriteDistance` metres
  * subtends 2 atan(size / 2 / distance), so on the sprite shell its span is
  * `shell * size / distance`. Size 0 is a hidden template slot.
+ *
+ * `blend` is `sprites.modulate`: 1 = "Add" -- additive, texel x tint x
+ * SPRITE_ADDITIVE_GAIN x alpha (SRC_ALPHA, ONE), so the dark body of a
+ * moon adds nothing and only the crescent shows; 0 = "Blend" -- an alpha
+ * disc (Earth), texel alpha x the record's alpha.
  */
 function addSkySprites(rig, sprites, textures, spriteDistance, mirrorZ) {
   const list = Array.isArray(sprites) ? sprites : [];
@@ -330,13 +439,15 @@ function addSkySprites(rig, sprites, textures, spriteDistance, mirrorZ) {
     dir.normalize();
     const span = dist * Math.abs(size) / refDist;
     const additive = Number(rec.blend) !== 0;
-    const mat = basicMat({
-      map,
+    const color = spriteColor(rec.color);
+    if (additive) color.multiplyScalar(SPRITE_ADDITIVE_GAIN);
+    const mat = blendedLayer(new THREE.MeshBasicMaterial({
+      map: flipDdsV(map),
       side: THREE.DoubleSide,
-      alphaTest: additive ? 0.02 : 0.45,
-      color: spriteColor(rec.color),
-    });
-    if (additive) punchDark(mat);
+      color,
+      opacity: THREE.MathUtils.clamp(num(rec.alpha, 1), 0, 1),
+      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    }));
     const mesh = new THREE.Mesh(SPRITE_GEO, mat);
     mesh.name = `sky-sprite-${drawn}`;
     mesh.position.copy(dir).multiplyScalar(dist);
@@ -383,7 +494,7 @@ function addStars(rig, stars, texture, seed) {
   if (!count || !texture) return null;
   const rand = seededRandom(seed);
   const positions = new Float32Array(count * 3);
-  const radius = SKY_RADIUS * 0.86;
+  const radius = STAR_SHELL;
   const distance = Math.max(1, num(stars.distance, 200));
   const lift = THREE.MathUtils.clamp(num(stars.height, 0) / distance, -0.5, 0.5) * radius;
   for (let i = 0; i < count; i++) {
@@ -399,30 +510,25 @@ function addStars(rig, stars, texture, seed) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   const additive = num(stars.modulate, 1) !== 0;
-  const mat = new THREE.PointsMaterial({
-    map: texture,
+  const mat = blendedLayer(new THREE.PointsMaterial({
+    map: flipDdsV(texture),
     color: spriteColor(stars.color_hex),
+    opacity: THREE.MathUtils.clamp(num(stars.alpha, 1), 0, 1),
     size: 4,
     sizeAttenuation: false,
-    transparent: false,
-    depthTest: false,
-    depthWrite: false,
     blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    alphaTest: additive ? 0.0 : 0.3,
-  });
-  mat.fog = false;
-  mat.toneMapped = false;
-  if (additive) {
-    // Same black-backed texture rule as the sprites.
-    mat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <map_particle_fragment>',
-        `#include <map_particle_fragment>
-         if (dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)) < 0.03) discard;`,
-      );
-    };
-    mat.customProgramCacheKey = () => 'sky-stars-punch';
-  }
+  }));
+  // The star textures (lightflare, plasma) are black-backed with a solid
+  // alpha. Additive draws add nothing there, but a "Blend" star would
+  // paint a black square, so drop the empty texels in both modes.
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_particle_fragment>',
+      `#include <map_particle_fragment>
+       if (dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)) < 0.03) discard;`,
+    );
+  };
+  mat.customProgramCacheKey = () => 'sky-stars-punch';
   const points = new THREE.Points(geo, mat);
   points.name = 'sky-stars';
   points.renderOrder = -18;
@@ -435,7 +541,6 @@ function addStars(rig, stars, texture, seed) {
 
 const FLAT_VERTEX = `
 #include <common>
-#include <fog_pars_vertex>
 varying vec2 vWorldXZ;
 varying float vRadial;
 uniform float uGeoRadius;
@@ -443,24 +548,23 @@ void main() {
   vec4 worldPos = modelMatrix * vec4(position, 1.0);
   vWorldXZ = worldPos.xz;
   vRadial = length(position.xz) / uGeoRadius;
-  vec4 mvPosition = viewMatrix * worldPos;
-  gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
+  gl_Position = projectionMatrix * viewMatrix * worldPos;
 }
 `;
 
-// Output encoding, then fog in output space (the renderer hands fogColor
-// over in the output colour space), the same order as the stock materials.
-// Additive light fades to nothing with distance rather than to the fog
-// colour, and carries its alpha in the colour (blend SRC_ALPHA, ONE).
+// Texel x tint, the layer opacity in alpha, output encoding. No fog here:
+// the fog skirt drawn over every sky layer carries the engine's sky fog
+// (the same `h / sin e` distance this plane sits at), so fogging the plane
+// itself as well would fog it twice. Additive light carries its alpha in
+// the colour (blend SRC_ALPHA, ONE).
 const FLAT_FRAGMENT = `
 #include <common>
-#include <fog_pars_fragment>
 uniform sampler2D map;
 uniform float uTile;
 uniform vec2 uScroll;
 uniform float uFadeStart;
 uniform float uAdditive;
+uniform float uOpacity;
 uniform vec3 uTint;
 varying vec2 vWorldXZ;
 varying float vRadial;
@@ -468,17 +572,12 @@ void main() {
   vec2 uv = vWorldXZ / uTile + uScroll;
   vec4 texel = texture2D(map, uv);
   float fade = 1.0 - smoothstep(uFadeStart, 1.0, vRadial);
-  float alpha = texel.a * fade;
+  float alpha = texel.a * uOpacity * fade;
   gl_FragColor = vec4(texel.rgb * uTint, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
-  float fogAmount = 0.0;
-  #ifdef USE_FOG
-    fogAmount = clamp((vFogDepth - fogNear) / max(fogFar - fogNear, 1e-3), 0.0, 1.0);
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogAmount);
-  #endif
   if (uAdditive > 0.5) {
-    gl_FragColor = vec4(gl_FragColor.rgb * alpha * (1.0 - fogAmount), 1.0);
+    gl_FragColor = vec4(gl_FragColor.rgb * alpha, 1.0);
   }
 }
 `;
@@ -487,49 +586,52 @@ void main() {
  * The flat cloud plane (`sky.flags` bit 4): `sky.texturename` tiled every
  * `tilesize` metres in world XZ, `height` metres above the eye, scrolling
  * `uspeed` / `vspeed` metres per second, alpha-blended ("Blend",
- * `modulate` 0) or additive ("Add", 1), modulated by `sky.color` like the
- * dome (Europa Night's grey clouds read as faint dark wisps in the game,
- * not as the 136-grey texture). The disc is camera-locked and rescaled per
- * frame to the far plane; the UVs come from world space so the clouds stay
- * put as the camera moves. Fogged like the terrain, with a radial fade so
- * it ends softly in the fog-free cameras too.
+ * `modulate` 0) or additive ("Add", 1), tinted by `sky.color` and faded
+ * by `sky.colora` (`layerAlpha`; 255 on most maps, 50-200 on about
+ * fifty). The disc is camera-locked and rescaled per frame to the far
+ * plane; the UVs come from world space so the clouds stay put as the
+ * camera moves. The fog skirt fogs it (same height, same ramp); the
+ * radial fade ends it softly in the fog-free cameras too.
+ *
+ * The tint is a DISPLAY-SPACE product, verified against the engine: the
+ * game's `default` pixel shader (bz2r_res/baked/shaders/dx11_default_psh_
+ * 0pd.fxc, disassembled) is `lerp(texel * g_MaterialDiffuse, g_FogColor,
+ * fog)` with no gamma step, the cloud texture is an sRGB DDS, and the fog
+ * constant displays as its bytes, so `texel x sky.color` lands at
+ * `texel_byte * byte / 255` on screen. In three.js that is the decoded
+ * (`displayColor`) tint on the linearised texel: Europa Night's
+ * `white_clouds` x `40 55 60` peaks at display (36,50,54) over the
+ * (20,25,30) fog, +20..30 unfogged, which is the +24 the in-game frame
+ * shows; the raw-as-linear tint the dome still uses put them at +70.
  */
-function addFlatClouds(rig, texture, layer, tintHex) {
+function addFlatClouds(rig, texture, layer, tintHex, layerAlpha) {
   if (!texture) return null;
   const tile = Math.max(1, num(layer.tilesize, 300));
   const additive = num(layer.modulate, 0) !== 0;
-  const tint = srgbTint(tintHex);
+  const tintColor = displayColor(tintHex);
+  const tint = new THREE.Vector3(tintColor.r, tintColor.g, tintColor.b);
   const geo = new THREE.CircleGeometry(FLAT_RADIUS, 96);
   geo.rotateX(-Math.PI / 2);
-  // Unlike the other layers this one is in the transparent pass: three.js
-  // drops NormalBlending on an opaque material, and alpha is the whole
-  // point here. It is depth-tested instead, so hills (which write depth)
-  // still hide it, and it draws after the dome / stars / sprites / sun,
-  // which is the order the clouds should cover them in.
-  const mat = new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([
-      THREE.UniformsLib.fog,
-      {
-        map: { value: null },
-        uTile: { value: tile },
-        uScroll: { value: new THREE.Vector2(0, 0) },
-        uFadeStart: { value: FLAT_FADE_START },
-        uAdditive: { value: additive ? 1 : 0 },
-        uGeoRadius: { value: FLAT_RADIUS },
-        uTint: { value: new THREE.Vector3(tint.x, tint.y, tint.z) },
-      },
-    ]),
+  // Transparent pass like the other blended layers: depth-tested so hills
+  // (which write depth) still hide it, drawn after the dome / stars /
+  // sprites / sun, which is the order the clouds should cover them in.
+  const mat = blendedLayer(new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: null },
+      uTile: { value: tile },
+      uScroll: { value: new THREE.Vector2(0, 0) },
+      uFadeStart: { value: FLAT_FADE_START },
+      uAdditive: { value: additive ? 1 : 0 },
+      uOpacity: { value: THREE.MathUtils.clamp(num(layerAlpha, 1), 0, 1) },
+      uGeoRadius: { value: FLAT_RADIUS },
+      uTint: { value: new THREE.Vector3(tint.x, tint.y, tint.z) },
+    },
     vertexShader: FLAT_VERTEX,
     fragmentShader: FLAT_FRAGMENT,
-    fog: true,
-    transparent: true,
-    depthTest: true,
-    depthWrite: false,
     side: THREE.DoubleSide,
     blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-  });
+  }));
   mat.uniforms.map.value = texture;
-  mat.toneMapped = false;
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'sky-flat';
   // Transparent pass; sits at the camera, so it sorts last there and only
@@ -567,7 +669,7 @@ function addFogSkirt(rig, fogHex, fogParams, heightM) {
   // the zenith when the fog starts under the layer (negative starts).
   const topSin = start > height ? Math.min(1, height / start) : 1;
   const topTheta = Math.max(0.02, Math.PI / 2 - Math.asin(topSin));
-  const radius = SKY_RADIUS * 0.96;
+  const radius = SKIRT_SHELL;
   const geo = new THREE.SphereGeometry(radius, 64, 24, 0, Math.PI * 2, topTheta, Math.PI * 0.68 - topTheta);
   const pos = geo.attributes.position;
   const rgba = new Float32Array(pos.count * 4);
@@ -580,15 +682,10 @@ function addFogSkirt(rig, fogHex, fogParams, heightM) {
     rgba[i * 4 + 3] = alpha;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(rgba, 4));
-  const mat = new THREE.MeshBasicMaterial({
+  const mat = blendedLayer(new THREE.MeshBasicMaterial({
     vertexColors: true,
-    transparent: true,
-    depthTest: true,
-    depthWrite: false,
     side: THREE.BackSide,
-  });
-  mat.fog = false;
-  mat.toneMapped = false;
+  }));
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'sky-fog-skirt';
   mesh.renderOrder = -9;
@@ -666,14 +763,13 @@ export function syncSky(rig, camera, sunDir) {
   if (Math.abs(rig.scale.x - scale) > 1e-6) rig.scale.setScalar(scale);
   const sprite = rig.userData.sunSprite;
   if (sprite && sunDir && sunDir.isVector3 && sunDir.lengthSq() > 1e-8) {
-    sprite.position.copy(sunDir).normalize().multiplyScalar(SKY_RADIUS * 0.82);
+    sprite.position.copy(sunDir).normalize().multiplyScalar(SUN_SHELL);
     sprite.visible = sunDir.y > -0.05;
   }
   const now = performance.now() / 1000;
   const flat = rig.userData.flat;
   if (flat) {
     // The rig is scaled to the far plane; the plane's height is metres.
-    // Fog uniforms are refreshed by the renderer (material.fog = true).
     flat.position.y = flat.userData.flatHeight / scale;
     const scroll = flat.userData.flatScroll;
     flat.material.uniforms.uScroll.value.set(scroll.x * now, scroll.y * now);
@@ -768,11 +864,12 @@ export async function attachSky(state) {
   const colors = skyColors(sky, mapData.skyTint);
   const layers = skyLayers(sky);
   const mirrorZ = state.mirrorZ !== false;
-  // The clear colour (`sky.color`) is what the engine shows wherever no
-  // layer draws (all of the sky on a dome-off map such as Europa Night);
-  // the fog keeps its own colour (`sky.fogcolor`), which is what fully
-  // fogged terrain fades to. The two differ on most maps.
-  scene.background = displayColor(colors.sky);
+  // The fog colour is what the engine shows wherever no layer draws (all of
+  // the sky on a dome-off map such as Europa Night: the in-game frame reads
+  // the fully fogged value between the cloud wisps right up to 30 degrees),
+  // and what fully fogged terrain fades to. `sky.color` only tints the dome
+  // and the cloud plane.
+  scene.background = displayColor(colors.fog);
   if (scene.fog && scene.fog.color) scene.fog.color.copy(displayColor(colors.fog));
 
   const rig = new THREE.Group();
@@ -838,7 +935,7 @@ export async function attachSky(state) {
   const fullbright = hasDomeTex && domeFullbright(sky);
 
   // Pre-flags fallback only: with the switches known, the engine shows the
-  // clear colour wherever no layer draws, so no filler hemisphere.
+  // fog colour wherever no layer draws, so no filler hemisphere.
   if (layers.legacy) {
     const gradient = new THREE.Mesh(
       gradientGeometry(colors, !hasDomeTex),
@@ -885,18 +982,17 @@ export async function attachSky(state) {
   }
 
   if (sunTex) {
-    const mat = new THREE.SpriteMaterial({
-      map: sunTex,
-      transparent: false,
+    // Additive at full strength: the sun textures are black-backed discs
+    // (dunesun, the dunemoonfull "moon" that Europa Night's frame shows
+    // bright white). Blended layer, so the terrain still hides it and the
+    // cloud plane (drawn after) passes in front of it.
+    const mat = blendedLayer(new THREE.SpriteMaterial({
+      map: flipDdsV(sunTex),
       blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-      fog: false,
-      toneMapped: false,
-    });
+    }));
     const sprite = new THREE.Sprite(mat);
     sprite.name = 'sky-sun';
-    const dist = SKY_RADIUS * 0.82;
+    const dist = SUN_SHELL;
     sprite.position.copy(sunDirection(state).multiplyScalar(dist));
     // `sun.size` is the sprite's angular size in degrees (30 on most VSR
     // maps; the disc is a fraction of the texture). 0 means no sun sprite.
@@ -904,8 +1000,6 @@ export async function attachSky(state) {
     const span = Number.isFinite(sunSize) ? spriteSpan(sunSize, dist) : SUN_SPRITE_FALLBACK;
     sprite.scale.setScalar(span);
     sprite.visible = span > 0;
-    // Opaque pass like the other layers: terrain overwrites it, the cloud
-    // plane (drawn after) passes in front of it.
     sprite.renderOrder = -12;
     silenceRaycast(sprite);
     rig.add(sprite);
@@ -915,7 +1009,7 @@ export async function attachSky(state) {
   addSkySprites(rig, sprites, spriteTextures, spriteDistance, mirrorZ);
 
   if (cloudTex && cloudLayer) {
-    const flat = addFlatClouds(rig, cloudTex, cloudLayer, colors.tint);
+    const flat = addFlatClouds(rig, cloudTex, cloudLayer, colors.tint, colors.layerAlpha);
     if (flat) rig.userData.flat = flat;
   }
 
