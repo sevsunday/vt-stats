@@ -2971,19 +2971,39 @@ function hideWatchVodControls() {
 function fillWatchVodDialog(links) {
   const list = document.getElementById('watch-vod-dialog-list');
   if (!list) return;
-  list.innerHTML = (links || []).map((link) => {
-    const ch = escapeHtml(link.channel || 'YouTube');
-    const title = escapeHtml(link.title || '');
-    const href = escapeHtml(link.url || '#');
-    const approx = link.approx
-      ? '<span class="t-watch-dialog-title">nearest kept footage</span>'
-      : '';
-    return `<a href="${href}" target="_blank" rel="noopener">` +
-      `<span class="t-watch-dialog-ch">${ch}</span>` +
-      (title ? `<span class="t-watch-dialog-title">${title}</span>` : '') +
-      approx +
-      `</a>`;
-  }).join('');
+  const rows = links || [];
+  // This runs every animation frame via syncTransportReadouts(), so the rows
+  // must keep their element identity: rebuilding them per frame replaced the
+  // <a> under the pointer before :hover could paint and split mousedown /
+  // mouseup across two elements, so no click (and no target=_blank
+  // navigation) ever fired. Rebuild only when the video set or its order
+  // changes; otherwise patch href + the approx label in place so the links
+  // keep tracking the playhead while the dialog is open.
+  const existing = list.querySelectorAll('a[data-video-id]');
+  const sameRows = existing.length === rows.length &&
+    rows.every((link, i) => existing[i].dataset.videoId === String(link.videoId || ''));
+  if (!sameRows) {
+    list.innerHTML = rows.map((link) => {
+      const ch = escapeHtml(link.channel || 'YouTube');
+      const title = escapeHtml(link.title || '');
+      const id = escapeHtml(String(link.videoId || ''));
+      return `<a data-video-id="${id}" target="_blank" rel="noopener">` +
+        `<span class="t-watch-dialog-ch">${ch}</span>` +
+        (title ? `<span class="t-watch-dialog-title">${title}</span>` : '') +
+        '<span class="t-watch-dialog-title t-watch-dialog-approx" hidden>' +
+        'nearest kept footage</span>' +
+        `</a>`;
+    }).join('');
+  }
+  const anchors = list.querySelectorAll('a[data-video-id]');
+  rows.forEach((link, i) => {
+    const a = anchors[i];
+    if (!a) return;
+    const href = link.url || '#';
+    if (a.getAttribute('href') !== href) a.setAttribute('href', href);
+    const approx = a.querySelector('.t-watch-dialog-approx');
+    if (approx && approx.hidden === !!link.approx) approx.hidden = !link.approx;
+  });
 }
 
 function wireWatchVodPicker() {
@@ -2998,6 +3018,17 @@ function wireWatchVodPicker() {
   dlg.addEventListener('click', (e) => {
     if (e.target === dlg) dlg.close();
   });
+  const list = document.getElementById('watch-vod-dialog-list');
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const a = e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || !list.contains(a)) return;
+      // Default target=_blank navigation still runs after dispatch (the
+      // anchor stays in the DOM); just drop the picker so it does not sit
+      // over the replay once the VOD tab is open.
+      dlg.close();
+    });
+  }
 }
 
 function syncWatchVodButton() {
