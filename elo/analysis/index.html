@@ -54,12 +54,137 @@
         .faq-link { display: inline-flex; align-items: center; gap: 0.25rem; border: 1px solid #334155; background: #0f172a; border-radius: 0.375rem; padding: 0.125rem 0.5rem; color: #7dd3fc; font-size: 0.72rem; text-decoration: none; white-space: nowrap; }
         .faq-link:hover { color: #fff; border-color: #475569; }
         .faq-link.ext::after { content: '\2197'; font-size: 0.65rem; opacity: 0.7; }
+
+        /* Anchors clear the sticky Contents bar on small screens. */
+        .anchor { scroll-margin-top: 2rem; }
+        @media (max-width: 767px) {
+            .anchor { scroll-margin-top: calc(4.75rem + env(safe-area-inset-top)); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            html.scroll-smooth { scroll-behavior: auto; }
+        }
+
+        .skip-link {
+            position: fixed;
+            left: 0.75rem;
+            top: 0.75rem;
+            z-index: 70;
+            padding: 0.5rem 0.75rem;
+            background: #0f172a;
+            color: #fff;
+            border: 1px solid #38bdf8;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            text-decoration: none;
+            transform: translateY(-200%);
+        }
+        .skip-link:focus { transform: none; }
+
+        /* py-2's top padding loses to this rule, and a zero safe-area inset
+           was pinning the buttons to the viewport edge. */
+        #toc-bar { padding-top: calc(0.75rem + env(safe-area-inset-top)); }
+
+        /* Off-canvas below md; fixed sidebar from 768px up. */
+        #toc {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 50;
+            height: 100vh;
+            height: 100dvh;
+            width: min(18rem, 88vw);
+            transform: translateX(-100%);
+            transition: transform 0.2s ease;
+            border-right: 1px solid #334155;
+            padding-bottom: env(safe-area-inset-bottom);
+            overscroll-behavior: contain;
+        }
+        #toc.toc-open { transform: translateX(0); }
+        @media (min-width: 768px) {
+            #toc {
+                z-index: 20;
+                width: 18rem;
+                transform: none;
+                transition: none;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #toc { transition: none; }
+        }
+        @media (max-width: 767px) {
+            #toc nav a {
+                min-height: 44px;
+                display: flex;
+                align-items: center;
+            }
+        }
+        #toc nav a[aria-current="page"] {
+            background: rgba(30, 41, 59, 0.95);
+            box-shadow: inset 3px 0 0 #38bdf8;
+        }
+
+        #toc-backdrop[hidden] { display: none; }
+        #toc-backdrop:not([hidden]) {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            background: rgba(15, 23, 42, 0.62);
+        }
+        @media (min-width: 768px) {
+            #toc-backdrop { display: none !important; }
+        }
+        body.toc-lock { overflow: hidden; }
+
+        main#article { min-width: 0; }
+        main .bg-slate-900:has(canvas) {
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        @media (max-width: 767px) {
+            main .chart-tall { height: 28rem; }
+            main .chart-xtall { height: 36rem; }
+        }
+
+        .src-item { overflow-wrap: anywhere; }
+        @media (max-width: 767px) {
+            .src-links {
+                display: flex;
+                margin-left: 0;
+                margin-top: 0.25rem;
+            }
+            .src-pill {
+                white-space: normal;
+                max-width: 100%;
+                overflow-wrap: anywhere;
+            }
+        }
     </style>
 </head>
 <body class="antialiased min-h-screen flex flex-col md:flex-row">
 
-    <!-- Sidebar -->
-    <aside class="w-full md:w-72 md:fixed h-auto md:h-screen bg-slate-900 border-b md:border-b-0 md:border-r border-slate-700 p-6 z-20 overflow-y-auto">
+    <a href="#article" id="skip-link" class="skip-link">Skip to article</a>
+
+    <header id="toc-bar" class="md:hidden sticky top-0 z-30 flex items-center gap-2 border-b border-slate-700 bg-slate-900/95 px-3 py-2 backdrop-blur">
+        <button type="button" id="toc-toggle" aria-expanded="false" aria-controls="toc" class="inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm font-medium text-white">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"></path></svg>
+            Contents
+        </button>
+        <span class="truncate text-sm font-semibold text-white">VTSR v4</span>
+        <a href="../../index.html" class="ml-auto inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/50 px-3 text-sm text-slate-300" title="Back to the VT Stats dashboard">
+            <svg class="h-4 w-4 text-accent" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg>
+            <span class="font-medium text-white">VT Stats</span>
+        </a>
+    </header>
+
+    <div id="toc-backdrop" hidden></div>
+
+    <!-- Sidebar on wide screens; off-canvas drawer below 768px. -->
+    <aside id="toc" class="bg-slate-900 p-6 overflow-y-auto" aria-label="Contents">
+        <button type="button" id="toc-close" class="md:hidden mb-4 inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-600 px-3 text-sm text-slate-200">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"></path></svg>
+            Close
+        </button>
         <a href="../../index.html" class="flex items-center gap-2 mb-6 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-white transition-colors" title="Back to the VT Stats dashboard">
             <svg class="w-4 h-4 text-accent shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"></circle><path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg>
             <span class="font-medium text-white">VT Stats</span>
@@ -71,11 +196,11 @@
         <div class="mb-6">
             <div class="flex items-center gap-2 mb-2">
                 <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                <h1 class="text-xl font-bold text-white tracking-tight">VTSR Critique v4</h1>
+                <h1 id="toc-title" class="text-xl font-bold text-white tracking-tight">VTSR Critique v4</h1>
             </div>
             <p class="text-xs text-slate-400">Both sides of the coin &middot; 2026-10-04</p>
         </div>
-        <nav class="space-y-1 text-sm">
+        <nav class="space-y-1 text-sm" aria-label="Table of contents">
             <a href="#sec-faq" class="block px-3 py-1.5 rounded-lg text-warning hover:bg-slate-800 hover:text-amber-200 font-medium">Quick answers</a>
             <a href="#sec-where" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">1 Where we are</a>
             <a href="#sec-provenance" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">2 Where it comes from</a>
@@ -105,7 +230,7 @@
     </aside>
 
     <!-- Main -->
-    <main class="flex-1 md:ml-72 p-4 md:p-8 lg:p-12">
+    <main id="article" tabindex="-1" class="flex-1 md:ml-72 p-4 md:p-8 lg:p-12 outline-none">
         <header class="max-w-5xl mx-auto mb-12">
             <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text">VTSR v4: Both Sides of the Coin</h2>
             <p class="text-slate-400 text-lg leading-relaxed">
@@ -122,8 +247,8 @@
                  sections and every in-text cross-reference stay stable. Each answer
                  reuses figures already on this page and links to the section that
                  carries them; "ext" links open the ELO page's explainer pills. -->
-            <section id="sec-faq" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-faq" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">Quick answers</h3>
                     <p class="text-slate-300 text-sm mb-4">The questions the community actually asks, in plain words. Every answer links to the numbered section that carries the numbers, and to the <a class="text-sky-300 hover:text-white" href="../">ELO page</a> where the mechanics are explained step by step.</p>
                     <div class="divide-y divide-slate-700/70">
@@ -241,11 +366,11 @@
             </section>
 
             <!-- 1 Where we are -->
-            <section id="sec-where" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-where" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">1. Where we are</h3>
                     <p class="text-slate-300 text-sm mb-6">228 recorded matches, 193 rated, 45 rated players, 170 rated matches with a determined winner; F9bomber's 505 community duels bring the commander ladder to 675 scored duels. <a class="cite" href="#src-76">[76]</a></p>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-8">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Spearman &rho; (R &rarr; P)</div><div class="stat text-2xl text-white">0.495</div><div class="text-xs text-slate-500">v3: 0.462</div></div>
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Self-consistency</div><div class="stat text-2xl text-white">0.888</div><div class="text-xs text-slate-500">v3: 0.804</div></div>
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Winner from team mean R</div><div class="stat text-2xl text-white">58.6%</div><div class="text-xs text-slate-500">n=169 &middot; v3: 43.3% (n=30)</div></div>
@@ -262,8 +387,8 @@
             </section>
 
             <!-- 2 Provenance map -->
-            <section id="sec-provenance" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-provenance" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">2. Where every mechanism comes from</h3>
                     <p class="text-slate-300 text-sm mb-6">Nothing in VTSR is invented here except the eight axis definitions and their weights &mdash; and those are exactly what &sect;5 puts under test. Each row: a VTSR mechanism, and the shipped system or peer-reviewed method that uses the same idea.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -284,8 +409,8 @@
             </section>
 
             <!-- 3 Gate + scoreboard -->
-            <section id="sec-gate" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-gate" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">3. How a number becomes a rule</h3>
                     <p class="text-slate-300 text-sm mb-6">Hypothesis &rarr; a rule written in a memo before any number exists &rarr; a forensic what-if rating file beside the real one &rarr; the validator scores both &rarr; PROMOTE / HOLD / DISCARD &rarr; only PROMOTE changes a published rating. Every proposal since v2 has gone through it. <a class="cite" href="#src-79">[79]</a></p>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -328,8 +453,8 @@
             </section>
 
             <!-- 4 What changed -->
-            <section id="sec-changed" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-changed" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">4. What changed since v3</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
                         <div>
@@ -359,12 +484,12 @@
             </section>
 
             <!-- 5 The complaint -->
-            <section id="sec-complaint" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-complaint" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">5. The complaint, quantified</h3>
                     <p class="text-slate-300 text-sm mb-8">The community's reading: VTSR-T is a raw performance meter that punishes strong thugs for what their commander or team did. Six findings, each a validator section. <a class="cite" href="#src-77">[77]</a></p>
 
-                    <h4 id="sec-complaint-1" class="text-white font-semibold mb-2 scroll-mt-8">5.1 Performance ladder vs wins ladder (&sect;15)</h4>
+                    <h4 id="sec-complaint-1" class="text-white font-semibold mb-2 anchor">5.1 Performance ladder vs wins ladder (&sect;15)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[340px]"><canvas id="perfWinsChart"></canvas></div>
                         <div>
@@ -373,7 +498,7 @@
                         </div>
                     </div>
 
-                    <h4 id="sec-complaint-2" class="text-white font-semibold mb-2 scroll-mt-8">5.2 Your team's result moves your rating (&sect;16)</h4>
+                    <h4 id="sec-complaint-2" class="text-white font-semibold mb-2 anchor">5.2 Your team's result moves your rating (&sect;16)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">1,084 determined thug rows. Winners: mean P +0.136, &Delta; +7.6. Losers: &minus;0.096, &minus;5.6. Only 27% of winning thugs lose rating; only 24% of losing thugs gain. Win/loss alone explains <span class="stat text-white">&eta;&sup2; = 0.21</span> of thug P variance.</p>
@@ -382,7 +507,7 @@
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="stompChart"></canvas></div>
                                 </div>
                                 
-                    <h4 id="sec-complaint-3" class="text-white font-semibold mb-2 scroll-mt-8">5.3 Time on foot at base costs rating (&sect;17)</h4>
+                    <h4 id="sec-complaint-3" class="text-white font-semibold mb-2 anchor">5.3 Time on foot at base costs rating (&sect;17)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="shipDenialChart"></canvas></div>
                         <div>
@@ -391,25 +516,25 @@
                             </div>
                         </div>
 
-                    <h4 id="sec-complaint-4" class="text-white font-semibold mb-2 scroll-mt-8">5.4 Two core axes point the wrong way (&sect;11)</h4>
+                    <h4 id="sec-complaint-4" class="text-white font-semibold mb-2 anchor">5.4 Two core axes point the wrong way (&sect;11)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">Across 170 determined matches: how often does the winning team have the higher team-mean on each axis? Net damage share and mobility 88%, kill rate 86%, PvE share 79% &mdash; but <span class="stat text-white">efficiency 39%</span> and <span class="stat text-white">accuracy 39%</span>, and those two carry 31% of the composite weight.</p>
                             <p class="text-slate-300 text-sm leading-relaxed">Winners shoot structures and AI (dilutes accuracy); losers get more kills per damage fighting through repairs. Whatever the cause, this is the honest version of the utility-vs-hunter debate: PvE work is already rewarded; the axes rewarding <em>clean</em> fighting over <em>effective</em> fighting are the ones that disagree with winning.</p>
                         </div>
-                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[320px]"><canvas id="axisChart"></canvas></div>
+                        <div class="chart-tall bg-slate-900 rounded-xl p-4 border border-slate-700 h-[320px]"><canvas id="axisChart"></canvas></div>
                     </div>
 
-                    <h4 id="sec-complaint-5" class="text-white font-semibold mb-2 scroll-mt-8">5.5 Who commands, and what commanding does to a rating (&sect;18)</h4>
+                    <h4 id="sec-complaint-5" class="text-white font-semibold mb-2 anchor">5.5 Who commands, and what commanding does to a rating (&sect;18)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
-                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[380px]"><canvas id="cmdrChart"></canvas></div>
+                        <div class="chart-tall bg-slate-900 rounded-xl p-4 border border-slate-700 h-[380px]"><canvas id="cmdrChart"></canvas></div>
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">Commanders sit at the 48th percentile of their lobby by pre-match VTSR-T (median 0.44) and below their own thug mean 52% of the time &mdash; the middle, not the weakest. 33 distinct commanders; the top four (Sev 42, Lithium 36, F9bomber 34, Darkvale 32) hold 37% of commander rows.</p>
                             <p class="text-slate-300 text-sm leading-relaxed">Commander rows gain <span class="stat text-white">+2.07</span> per match vs +0.93 for thug rows. The v2.4 adjustment is set to the <em>average</em> commander's shortfall, so strong fighters harvest it (Muffin +14.5, blue +11.3, Snake +8.4) while Lithium (&minus;4.0) and DraconisMarch (&minus;5.6) still bleed &mdash; the known failure mode of a population-baseline positional adjustment <a class="cite" href="#src-19">[19]</a><a class="cite" href="#src-21">[21]</a>.</p>
                         </div>
                     </div>
 
-                    <h4 id="sec-complaint-6" class="text-white font-semibold mb-2 scroll-mt-8">5.6 Faction is not neutral (&sect;19)</h4>
+                    <h4 id="sec-complaint-6" class="text-white font-semibold mb-2 anchor">5.6 Faction is not neutral (&sect;19)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="factionChart"></canvas></div>
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="hadeanShareChart"></canvas></div>
@@ -419,8 +544,8 @@
             </section>
 
             <!-- 6 Steelman -->
-            <section id="sec-steelman" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-steelman" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">6. Why the current design is defensible</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">It measures something persistent</div><p class="text-slate-400">Split-half self-consistency 0.888. Rating from per-match statistics is the move that lifted Halo 5 prediction from 52% to 68% <a class="cite" href="#src-9">[9]</a>.</p></div>
@@ -436,8 +561,8 @@
             </section>
 
             <!-- 7 Faction -->
-            <section id="sec-faction" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-faction" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">7. Faction-based ELO</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-6">
                         <div class="bg-success/5 border border-success/20 rounded-xl p-4">
@@ -463,8 +588,8 @@
             </section>
 
             <!-- 8 Role -->
-            <section id="sec-role" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-role" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">8. Role-based ELO</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-6">
                         <div class="bg-success/5 border border-success/20 rounded-xl p-4">
@@ -491,8 +616,8 @@
             </section>
 
             <!-- 9 Ship -->
-            <section id="sec-ship" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-ship" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">9. By-ship ELO</h3>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                         <div class="bg-success/5 border border-success/20 rounded-xl p-4"><div class="text-xs font-mono uppercase text-success mb-2">For</div><p class="text-slate-300">Ships are where skill shows; champion-specific skill was a significant predictor in League of Legends <a class="cite" href="#src-28">[28]</a>.</p></div>
@@ -503,8 +628,8 @@
                 </section>
 
             <!-- 10 Include all games? -->
-            <section id="sec-format" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-format" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">10. Include all games regardless of size?</h3>
                     <p class="text-slate-300 text-sm mb-6">A match rates today at &ge; 6 real players and &ge; 240 s &mdash; 3v3 and up. The proposal: drop the size gate. The author's position: 1v1 and 2v2 change the game too much. Validator &sect;20 tests both. <a class="cite" href="#src-77">[77]</a></p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-6">
@@ -540,8 +665,8 @@
                 </section>
 
             <!-- 11 Matchmaking -->
-            <section id="sec-matchmaking" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-matchmaking" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">11. Matchmaking</h3>
                     <p class="text-slate-300 text-sm leading-relaxed mb-4">Twenty to twenty-five active players, commanders volunteer, teams split by hand <a class="cite" href="#src-80">[80]</a>. No rating design fixes that; it can only describe it honestly.</p>
                     <ul class="text-slate-300 text-sm space-y-3 list-disc list-inside">
@@ -555,8 +680,8 @@
             </section>
 
             <!-- 11 Genre -->
-            <section id="sec-genre" class="scroll-mt-8">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-genre" class="anchor">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">12. The FPS+RTS lens</h3>
                     <p class="text-slate-300 text-sm leading-relaxed mb-3">Battlezone (1998) combined &ldquo;a tank simulation game, a first-person shooter and a real-time strategy game&rdquo; <a class="cite" href="#src-56">[56]</a>; Battlezone II (1999, remastered 2018) kept the formula <a class="cite" href="#src-57">[57]</a>. The lineage runs through Allegiance (Microsoft Research, 2000) <a class="cite" href="#src-52">[52]</a>, Natural Selection (2002) <a class="cite" href="#src-53">[53]</a>, Savage (2003) <a class="cite" href="#src-54">[54]</a>, Nuclear Dawn (2011) <a class="cite" href="#src-55">[55]</a>, NS2, Eximius <a class="cite" href="#src-64">[64]</a> and Silica <a class="cite" href="#src-63">[63]</a>. Two shipped public skill systems &mdash; AllegSkill <a class="cite" href="#src-50">[50]</a> and Hive <a class="cite" href="#src-58">[58]</a> &mdash; and both separate the commander from the field player.</p>
                     <p class="text-slate-300 text-sm leading-relaxed mb-3">What makes the genre hard to rate is not that it has two jobs; it is that they are <strong class="text-white">coupled</strong>. A thug's measurable output depends on the commander's supply (5.3), and the commander's win depends on the thugs' fighting. Every thug is on a team whose coach controls their equipment mid-game &mdash; which is why the composite-vs-impact debate maps so cleanly onto VTSR-T vs the wins ladder <a class="cite" href="#src-16">[16]</a><a class="cite" href="#src-17">[17]</a>.</p>
@@ -565,18 +690,18 @@
                 </section>
 
             <!-- 12 Roadmap -->
-            <section id="sec-roadmap" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-roadmap" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">13. Roadmap v4</h3>
                     <p class="text-slate-300 text-sm mb-4">Ranked by evidence available &times; leverage &divide; effort. Nothing below changes a published rating without a pre-registered rule passing.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div id="roadmap-1" class="glass-panel rounded-xl p-4 border-l-4 border-l-success scroll-mt-8"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
-                        <div id="roadmap-2" class="glass-panel rounded-xl p-4 border-l-4 border-l-success scroll-mt-8"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 170 now. Same rule.</p></div>
-                        <div id="roadmap-3" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
-                        <div id="roadmap-4" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">4. Phase 7(b) &mdash; re-weight away from the wrong-way axes</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; pre-registered on the &sect;11 sign-agreement study with a hold-out of future matches.</p></div>
-                        <div id="roadmap-5" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>
-                        <div id="roadmap-6" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">6. Phase 7(d) &mdash; small formats</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode admitting &le;2-per-side games to the wins ladder only; display-only small-format record on the player page; a rated small-format ladder, rule first, at &ge; 30 determined small games.</p></div>
-                        <div id="roadmap-7" class="glass-panel rounded-xl p-4 border-l-4 border-l-accent scroll-mt-8"><div class="text-white font-medium">7. Display work, no rating consequence</div><p class="text-xs text-slate-400 mt-1">Faction matchup table and pick-share trend on the Meta tab; faction and playstyle profiles; commander burden beside VTSR-C.</p></div>
+                        <div id="roadmap-1" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
+                        <div id="roadmap-2" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 170 now. Same rule.</p></div>
+                        <div id="roadmap-3" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
+                        <div id="roadmap-4" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">4. Phase 7(b) &mdash; re-weight away from the wrong-way axes</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; pre-registered on the &sect;11 sign-agreement study with a hold-out of future matches.</p></div>
+                        <div id="roadmap-5" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>
+                        <div id="roadmap-6" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">6. Phase 7(d) &mdash; small formats</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode admitting &le;2-per-side games to the wins ladder only; display-only small-format record on the player page; a rated small-format ladder, rule first, at &ge; 30 determined small games.</p></div>
+                        <div id="roadmap-7" class="glass-panel rounded-xl p-4 border-l-4 border-l-accent anchor"><div class="text-white font-medium">7. Display work, no rating consequence</div><p class="text-xs text-slate-400 mt-1">Faction matchup table and pick-share trend on the Meta tab; faction and playstyle profiles; commander burden beside VTSR-C.</p></div>
                             </div>
                     <div class="mt-6 bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm">
                         <div class="text-xs font-mono uppercase text-danger mb-2">Do not do</div>
@@ -594,15 +719,15 @@
                 </section>
 
             <!-- 13 History -->
-            <section id="sec-history" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-history" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">14. History: what v2 proposed and v3 found</h3>
                     <p class="text-slate-300 text-sm mb-6">Condensed from the v3 page (full text in <code>critique/analysis-archive/elo-analysis-v3.md</code> <a class="cite" href="#src-78">[78]</a>). Two reforms refuted, one shipped.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
                             <h4 class="text-white font-medium text-sm mb-2">Locked commander priors &mdash; refuted</h4>
                             <p class="text-xs text-slate-400 mb-3">Re-rating with the two hand-tuned priors unlocked moved the most-affected player 3.9 ELO against a 27 ELO bootstrap noise floor. Kept canonical.</p>
-                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[260px]"><canvas id="priorsAblationChart"></canvas></div>
+                            <div class="chart-xtall bg-slate-900 rounded-xl p-4 border border-slate-700 h-[260px]"><canvas id="priorsAblationChart"></canvas></div>
                             </div>
                             <div>
                             <h4 class="text-white font-medium text-sm mb-2">MAX vs median opponent reference &mdash; refuted</h4>
@@ -614,8 +739,8 @@
                 </section>
 
             <!-- 14 Sources -->
-            <section id="sec-sources" class="scroll-mt-8">
-                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-sources" class="anchor">
+                    <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">15. Sources cited</h3>
                     <p class="text-slate-400 text-xs mb-6">Numbering is shared with <code>critique/elo-analysis-v4.md</code> Part IX, which carries full citation fields, access dates (2026-10-04) and a &ldquo;used for&rdquo; note per entry.</p>
                     <p class="text-slate-400 text-xs mb-6"><span class="src-pill src-pill-demo">original &#8599;</span> = the link as found on 2026-10-04 &nbsp;&middot;&nbsp; <span class="src-pill src-pill-demo">local copy</span> = PDF kept in <code>critique/publications/</code>.</p>
@@ -737,8 +862,8 @@
             </section>
 
             <!-- 15 Perspective -->
-            <section id="sec-perspective" class="scroll-mt-8 mb-24">
-                <div class="glass-panel rounded-2xl p-6 md:p-8">
+            <section id="sec-perspective" class="anchor mb-24">
+                <div class="glass-panel rounded-2xl p-4 md:p-8">
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">16. Author's perspective</h3>
                     <div class="text-slate-300 text-sm leading-relaxed space-y-4">
                         <p>I built this system, I command in it more than anyone else in the corpus, and I am rated by it the same way everyone else is. My own rows are in the tables above: forty-two commander matches at +3.3 a game, sixty-eight thug matches at &minus;0.7, a thug rating 98 points above my win ladder, a commander rating that sits in the middle of the pack. I did not pick those numbers and I cannot move them except by playing.</p>
@@ -756,6 +881,152 @@
     </main>
 
     <script>
+        (function () {
+            var toc = document.getElementById('toc');
+            var toggle = document.getElementById('toc-toggle');
+            var closeBtn = document.getElementById('toc-close');
+            var backdrop = document.getElementById('toc-backdrop');
+            var main = document.getElementById('article');
+            var bar = document.getElementById('toc-bar');
+            var skip = document.getElementById('skip-link');
+            var mq = window.matchMedia('(max-width: 767px)');
+
+            function isPhone() { return mq.matches; }
+
+            function setDialog(on) {
+                if (on) {
+                    toc.setAttribute('role', 'dialog');
+                    toc.setAttribute('aria-modal', 'true');
+                    toc.setAttribute('aria-labelledby', 'toc-title');
+                } else {
+                    toc.removeAttribute('role');
+                    toc.removeAttribute('aria-modal');
+                    toc.removeAttribute('aria-labelledby');
+                }
+            }
+
+            function setPageInert(on) {
+                skip.inert = on;
+                bar.inert = on;
+                main.inert = on;
+            }
+
+            function openToc() {
+                if (!isPhone()) return;
+                toc.classList.add('toc-open');
+                backdrop.hidden = false;
+                toggle.setAttribute('aria-expanded', 'true');
+                toc.removeAttribute('inert');
+                toc.removeAttribute('aria-hidden');
+                setPageInert(true);
+                document.body.classList.add('toc-lock');
+                setDialog(true);
+                closeBtn.focus({ preventScroll: true });
+            }
+
+            function closeToc(restore) {
+                toc.classList.remove('toc-open');
+                backdrop.hidden = true;
+                toggle.setAttribute('aria-expanded', 'false');
+                document.body.classList.remove('toc-lock');
+                setPageInert(false);
+                setDialog(false);
+                if (isPhone()) {
+                    toc.setAttribute('inert', '');
+                    toc.setAttribute('aria-hidden', 'true');
+                } else {
+                    toc.removeAttribute('inert');
+                    toc.removeAttribute('aria-hidden');
+                }
+                if (restore && isPhone()) toggle.focus({ preventScroll: true });
+            }
+
+            function syncMode() {
+                if (!isPhone()) closeToc(false);
+                else if (!toc.classList.contains('toc-open')) {
+                    toc.setAttribute('inert', '');
+                    toc.setAttribute('aria-hidden', 'true');
+                    setDialog(false);
+                }
+            }
+
+            function focusables() {
+                return Array.prototype.filter.call(
+                    toc.querySelectorAll('a[href], button:not([disabled])'),
+                    function (el) { return el.getClientRects().length > 0; }
+                );
+            }
+
+            toggle.addEventListener('click', function () {
+                if (toggle.getAttribute('aria-expanded') === 'true') closeToc(true);
+                else openToc();
+            });
+            closeBtn.addEventListener('click', function () { closeToc(true); });
+            backdrop.addEventListener('click', function () { closeToc(true); });
+            document.addEventListener('keydown', function (e) {
+                if (!toc.classList.contains('toc-open') || !isPhone()) return;
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeToc(true);
+                    return;
+                }
+                if (e.key !== 'Tab') return;
+                var items = focusables();
+                if (!items.length) return;
+                var first = items[0];
+                var last = items[items.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            });
+            toc.addEventListener('click', function (e) {
+                var link = e.target.closest('a[href^="#"]');
+                if (link && isPhone()) closeToc(true);
+            });
+            if (mq.addEventListener) mq.addEventListener('change', syncMode);
+            else mq.addListener(syncMode);
+            syncMode();
+
+            var links = Array.prototype.slice.call(toc.querySelectorAll('nav a[href^="#"]'));
+            var byId = {};
+            links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+            var sections = Object.keys(byId).map(function (id) { return document.getElementById(id); }).filter(Boolean);
+            var currentId = null;
+            var seen = {};
+            function setCurrent(id) {
+                if (!id || currentId === id) return;
+                currentId = id;
+                links.forEach(function (a) { a.removeAttribute('aria-current'); });
+                if (byId[id]) byId[id].setAttribute('aria-current', 'page');
+            }
+            if ('IntersectionObserver' in window && sections.length) {
+                var io = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        seen[entry.target.id] = entry.isIntersecting;
+                    });
+                    var line = window.innerHeight * 0.28;
+                    var chosen = null;
+                    sections.forEach(function (section) {
+                        if (!seen[section.id]) return;
+                        if (section.getBoundingClientRect().top <= line) chosen = section.id;
+                    });
+                    if (!chosen) {
+                        sections.forEach(function (section) {
+                            if (seen[section.id] && !chosen) chosen = section.id;
+                        });
+                    }
+                    setCurrent(chosen);
+                }, { rootMargin: '-10% 0px -55% 0px', threshold: [0, 0.05, 0.15] });
+                sections.forEach(function (section) { io.observe(section); });
+            }
+        })();
+    </script>
+
+    <script>
         // ---- Chart defaults -------------------------------------------------
         Chart.defaults.color = '#94a3b8';
         Chart.defaults.font.family = 'Inter, sans-serif';
@@ -763,6 +1034,10 @@
         Chart.defaults.plugins.tooltip.titleColor = '#fff';
         Chart.defaults.plugins.tooltip.borderColor = '#334155';
         Chart.defaults.plugins.tooltip.borderWidth = 1;
+        if (window.matchMedia('(max-width: 767px)').matches && Chart.defaults.scales.category) {
+            Chart.defaults.scales.category.ticks.autoSkip = true;
+            Chart.defaults.scales.category.ticks.maxRotation = 40;
+        }
         const grid = { color: '#1e293b' };
 
         // ---- 1. Trend (validation_summary.json history, one point per distinct
@@ -828,7 +1103,7 @@
             data: { labels: ['net_damage_share (.20)', 'mobility (.08)', 'thug_kill_rate (.20)', 'pve_share (.12)', 'target_lock_pct (.005)', 'thug_efficiency (.16)', 'thug_accuracy (.15)', 'snipe_bonus (.005)'],
                 datasets: [{ label: 'Winner has the higher team mean (%)', data: [88.2, 88.2, 85.6, 78.8, 42.2, 39.4, 39.4, 22.4], backgroundColor: [88.2, 88.2, 85.6, 78.8, 42.2, 39.4, 39.4, 22.4].map(v => v >= 50 ? '#10b981' : '#f43f5e'), borderRadius: 3 }] },
             options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Axis vs outcome: sign agreement (50% = no relation)', color: '#e2e8f0', font: { size: 12 } } },
-                scales: { x: { min: 0, max: 100, grid }, y: { grid: { display: false }, ticks: { font: { size: 10 } } } } },
+                scales: { x: { min: 0, max: 100, grid }, y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } } } },
             plugins: [{ id: 'fifty', afterDraw: (chart) => { const ctx = chart.ctx, x = chart.scales.x.getPixelForValue(50), y = chart.scales.y; ctx.save(); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x, y.top); ctx.lineTo(x, y.bottom); ctx.stroke(); ctx.restore(); } }]
         });
 
@@ -841,7 +1116,7 @@
                 { label: 'Mean Δ as thug', data: cvt.map(p => p.t), backgroundColor: '#38bdf8', borderRadius: 3 }
             ] },
             options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10, color: '#e2e8f0', font: { size: 10 } } }, title: { display: true, text: 'Cohort means: commanders +2.07 · thugs +0.93 (ordered by commander rows)', color: '#e2e8f0', font: { size: 12 } } },
-                scales: { x: { grid, title: { display: true, text: 'ELO per match', color: '#64748b' } }, y: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+                scales: { x: { grid, title: { display: true, text: 'ELO per match', color: '#64748b' } }, y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } } } }
         });
 
         // ---- 5.6 Faction: raw non-mirror matchups + adjusted effect (validator §19)
@@ -897,7 +1172,7 @@
             data: { labels: ['vacuum34','Darkvale','blue','Cloaket','Snake','Sev','Lithium','C.Bad Guy','Nomad','F9bomber','econchump','dd','VTrider','Waddles','judgeguns'],
                 datasets: [{ label: 'Rating delta (canonical → unlocked, ELO)', data: [-3.9,-3.8,-3.5,-3.3,-3.0,-3.0,-3.0,-3.0,-2.7,-2.7,-2.7,-2.6,-2.5,-2.5,-2.5], backgroundColor: '#94a3b8', borderRadius: 3 }] },
             options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-                scales: { x: { min: -30, max: 5, grid, title: { display: true, text: 'ELO delta', color: '#64748b', font: { size: 10 } } }, y: { grid: { display: false }, ticks: { font: { size: 9 } } } } },
+                scales: { x: { min: -30, max: 5, grid, title: { display: true, text: 'ELO delta', color: '#64748b', font: { size: 10 } } }, y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 9 } } } } },
             plugins: [{ id: 'noiseFloor', afterDraw: (chart) => { const ctx = chart.ctx, xA = chart.scales.x, yA = chart.scales.y; const xL = xA.getPixelForValue(-27), xR = xA.getPixelForValue(0); ctx.save(); ctx.fillStyle = 'rgba(251,191,36,0.10)'; ctx.fillRect(xL, yA.top, xR - xL, yA.bottom - yA.top); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4,4]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, yA.top); ctx.lineTo(xL, yA.bottom); ctx.stroke(); ctx.fillStyle = '#fbbf24'; ctx.font = '10px Inter'; ctx.fillText('27 ELO noise floor →', xL + 4, yA.top + 14); ctx.restore(); } }]
         });
         // MAX vs median: validator headline metrics, three full re-rates (n=100). Source: phase-2c-max-vs-median.md §1.

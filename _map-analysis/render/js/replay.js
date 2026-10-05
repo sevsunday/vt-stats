@@ -80,7 +80,7 @@ import {
   ENHANCED_PACK_IDS,
   LEGO_SET_ID,
   TEXTURE_PACKS,
-} from '../../../js/replay-quality.js?v=atmo1';
+} from '../../../js/replay-quality.js?v=rqscroll1';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,

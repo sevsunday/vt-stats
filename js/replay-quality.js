@@ -535,7 +535,29 @@ function selectField(label, key, options) {
   return { field, select, picker: dressSelect(select) };
 }
 
-/** Site-styled list in place of the native popup, which stays white on Windows. */
+/** Site-styled list in place of the native popup, which stays white on Windows.
+ *  Open menus are moved onto the dialog or modal so a scrolling body cannot clip them. */
+function placePickerMenu(menu, btn) {
+  const rect = btn.getBoundingClientRect();
+  const below = window.innerHeight - rect.bottom;
+  const up = below < 180 && rect.top > below;
+  const layer = btn.closest('dialog, .modal') || document.body;
+  if (menu.parentElement !== layer) layer.appendChild(menu);
+  menu.classList.toggle('is-up', up);
+  menu.style.position = 'fixed';
+  menu.style.zIndex = '2000';
+  menu.style.left = `${rect.left}px`;
+  menu.style.width = `${rect.width}px`;
+  menu.style.right = 'auto';
+  if (up) {
+    menu.style.top = 'auto';
+    menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+  } else {
+    menu.style.bottom = 'auto';
+    menu.style.top = `${rect.bottom + 4}px`;
+  }
+}
+
 function dressSelect(select) {
   select.classList.add('vt-rq-native');
   const wrap = document.createElement('div');
@@ -548,6 +570,7 @@ function dressSelect(select) {
   menu.className = 'vt-rq-picker-menu';
   menu.hidden = true;
   menu.setAttribute('role', 'listbox');
+  menu._vtRqBtn = btn;
 
   function sync() {
     const chosen = select.selectedOptions[0];
@@ -587,9 +610,7 @@ function dressSelect(select) {
     if (!opening) return;
     menu.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
-    const rect = btn.getBoundingClientRect();
-    const below = window.innerHeight - rect.bottom;
-    menu.classList.toggle('is-up', below < 180 && rect.top > below);
+    placePickerMenu(menu, btn);
   });
 
   select.addEventListener('change', sync);
@@ -598,9 +619,17 @@ function dressSelect(select) {
   select.insertAdjacentElement('afterend', wrap);
   if (!dressSelect.wired) {
     dressSelect.wired = true;
+    const reposition = () => {
+      document.querySelectorAll('.vt-rq-picker-menu').forEach((open) => {
+        if (open.hidden || !open._vtRqBtn) return;
+        placePickerMenu(open, open._vtRqBtn);
+      });
+    };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
     document.addEventListener('pointerdown', (ev) => {
       const t = ev.target;
-      if (t && t.closest && t.closest('.vt-rq-picker')) return;
+      if (t && t.closest && t.closest('.vt-rq-picker, .vt-rq-picker-menu')) return;
       document.querySelectorAll('.vt-rq-picker-menu').forEach((other) => {
         other.hidden = true;
       });

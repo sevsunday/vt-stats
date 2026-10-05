@@ -26,7 +26,7 @@ import {
   ENHANCED_SET_ID,
   ENHANCED_PACK_IDS,
   LEGO_SET_ID,
-} from '../../../js/replay-quality.js?v=atmo1';
+} from '../../../js/replay-quality.js?v=rqscroll1';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
 export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
