@@ -61,6 +61,39 @@ v1.2 additions (VTSR-C -- commander ladder proof sections):
         determined rated matches -- the empirical ranking of which axes
         actually predict winning (the honest check on THUG_WEIGHTS).
 
+v1.7 additions (critique v4 -- descriptive diagnostics, report schema 8):
+    15. Performance ladder vs wins ladder: per-player Spearman/Pearson of
+        ``thug_elo`` against the inert ``wins_elo`` ladder, the per-player
+        gap table, and the gap's correlation with commander share.
+    16. Team-outcome dependence of thug P_i: winner/loser mean P and
+        delta, sign-flip shares, eta-squared of P by win/loss, and the
+        high-rated breakout (the "stomp effect").
+    17. Ship-denial gradient: thug rows banded by positioning
+        ``at_base_pilot_share`` -> mean delta / P / team win share, with
+        the per-outcome split that exposes the losing-team confound.
+    18. Commander selection + role-adjustment audit: commander lobby
+        percentile, concentration of the job, and per-player mean delta
+        as commander vs as thug (the v2.4 axis-shift audit).
+    19. Faction effect controlling for the ratings: offset logistic
+        regression on the VTSR-C duel stream (canonical expected score as
+        the offset; Hadean-vs-ISDF and Scion-vs-ISDF contrasts), fitted
+        on the full corpus, per source, and on the confirmation sample
+        the Phase 6 memo scores. Factions join from matches.json and
+        data/external/f9_ledger.json. Pure-Python Newton; no new deps.
+    None of 15-19 feeds validation_summary.json. The one actionable
+    candidate (a faction-advantage term in the VTSR-C expected score) is
+    governed by critique/decisions/phase-6-faction-advantage-term.md.
+
+v1.8 addition (critique v4 addendum -- the format gate, report schema 9):
+    20. Format gate: every excluded history entry by reason / shape /
+        month; small-format (<= 2 per side) vs rated full-format medians
+        of duration, kills / deaths / damage per player-minute, PvE share
+        and peak pools; and a transfer test -- does the higher pre-match
+        team-mean VTSR-T (or leader VTSR-C) predict the determined
+        small-format winners? Loads the excluded matches' per-match
+        files (the other sections never do). Descriptive; not in
+        validation_summary.json.
+
 Explicit non-goals (Phase 1 + 2A):
     - No changes to ``scripts/elo.py``.
     - No new fields on existing JSON outputs.
@@ -90,7 +123,7 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 7  # v1.6: VTSR-C opening-semantics promote rule + early-vs-full
+VALIDATOR_VERSION = 9  # v1.8: format-gate audit (#20) on top of v1.7 (#15-#19)
 
 # 2026-09-23 VTSR-C amendment. Confirmation duels are dated strictly after
 # this day. Mirrors elo_commander.ECON_SEMANTICS_AMENDED_ON; the history
@@ -210,6 +243,61 @@ CMDR_LAMBDA_FALLBACK = 1.0
 # axis-vs-outcome study (winner.team in (1, 2)). Draws carry no winner
 # and are excluded by construction.
 AXIS_OUTCOME_DECIDED_BY = ("clean_win", "attested", "adjudicated", "contested")
+
+# v1.7 (critique v4) constants. All five new sections are DIAGNOSTIC:
+# they describe the canonical ratings and the corpus, they never change
+# a rating, and none of them feeds validation_summary.json. The one
+# actionable candidate they surface (a faction-advantage term in the
+# VTSR-C expected score) is governed by the pre-registered memo
+# critique/decisions/phase-6-faction-advantage-term.md -- read it before
+# touching any constant below, and never retune one to chase a result.
+#
+# §15 perf-vs-wins: a player enters the thug_elo-vs-wins_elo comparison
+# once they have this many rated matches (both ladders need games to
+# have moved off the anchor).
+PERF_VS_WINS_MIN_MATCHES = 20
+# §16 team-outcome dependence: the "high-rated" cut for the losing-team
+# breakout. Roughly the top tier boundary in the current distribution.
+HIGH_RATED_THRESHOLD = 1650.0
+# §17 ship-denial gradient: bands over positioning
+# ``metrics.at_base_pilot_share`` (share of the match a thug spent on foot
+# inside their own base radius -- "ship-denied" time).
+SHIP_DENIAL_BANDS = [
+    ("<5%",    0.00, 0.05),
+    ("5-15%",  0.05, 0.15),
+    ("15-30%", 0.15, 0.30),
+    (">=30%",  0.30, 1.01),
+]
+# §18 commander selection: a player appears in the per-player
+# commander-vs-thug delta table once they have this many rows in BOTH
+# roles.
+CMDR_SELECTION_MIN_ROWS = 5
+# §19 faction effect: faction codes as emitted by process_stats
+# (team_factions[side].code) and by the F9 ledger importer (full names).
+FACTION_CODES = {"i": "i", "e": "e", "f": "f",
+                 "ISDF": "i", "Hadean": "e", "Scion": "f"}
+FACTION_NAMES = {"i": "ISDF", "e": "Hadean", "f": "Scion"}
+# Logistic-regression fit controls (pure-Python Newton on 2 params).
+FACTION_FIT_MAX_ITER = 50
+FACTION_FIT_TOL = 1e-9
+# Discovery/confirmation split for the faction memo: duels dated strictly
+# after this day are the confirmation sample. Mirrors the memo; the memo
+# wins if they ever disagree.
+FACTION_DISCOVERY_CUTOFF = "2026-10-04"
+# The FROZEN candidate term the memo pre-registers (rating points added
+# to the side fielding the faction; ISDF is the zero reference). Set from
+# the discovery fit, rounded, and never refit on the confirmation sample:
+# the confirmation rows judge these exact numbers.
+FACTION_FROZEN_POINTS = {"i": 0.0, "e": 60.0, "f": 0.0}
+# Promote-rule thresholds (mirror of the memo; the memo wins).
+FACTION_PROMOTE_MIN_CONFIRMATION = 60
+FACTION_PROMOTE_LOGLOSS_DELTA = 0.005
+# §20 format gate (v1.8): a match is "small format" when neither side has
+# more than this many non-campod rows (1v1, 2v2, 2v1 ...). The dynamics
+# comparison keeps only games at least FORMAT_MIN_DURATION_SEC long so a
+# 14-second misclick does not define the small-format medians.
+FORMAT_SMALL_MAX_PER_SIDE = 2
+FORMAT_MIN_DURATION_SEC = 240.0
 
 
 # ---------------------------------------------------------------------------
@@ -1921,7 +2009,11 @@ def metric_axis_outcome(
                 mean(rec["diffs"]) if rec["diffs"] else None
             ),
         })
-    rows.sort(key=lambda r: -(r["sign_agreement"] or 0.0))
+    # Secondary key on the axis name: ``axes_present`` is a set, so two
+    # axes tied on agreement (mobility and net_damage_share both at
+    # 0.882 on the 2026-10-04 corpus) used to swap order between runs
+    # under hash randomization and churn validation_summary.json.
+    rows.sort(key=lambda r: (-(r["sign_agreement"] or 0.0), r["axis"]))
 
     if not rows:
         return {
@@ -2904,6 +2996,1016 @@ def metric_dirichlet_perturbation(
 
 
 # ---------------------------------------------------------------------------
+# v1.7 (critique v4): shared row builder for sections 16-18
+# ---------------------------------------------------------------------------
+
+
+def _build_rated_rows(
+    history: dict[str, Any], per_match: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Join every canonical rated delta to its per-match leaderboard row.
+
+    Returns ``(rows, meta)``. One row per (rated match, rated player):
+    ``match_id`` / ``match_date`` / ``name`` / ``key`` / ``before`` /
+    ``performance`` / ``delta`` / ``side`` (leaderboard ``faction`` 1|2) /
+    ``is_commander`` / ``winner_side`` (1|2 when the outcome is DETERMINED
+    under AXIS_OUTCOME_DECIDED_BY, else None) / ``won`` / ``at_base_share``
+    (positioning ``metrics.at_base_pilot_share`` when the match carries
+    positioning data, else None).
+
+    Deltas that cannot be matched to a leaderboard row (legacy keys) are
+    dropped and counted in ``meta["unmatched"]``. Sections 16-18 are
+    descriptive, so a dropped row only shrinks n; nothing is imputed.
+    """
+    rows: list[dict[str, Any]] = []
+    meta = {"matches": 0, "rows": 0, "unmatched": 0, "with_positioning": 0}
+    for match_id, match_date, deltas in iter_rated_history(history):
+        md = per_match.get(match_id)
+        if not md:
+            continue
+        meta["matches"] += 1
+        winner_block = (md.get("match") or {}).get("winner") or {}
+        winner_side = None
+        if winner_block.get("decided_by") in AXIS_OUTCOME_DECIDED_BY:
+            wt = winner_block.get("team")
+            if wt in (1, 2):
+                winner_side = int(wt)
+
+        lb_by_key: dict[str, dict[str, Any]] = {}
+        name_to_key: dict[str, str] = {}
+        for lrow in md.get("leaderboard") or []:
+            s64 = lrow.get("steam64")
+            key = str(s64) if s64 else str(lrow.get("name") or "")
+            if not key:
+                continue
+            lb_by_key[key] = lrow
+            name = lrow.get("name")
+            if name:
+                name_to_key.setdefault(str(name), key)
+
+        # Positioning metrics are keyed by display name; map back to the
+        # leaderboard key so the join is steam64-first like everywhere else.
+        pos_players = (md.get("positioning") or {}).get("players") or {}
+        at_base_by_key: dict[str, float] = {}
+        if isinstance(pos_players, dict):
+            for pname, pentry in pos_players.items():
+                if not isinstance(pentry, dict):
+                    continue
+                metrics = pentry.get("metrics") or {}
+                share = metrics.get("at_base_pilot_share")
+                if not isinstance(share, (int, float)):
+                    continue
+                key = str(pentry.get("steam64") or name_to_key.get(str(pname)) or pname)
+                at_base_by_key[key] = float(share)
+        if at_base_by_key:
+            meta["with_positioning"] += 1
+
+        for d in deltas:
+            key = player_key_for_delta(d)
+            lrow = lb_by_key.get(key)
+            if lrow is None:
+                alt = name_to_key.get(str(d.get("name") or ""))
+                lrow = lb_by_key.get(alt) if alt else None
+                if lrow is not None:
+                    key = alt  # type: ignore[assignment]
+            if lrow is None:
+                meta["unmatched"] += 1
+                continue
+            side = lrow.get("faction")
+            try:
+                side = int(side)
+            except (TypeError, ValueError):
+                meta["unmatched"] += 1
+                continue
+            if side not in (1, 2):
+                meta["unmatched"] += 1
+                continue
+            before = d.get("before")
+            perf = d.get("performance")
+            delta = d.get("delta")
+            if before is None or perf is None or delta is None:
+                meta["unmatched"] += 1
+                continue
+            rows.append({
+                "match_id":      match_id,
+                "match_date":    match_date or "",
+                "name":          d.get("name") or lrow.get("name") or key,
+                "key":           str(key),
+                "before":        float(before),
+                "performance":   float(perf),
+                "delta":         float(delta),
+                "side":          side,
+                "is_commander":  bool(lrow.get("is_commander")),
+                "winner_side":   winner_side,
+                "won":           (winner_side is not None and side == winner_side),
+                "at_base_share": at_base_by_key.get(str(key)),
+            })
+            meta["rows"] += 1
+    return rows, meta
+
+
+# ---------------------------------------------------------------------------
+# Metric #15 (v1.7): performance ladder vs wins ladder
+# ---------------------------------------------------------------------------
+
+
+def metric_perf_vs_wins(
+    current: dict[str, Any],
+    min_matches: int = PERF_VS_WINS_MIN_MATCHES,
+) -> dict[str, Any]:
+    """How much does the published performance rating (``thug_elo``, the
+    8-axis composite) agree with the win/loss ladder (``wins_elo``, the
+    Stage E R^W machinery that runs inert at ALPHA = 0)?
+
+    Per-player comparison over everyone with at least ``min_matches``
+    rated matches: Spearman and Pearson across players, the per-player
+    gap ``thug_elo - wins_elo`` (positive = the composite says you are
+    better than your team results do), and the correlation between that
+    gap and the share of a player's matches spent commanding. This is the
+    v4 critique's quantified "raw performance meter" complaint; it is a
+    description of the two ladders, not a verdict on either.
+    """
+    ratings = current.get("ratings") or []
+    eligible = []
+    for r in ratings:
+        n = r.get("matches_played")
+        t = r.get("thug_elo")
+        w = r.get("wins_elo")
+        if not isinstance(n, int) or n < min_matches:
+            continue
+        if not isinstance(t, (int, float)) or not isinstance(w, (int, float)):
+            continue
+        cmdr = r.get("matches_as_commander") or 0
+        eligible.append({
+            "name":          r.get("name"),
+            "steam64":       r.get("steam64"),
+            "thug_elo":      float(t),
+            "wins_elo":      float(w),
+            "gap":           float(t) - float(w),
+            "matches_played": n,
+            "matches_as_commander": cmdr,
+            "commander_share": (cmdr / n) if n else 0.0,
+            "wins_record":   r.get("wins_record"),
+            "wins_games":    r.get("wins_games"),
+        })
+    if len(eligible) < 3:
+        return {
+            "available": False,
+            "skipped_reason": f"fewer than 3 players with >= {min_matches} matches",
+            "min_matches": min_matches,
+        }
+    thug = [e["thug_elo"] for e in eligible]
+    wins = [e["wins_elo"] for e in eligible]
+    gaps = [e["gap"] for e in eligible]
+    shares = [e["commander_share"] for e in eligible]
+    eligible.sort(key=lambda e: -e["gap"])
+    return {
+        "available":        True,
+        "min_matches":      min_matches,
+        "n_players":        len(eligible),
+        "spearman":         spearman(thug, wins),
+        "pearson":          _pearson(thug, wins),
+        "gap_mean":         mean(gaps),
+        "gap_stdev":        stdev(gaps) if len(gaps) >= 2 else None,
+        "gap_max":          max(gaps),
+        "gap_min":          min(gaps),
+        "pearson_gap_vs_commander_share": _pearson(shares, gaps),
+        "players":          eligible,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #16 (v1.7): team-outcome dependence of thug P_i ("stomp effect")
+# ---------------------------------------------------------------------------
+
+
+def _eta_squared(groups: list[list[float]]) -> float | None:
+    """Share of total variance explained by group membership."""
+    allv = [v for g in groups for v in g]
+    if len(allv) < 2:
+        return None
+    gm = mean(allv)
+    ss_total = sum((v - gm) ** 2 for v in allv)
+    if ss_total <= 0:
+        return None
+    ss_between = sum(len(g) * (mean(g) - gm) ** 2 for g in groups if g)
+    return ss_between / ss_total
+
+
+def metric_team_outcome_dependence(
+    rows: list[dict[str, Any]],
+    high_rated_threshold: float = HIGH_RATED_THRESHOLD,
+) -> dict[str, Any]:
+    """P_i is lobby-relative, so a thug on the losing side tends to score
+    below zero whatever they personally did. This section measures how
+    much: winner vs loser mean P and delta, the share of winning thugs
+    who still lost rating and losing thugs who still gained, the share of
+    thug-P variance explained by win/loss alone (eta squared), and the
+    same breakout for high-rated thugs. Commander rows are reported
+    separately for completeness (they carry the v2.4 shift).
+    """
+    thugs = [r for r in rows if r["winner_side"] is not None and not r["is_commander"]]
+    cmdrs = [r for r in rows if r["winner_side"] is not None and r["is_commander"]]
+    if len(thugs) < 20:
+        return {"available": False,
+                "skipped_reason": "fewer than 20 determined thug rows"}
+
+    def _block(sub: list[dict[str, Any]]) -> dict[str, Any]:
+        w = [r for r in sub if r["won"]]
+        l = [r for r in sub if not r["won"]]
+        return {
+            "n_winners": len(w),
+            "n_losers": len(l),
+            "winner_mean_p":     mean([r["performance"] for r in w]) if w else None,
+            "loser_mean_p":      mean([r["performance"] for r in l]) if l else None,
+            "winner_mean_delta": mean([r["delta"] for r in w]) if w else None,
+            "loser_mean_delta":  mean([r["delta"] for r in l]) if l else None,
+            "winners_negative_delta_share": (
+                sum(1 for r in w if r["delta"] < 0) / len(w) if w else None),
+            "losers_positive_delta_share": (
+                sum(1 for r in l if r["delta"] > 0) / len(l) if l else None),
+            "eta_squared_p": _eta_squared([
+                [r["performance"] for r in w], [r["performance"] for r in l]]),
+        }
+
+    hi = [r for r in thugs if r["before"] >= high_rated_threshold]
+    return {
+        "available": True,
+        "n_thug_rows": len(thugs),
+        "n_commander_rows": len(cmdrs),
+        "thugs": _block(thugs),
+        "high_rated_thugs": {
+            "threshold": high_rated_threshold,
+            **_block(hi),
+        } if hi else {"threshold": high_rated_threshold, "n_winners": 0, "n_losers": 0},
+        "commanders": _block(cmdrs) if cmdrs else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #17 (v1.7): ship-denial gradient (at-base on-foot time vs rating)
+# ---------------------------------------------------------------------------
+
+
+def metric_ship_denial(
+    rows: list[dict[str, Any]],
+    bands: list[tuple[str, float, float]] | None = None,
+) -> dict[str, Any]:
+    """Band thug rows by the share of the match spent on foot inside their
+    own base (positioning ``at_base_pilot_share`` -- time waiting for a
+    ship) and report mean delta, mean P, mean pre-match rating and team
+    win share per band, plus the same delta broken out by match outcome so
+    the reader can see how much of the gradient survives inside a fixed
+    outcome. CONFOUND, stated plainly: a thug is on foot at base because
+    their ship died and was not replaced, which happens more on losing
+    teams. The gradient is real; attributing it to the commander alone is
+    not something this section can do.
+    """
+    bands = bands or SHIP_DENIAL_BANDS
+    eligible = [r for r in rows
+                if r["winner_side"] is not None and not r["is_commander"]
+                and r.get("at_base_share") is not None]
+    if len(eligible) < 20:
+        return {"available": False,
+                "skipped_reason": "fewer than 20 determined thug rows with positioning"}
+    out_bands = []
+    for label, lo, hi in bands:
+        sub = [r for r in eligible if lo <= r["at_base_share"] < hi]
+        if not sub:
+            out_bands.append({"band": label, "lo": lo, "hi": hi, "n": 0})
+            continue
+        w = [r for r in sub if r["won"]]
+        l = [r for r in sub if not r["won"]]
+        out_bands.append({
+            "band": label, "lo": lo, "hi": hi,
+            "n": len(sub),
+            "mean_delta":  mean([r["delta"] for r in sub]),
+            "mean_p":      mean([r["performance"] for r in sub]),
+            "mean_before": mean([r["before"] for r in sub]),
+            "win_share":   len(w) / len(sub),
+            "winners": {"n": len(w),
+                        "mean_delta": mean([r["delta"] for r in w]) if w else None},
+            "losers":  {"n": len(l),
+                        "mean_delta": mean([r["delta"] for r in l]) if l else None},
+        })
+    shares = [r["at_base_share"] for r in eligible]
+    deltas = [r["delta"] for r in eligible]
+    perfs = [r["performance"] for r in eligible]
+    return {
+        "available": True,
+        "n_rows": len(eligible),
+        "spearman_share_vs_delta": spearman(shares, deltas),
+        "spearman_share_vs_p":     spearman(shares, perfs),
+        "bands": out_bands,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #18 (v1.7): commander selection + role-adjustment audit
+# ---------------------------------------------------------------------------
+
+
+def metric_commander_selection(
+    rows: list[dict[str, Any]],
+    min_rows: int = CMDR_SELECTION_MIN_ROWS,
+) -> dict[str, Any]:
+    """Who commands, and what does commanding do to a rating?
+
+    Selection: for every commander row, the commander's pre-match VTSR-T
+    percentile inside their own lobby (0 = highest rated in the lobby) and
+    whether they sat below their own team's thug mean. Concentration: the
+    share of all commander rows held by the four most frequent commanders.
+    Role adjustment: per-player mean delta as commander vs as thug (players
+    with >= ``min_rows`` rows in both roles) and the cohort means. A
+    commander cohort that out-gains the thug cohort per match is the v2.4
+    axis-shift over-compensating for above-average fighters; a cohort that
+    under-gains is the reverse. Either reading is an audit input, not a
+    verdict.
+    """
+    by_match: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        by_match[r["match_id"]].append(r)
+    percentiles: list[float] = []
+    n_sides = 0
+    n_below = 0
+    for mid, mrows in by_match.items():
+        ratings_desc = sorted((r["before"] for r in mrows), reverse=True)
+        n = len(ratings_desc)
+        sides: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for r in mrows:
+            sides[r["side"]].append(r)
+        for side, srows in sides.items():
+            cmd = [r for r in srows if r["is_commander"]]
+            thug = [r for r in srows if not r["is_commander"]]
+            if not cmd:
+                continue
+            c = cmd[0]
+            if n > 1:
+                percentiles.append(ratings_desc.index(c["before"]) / (n - 1))
+            if thug:
+                n_sides += 1
+                if c["before"] < mean([r["before"] for r in thug]):
+                    n_below += 1
+    if not percentiles:
+        return {"available": False, "skipped_reason": "no commander rows"}
+
+    cmdr_rows = [r for r in rows if r["is_commander"]]
+    thug_rows = [r for r in rows if not r["is_commander"]]
+    counts: dict[str, int] = defaultdict(int)
+    names: dict[str, str] = {}
+    for r in cmdr_rows:
+        counts[r["key"]] += 1
+        names[r["key"]] = r["name"]
+    top = sorted(counts.items(), key=lambda kv: -kv[1])
+    top4 = sum(c for _, c in top[:4])
+
+    per_player: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        rec = per_player.setdefault(r["key"], {"name": r["name"], "cmdr": [], "thug": []})
+        rec["cmdr" if r["is_commander"] else "thug"].append(r["delta"])
+    table = []
+    for key, rec in per_player.items():
+        if len(rec["cmdr"]) >= min_rows and len(rec["thug"]) >= min_rows:
+            table.append({
+                "name": rec["name"],
+                "steam64": key,
+                "n_commander": len(rec["cmdr"]),
+                "n_thug": len(rec["thug"]),
+                "mean_delta_commander": mean(rec["cmdr"]),
+                "mean_delta_thug": mean(rec["thug"]),
+            })
+    table.sort(key=lambda t: -t["n_commander"])
+
+    return {
+        "available": True,
+        "n_commander_rows": len(cmdr_rows),
+        "n_thug_rows": len(thug_rows),
+        "commander_percentile_mean":   mean(percentiles),
+        "commander_percentile_median": median(percentiles),
+        "team_sides_with_both_roles":  n_sides,
+        "commander_below_own_thug_mean_share": (n_below / n_sides) if n_sides else None,
+        "distinct_commanders": len(counts),
+        "top4_commander_row_share": (top4 / len(cmdr_rows)) if cmdr_rows else None,
+        "top_commanders": [{"name": names[k], "steam64": k, "rows": c} for k, c in top[:8]],
+        "cohort_mean_delta_commander": mean([r["delta"] for r in cmdr_rows]) if cmdr_rows else None,
+        "cohort_mean_delta_thug":      mean([r["delta"] for r in thug_rows]) if thug_rows else None,
+        "min_rows_per_role": min_rows,
+        "per_player": table,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #19 (v1.7): faction effect, controlling for the ratings
+# ---------------------------------------------------------------------------
+
+
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-6), 1.0 - 1e-6)
+    return math.log(p / (1.0 - p))
+
+
+def _sigmoid(z: float) -> float:
+    if z >= 0:
+        ez = math.exp(-z)
+        return 1.0 / (1.0 + ez)
+    ez = math.exp(z)
+    return ez / (1.0 + ez)
+
+
+def _normal_sf_two_sided(z: float) -> float:
+    """Two-sided normal tail probability for a Wald statistic."""
+    return math.erfc(abs(z) / math.sqrt(2.0))
+
+
+def _fit_offset_logistic_2(
+    xs: list[tuple[float, float]], ys: list[float], offsets: list[float],
+) -> dict[str, Any] | None:
+    """Newton-Raphson fit of ``logit p = offset + b1*x1 + b2*x2`` (no
+    intercept -- the offset is the canonical expected score, so the model
+    asks only whether the two faction contrasts add information). Returns
+    coefficients, Wald SEs/z/p, the likelihood-ratio test against the
+    offset-only model (chi-square, 2 df, closed-form survival
+    ``exp(-LR/2)``), and log-loss/accuracy before vs after. ``None`` when
+    the Hessian is singular (a contrast with no variation in the sample).
+    """
+    n = len(ys)
+    if n == 0:
+        return None
+
+    def _ll(b1: float, b2: float) -> float:
+        total = 0.0
+        for (x1, x2), y, off in zip(xs, ys, offsets):
+            z = off + b1 * x1 + b2 * x2
+            # log p if y==1 else log(1-p), written stably.
+            total += -math.log1p(math.exp(-z)) if y == 1.0 else -math.log1p(math.exp(z))
+        return total
+
+    b1 = b2 = 0.0
+    for _ in range(FACTION_FIT_MAX_ITER):
+        g1 = g2 = 0.0
+        h11 = h12 = h22 = 0.0
+        for (x1, x2), y, off in zip(xs, ys, offsets):
+            p = _sigmoid(off + b1 * x1 + b2 * x2)
+            r = y - p
+            g1 += x1 * r
+            g2 += x2 * r
+            w = p * (1.0 - p)
+            h11 += w * x1 * x1
+            h12 += w * x1 * x2
+            h22 += w * x2 * x2
+        det = h11 * h22 - h12 * h12
+        if abs(det) < 1e-12:
+            return None
+        inv11 = h22 / det
+        inv12 = -h12 / det
+        inv22 = h11 / det
+        s1 = inv11 * g1 + inv12 * g2
+        s2 = inv12 * g1 + inv22 * g2
+        b1 += s1
+        b2 += s2
+        if abs(s1) < FACTION_FIT_TOL and abs(s2) < FACTION_FIT_TOL:
+            break
+    # Final Hessian at the optimum for the SEs.
+    h11 = h12 = h22 = 0.0
+    for (x1, x2), y, off in zip(xs, ys, offsets):
+        p = _sigmoid(off + b1 * x1 + b2 * x2)
+        w = p * (1.0 - p)
+        h11 += w * x1 * x1
+        h12 += w * x1 * x2
+        h22 += w * x2 * x2
+    det = h11 * h22 - h12 * h12
+    if abs(det) < 1e-12:
+        return None
+    se1 = math.sqrt(max(h22 / det, 0.0))
+    se2 = math.sqrt(max(h11 / det, 0.0))
+    ll1 = _ll(b1, b2)
+    ll0 = _ll(0.0, 0.0)
+    lr = 2.0 * (ll1 - ll0)
+    acc0 = sum(1 for y, off in zip(ys, offsets) if (off > 0) == (y == 1.0)) / n
+    acc1 = sum(
+        1 for (x1, x2), y, off in zip(xs, ys, offsets)
+        if ((off + b1 * x1 + b2 * x2) > 0) == (y == 1.0)
+    ) / n
+    z1 = (b1 / se1) if se1 > 0 else None
+    z2 = (b2 / se2) if se2 > 0 else None
+    return {
+        "n": n,
+        "coef_hadean_vs_isdf": b1,
+        "se_hadean_vs_isdf": se1,
+        "z_hadean_vs_isdf": z1,
+        "p_hadean_vs_isdf": _normal_sf_two_sided(z1) if z1 is not None else None,
+        "coef_scion_vs_isdf": b2,
+        "se_scion_vs_isdf": se2,
+        "z_scion_vs_isdf": z2,
+        "p_scion_vs_isdf": _normal_sf_two_sided(z2) if z2 is not None else None,
+        "lr_chi2_2df": lr,
+        "lr_p_value": math.exp(-lr / 2.0) if lr >= 0 else 1.0,
+        "log_loss_baseline": -ll0 / n,
+        "log_loss_with_faction": -ll1 / n,
+        "accuracy_baseline": acc0,
+        "accuracy_with_faction": acc1,
+    }
+
+
+def metric_faction_effect(
+    cmdr_history: dict[str, Any] | None,
+    manifest: list[dict[str, Any]],
+    f9_ledger: dict[str, Any] | None,
+    discovery_cutoff: str = FACTION_DISCOVERY_CUTOFF,
+) -> dict[str, Any]:
+    """Is a faction advantaged AFTER the ratings have had their say?
+
+    Every VTSR-C duel already carries the canonical expected score
+    (commander gap + lambda x thug handicap). Taking its logit as a fixed
+    offset, fit two contrasts -- Hadean-vs-ISDF and Scion-vs-ISDF, each
+    coded +1/-1/0 by which side fielded the faction -- and ask whether
+    they add information: Wald z per contrast, a likelihood-ratio test for
+    the pair, log-loss and accuracy before vs after, and the coefficients
+    expressed as rating points on the ladder's logistic scale (so
+    "+60 points" reads as "worth a 60-point stronger commander").
+
+    Factions join from ``matches.json`` ``team_factions`` for telemetry
+    duels and from ``data/external/f9_ledger.json`` for F9 duels (by
+    ``external_row``). Mirror matchups carry no contrast and drop out of
+    the fit (they still count in the pick tables). The fit runs on the full
+    corpus, per source, and on the confirmation sample (duels dated after
+    ``discovery_cutoff``) that the Phase 6 memo scores -- the full-corpus
+    fit is DISCOVERY and can never promote anything.
+    """
+    duels = (cmdr_history or {}).get("duels") or []
+    if not duels:
+        return {"available": False, "skipped_reason": "no commander history"}
+    scale = float((cmdr_history or {}).get("logistic_scale") or CMDR_LOGISTIC_SCALE_FALLBACK)
+    man_factions: dict[str, tuple[str | None, str | None]] = {}
+    for m in manifest:
+        tf = m.get("team_factions") or {}
+        c1 = FACTION_CODES.get(((tf.get("1") or {}) or {}).get("code") or "")
+        c2 = FACTION_CODES.get(((tf.get("2") or {}) or {}).get("code") or "")
+        man_factions[str(m.get("id"))] = (c1, c2)
+    ledger_factions: dict[int, tuple[str | None, str | None]] = {}
+    for d in (f9_ledger or {}).get("duels") or []:
+        fs = d.get("factions") or {}
+        ledger_factions[int(d.get("row"))] = (
+            FACTION_CODES.get(fs.get("1") or ""), FACTION_CODES.get(fs.get("2") or ""))
+
+    joined: list[dict[str, Any]] = []
+    n_missing_faction = 0
+    n_draws = 0
+    picks: dict[str, dict[str, int]] = {c: {"picks": 0, "wins": 0} for c in ("i", "e", "f")}
+    cmdr_before_by_faction: dict[str, list[float]] = {"i": [], "e": [], "f": []}
+    month_sides: dict[str, dict[str, int]] = defaultdict(lambda: {"sides": 0, "hadean": 0})
+    for d in duels:
+        if d.get("source") == "f9":
+            f1, f2 = ledger_factions.get(int(d.get("external_row") or -1), (None, None))
+        else:
+            f1, f2 = man_factions.get(str(d.get("match_id")), (None, None))
+        if not f1 or not f2:
+            n_missing_faction += 1
+            continue
+        outcome = d.get("outcome")
+        if outcome not in ("team1", "team2"):
+            n_draws += 1
+            continue
+        y = 1.0 if outcome == "team1" else 0.0
+        c1 = (d.get("commanders") or {}).get("1") or {}
+        c2 = (d.get("commanders") or {}).get("2") or {}
+        e1 = c1.get("expected")
+        if not isinstance(e1, (int, float)):
+            n_missing_faction += 1
+            continue
+        day = str(d.get("date") or "")[:10]
+        joined.append({
+            "source": d.get("source") or "telemetry",
+            "date": day,
+            "f1": f1, "f2": f2, "y": y, "e1": float(e1),
+        })
+        picks[f1]["picks"] += 1
+        picks[f2]["picks"] += 1
+        picks[f1 if y == 1.0 else f2]["wins"] += 1
+        if isinstance(c1.get("before"), (int, float)):
+            cmdr_before_by_faction[f1].append(float(c1["before"]))
+        if isinstance(c2.get("before"), (int, float)):
+            cmdr_before_by_faction[f2].append(float(c2["before"]))
+        if len(day) >= 7:
+            ms = month_sides[day[:7]]
+            ms["sides"] += 2
+            ms["hadean"] += (f1 == "e") + (f2 == "e")
+
+    if len(joined) < 20:
+        return {"available": False,
+                "skipped_reason": "fewer than 20 duels with both factions known",
+                "n_missing_faction": n_missing_faction}
+
+    # Raw non-mirror matchup table.
+    matchups: dict[tuple[str, str], dict[str, Any]] = {}
+    n_mirror = 0
+    for j in joined:
+        if j["f1"] == j["f2"]:
+            n_mirror += 1
+            continue
+        a, b = sorted([j["f1"], j["f2"]])
+        rec = matchups.setdefault((a, b), {"n": 0, "wins": {a: 0, b: 0}})
+        rec["n"] += 1
+        rec["wins"][j["f1"] if j["y"] == 1.0 else j["f2"]] += 1
+    matchup_rows = []
+    for (a, b), rec in sorted(matchups.items()):
+        wa = rec["wins"][a]
+        ci = wilson_ci(wa, rec["n"])
+        matchup_rows.append({
+            "faction_a": a, "faction_b": b,
+            "faction_a_name": FACTION_NAMES[a], "faction_b_name": FACTION_NAMES[b],
+            "n": rec["n"],
+            "wins_a": wa, "wins_b": rec["wins"][b],
+            "rate_a": wa / rec["n"],
+            "rate_a_ci": list(ci),
+        })
+
+    def _fit(subset: list[dict[str, Any]]) -> dict[str, Any] | None:
+        non_mirror = [j for j in subset if j["f1"] != j["f2"]]
+        if len(non_mirror) < 10:
+            return {"n": len(non_mirror), "fitted": False,
+                    "skipped_reason": "fewer than 10 non-mirror duels"}
+        xs = [((1.0 if j["f1"] == "e" else 0.0) - (1.0 if j["f2"] == "e" else 0.0),
+               (1.0 if j["f1"] == "f" else 0.0) - (1.0 if j["f2"] == "f" else 0.0))
+              for j in non_mirror]
+        ys = [j["y"] for j in non_mirror]
+        offs = [_logit(j["e1"]) for j in non_mirror]
+        fit = _fit_offset_logistic_2(xs, ys, offs)
+        if fit is None:
+            return {"n": len(non_mirror), "fitted": False,
+                    "skipped_reason": "singular Hessian (a contrast has no variation)"}
+        pts = scale / math.log(10.0)
+        # Frozen-term evaluation: the memo's candidate constants applied
+        # as-is (no refit) -- the out-of-sample test the promote rule reads.
+        frozen_ll = 0.0
+        frozen_acc = 0
+        for j, off in zip(non_mirror, offs):
+            term = (FACTION_FROZEN_POINTS.get(j["f1"], 0.0)
+                    - FACTION_FROZEN_POINTS.get(j["f2"], 0.0)) / pts
+            z = off + term
+            p = _sigmoid(z)
+            frozen_ll += -math.log(max(p if j["y"] == 1.0 else 1.0 - p, 1e-12))
+            frozen_acc += 1 if (z > 0) == (j["y"] == 1.0) else 0
+        n_nm = len(non_mirror)
+        fit.update({
+            "fitted": True,
+            "rating_points_hadean_vs_isdf": fit["coef_hadean_vs_isdf"] * pts,
+            "rating_points_scion_vs_isdf": fit["coef_scion_vs_isdf"] * pts,
+            "n_mirror_dropped": len(subset) - n_nm,
+            "frozen_term": {
+                "points": dict(FACTION_FROZEN_POINTS),
+                "log_loss": frozen_ll / n_nm,
+                "log_loss_delta_vs_baseline": fit["log_loss_baseline"] - frozen_ll / n_nm,
+                "accuracy": frozen_acc / n_nm,
+                "accuracy_delta_vs_baseline": frozen_acc / n_nm - fit["accuracy_baseline"],
+            },
+        })
+        return fit
+
+    fits = {
+        "all": _fit(joined),
+        "telemetry": _fit([j for j in joined if j["source"] != "f9"]),
+        "f9": _fit([j for j in joined if j["source"] == "f9"]),
+        "confirmation": _fit([j for j in joined if j["date"] > discovery_cutoff]),
+    }
+    months = [
+        {"month": k, "sides": v["sides"], "hadean_share": v["hadean"] / v["sides"]}
+        for k, v in sorted(month_sides.items()) if v["sides"]
+    ]
+    # Memo promote verdict, read off the confirmation fit only. The
+    # conditions mirror critique/decisions/phase-6-faction-advantage-term.md;
+    # the memo text is binding if they ever disagree.
+    conf = fits["confirmation"] or {}
+    disc = fits["all"] or {}
+    reasons: list[str] = []
+    verdict = "NOT YET TESTABLE"
+    if conf.get("fitted"):
+        n_conf = conf.get("n", 0)
+        ft = conf.get("frozen_term") or {}
+        if n_conf < FACTION_PROMOTE_MIN_CONFIRMATION:
+            reasons.append(f"confirmation non-mirror duels {n_conf} < "
+                           f"{FACTION_PROMOTE_MIN_CONFIRMATION}")
+        if (ft.get("log_loss_delta_vs_baseline") or 0.0) < FACTION_PROMOTE_LOGLOSS_DELTA:
+            reasons.append("frozen term does not improve confirmation log-loss by "
+                           f">= {FACTION_PROMOTE_LOGLOSS_DELTA}")
+        if (ft.get("accuracy_delta_vs_baseline") or 0.0) < 0.0:
+            reasons.append("frozen term worsens confirmation accuracy")
+        disc_coef = disc.get("coef_hadean_vs_isdf") if disc.get("fitted") else None
+        conf_coef = conf.get("coef_hadean_vs_isdf")
+        if disc_coef is not None and conf_coef is not None:
+            if conf_coef * disc_coef <= 0:
+                reasons.append("confirmation refit sign disagrees with discovery")
+            elif abs(conf_coef) < 0.5 * abs(disc_coef):
+                reasons.append("confirmation refit magnitude below half the discovery estimate")
+        if n_conf >= FACTION_PROMOTE_MIN_CONFIRMATION:
+            if (conf_coef is not None and disc_coef is not None
+                    and conf_coef * disc_coef <= 0):
+                verdict = "DISCARD"
+            else:
+                verdict = "PROMOTE-CANDIDATE" if not reasons else "HOLD"
+        else:
+            verdict = "HOLD (sample too small)"
+    else:
+        reasons.append(conf.get("skipped_reason") or "no confirmation duels yet")
+    promote = {
+        "verdict": verdict,
+        "reasons": reasons,
+        "min_confirmation": FACTION_PROMOTE_MIN_CONFIRMATION,
+        "log_loss_min_improvement": FACTION_PROMOTE_LOGLOSS_DELTA,
+        "frozen_points": dict(FACTION_FROZEN_POINTS),
+        "memo": "critique/decisions/phase-6-faction-advantage-term.md",
+    }
+    return {
+        "available": True,
+        "promote": promote,
+        "n_duels_with_factions": len(joined),
+        "n_telemetry": sum(1 for j in joined if j["source"] != "f9"),
+        "n_f9": sum(1 for j in joined if j["source"] == "f9"),
+        "n_mirror": n_mirror,
+        "n_missing_faction": n_missing_faction,
+        "n_draws_skipped": n_draws,
+        "logistic_scale": scale,
+        "discovery_cutoff": discovery_cutoff,
+        "picks": {FACTION_NAMES[c]: {**v, "win_rate": (v["wins"] / v["picks"]) if v["picks"] else None}
+                  for c, v in picks.items()},
+        "commander_vtsr_c_before_by_faction": {
+            FACTION_NAMES[c]: {"n": len(v), "mean": mean(v) if v else None}
+            for c, v in cmdr_before_by_faction.items()},
+        "matchups": matchup_rows,
+        "fits": fits,
+        "hadean_share_by_month": months,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #20 (v1.8): the format gate -- what the size exclusion leaves out
+# ---------------------------------------------------------------------------
+
+
+def _side_counts(md: dict[str, Any]) -> dict[int, list[dict[str, Any]]]:
+    """Non-campod leaderboard rows per side (1|2)."""
+    sides: dict[int, list[dict[str, Any]]] = {1: [], 2: []}
+    for r in md.get("leaderboard") or []:
+        if r.get("is_campod"):
+            continue
+        try:
+            side = int(r.get("faction"))
+        except (TypeError, ValueError):
+            continue
+        if side in (1, 2):
+            sides[side].append(r)
+    return sides
+
+
+def _duel_sort_key(date: Any) -> str:
+    """Sortable key for a duel/match date. F9 rows carry a bare day; place
+    them at midday so same-day telemetry (which carries a timestamp)
+    orders around them deterministically."""
+    s = str(date or "")
+    return s if "T" in s else (s + "T12:00:00+00:00" if s else "")
+
+
+def _match_dynamics(md: dict[str, Any], duration_sec: float) -> dict[str, list[float]]:
+    """Per-row rate statistics for one match (kills / deaths / damage per
+    player-minute, PvE share) plus per-team peak pools when the match
+    carries economy telemetry."""
+    mins = max(duration_sec, 1.0) / 60.0
+    out: dict[str, list[float]] = {"kpm": [], "dpm": [], "dmgpm": [], "pve": [], "pools": []}
+    for side_rows in _side_counts(md).values():
+        for r in side_rows:
+            p = r.get("personal") or {}
+            out["kpm"].append(float(r.get("kills") or 0) / mins)
+            out["dpm"].append(float(r.get("deaths") or 0) / mins)
+            dealt = float(p.get("dealt") or 0.0)
+            out["dmgpm"].append(dealt / mins)
+            if dealt > 0:
+                out["pve"].append(float(p.get("pve_dealt") or 0.0) / dealt)
+    for t in ((md.get("economy") or {}).get("teams") or {}).values():
+        if isinstance(t, dict) and isinstance(t.get("peak_pools"), (int, float)):
+            out["pools"].append(float(t["peak_pools"]))
+    return out
+
+
+def metric_format_gate(
+    history: dict[str, Any],
+    per_match: dict[str, Any],
+    per_match_excluded: dict[str, Any],
+    manifest: list[dict[str, Any]],
+    cmdr_history: dict[str, Any] | None,
+    current: dict[str, Any] | None = None,
+    small_max_per_side: int = FORMAT_SMALL_MAX_PER_SIDE,
+    min_duration_sec: float = FORMAT_MIN_DURATION_SEC,
+) -> dict[str, Any]:
+    """What does the six-row / 240-second rating gate leave out, and would
+    the published ratings have predicted those games?
+
+    Three blocks:
+      * **profile** -- every excluded history entry by reason, by team
+        shape (non-campod rows per side) and by month, with the count of
+        small-format games (<= ``small_max_per_side`` per side) that have a
+        DETERMINED winner.
+      * **dynamics** -- small-format vs rated full-format medians of match
+        duration, kills / deaths / damage per player-minute, PvE damage
+        share and peak pools (games under ``min_duration_sec`` dropped).
+      * **transfer** -- for each determined small-format game, the side
+        with the higher pre-match team-mean VTSR-T (reconstructed from the
+        rated ``elo_history`` deltas -- ratings only move on rated
+        appearances) and the side whose leader has the higher pre-match
+        VTSR-C (from ``elo_commander_history``); how often each picked the
+        actual winner, with Wilson intervals. A size-agnostic test the
+        composite itself cannot run: with two rated rows every lobby z-score
+        is +-0.5 by construction and with four the sigma estimate is noise,
+        which is why the composite excludes these games whatever one thinks
+        of the format.
+    Descriptive only; nothing here changes a rating or the summary file.
+    """
+    man_by_id = {str(m.get("id")): m for m in manifest}
+    entries = (history or {}).get("history") or []
+    excluded = [e for e in entries if e.get("match_excluded")]
+    if not excluded:
+        return {"available": False, "skipped_reason": "no excluded history entries"}
+
+    # ---- profile -------------------------------------------------------
+    reasons: dict[str, int] = defaultdict(int)
+    shapes: dict[str, int] = defaultdict(int)
+    months_small: dict[str, int] = defaultdict(int)
+    small_games: list[dict[str, Any]] = []
+    for e in excluded:
+        mid = str(e.get("match_id") or "")
+        reasons[str(e.get("exclusion_reason") or "unknown")] += 1
+        md = per_match_excluded.get(mid)
+        if not md:
+            continue
+        sides = _side_counts(md)
+        n1, n2 = len(sides[1]), len(sides[2])
+        shapes[f"{n1}v{n2}"] += 1
+        if n1 == 0 or n2 == 0 or max(n1, n2) > small_max_per_side:
+            continue
+        m = man_by_id.get(mid) or {}
+        win = (md.get("match") or {}).get("winner") or {}
+        determined = (win.get("decided_by") in AXIS_OUTCOME_DECIDED_BY
+                      and win.get("team") in (1, 2))
+        date = str(e.get("match_date") or m.get("date") or "")
+        if len(date) >= 7:
+            months_small[date[:7]] += 1
+        small_games.append({
+            "match_id": mid, "date": date, "n1": n1, "n2": n2,
+            "uneven": n1 != n2,
+            "duration_sec": float(m.get("duration_sec") or 0.0),
+            "determined": determined,
+            "winner_side": int(win["team"]) if determined else None,
+            "decided_by": win.get("decided_by"),
+            "sides": sides,
+        })
+
+    # ---- dynamics ------------------------------------------------------
+    def _agg(ids: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+        acc: dict[str, list[float]] = {"dur": [], "kpm": [], "dpm": [], "dmgpm": [], "pve": [], "pools": []}
+        for mid, md in ids:
+            dur = float((man_by_id.get(mid) or {}).get("duration_sec") or 0.0)
+            if dur < min_duration_sec:
+                continue
+            acc["dur"].append(dur)
+            dyn = _match_dynamics(md, dur)
+            for k in ("kpm", "dpm", "dmgpm", "pve", "pools"):
+                acc[k].extend(dyn[k])
+        med = lambda v: (median(v) if v else None)  # noqa: E731
+        return {
+            "n_matches": len(acc["dur"]),
+            "n_rows": len(acc["kpm"]),
+            "duration_sec_median": med(acc["dur"]),
+            "kills_per_player_min_median": med(acc["kpm"]),
+            "deaths_per_player_min_median": med(acc["dpm"]),
+            "damage_per_player_min_median": med(acc["dmgpm"]),
+            "pve_share_median": med(acc["pve"]),
+            "peak_pools_median": med(acc["pools"]),
+            "n_team_sides_with_pools": len(acc["pools"]),
+        }
+
+    small_ids = [(g["match_id"], per_match_excluded[g["match_id"]]) for g in small_games]
+    full_ids = [(mid, md) for mid, md in per_match.items()]
+    dynamics = {"small_format": _agg(small_ids), "rated_full_format": _agg(full_ids)}
+
+    # ---- transfer ------------------------------------------------------
+    t_timeline: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for mid, mdate, deltas in iter_rated_history(history):
+        key_date = _duel_sort_key(mdate)
+        for d in deltas:
+            aft = d.get("after")
+            if isinstance(aft, (int, float)):
+                t_timeline[player_key_for_delta(d)].append((key_date, float(aft)))
+    for lst in t_timeline.values():
+        lst.sort()
+    c_timeline: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for duel in (cmdr_history or {}).get("duels") or []:
+        key_date = _duel_sort_key(duel.get("date"))
+        for side in ("1", "2"):
+            c = (duel.get("commanders") or {}).get(side) or {}
+            aft = c.get("after")
+            s64 = c.get("steam64")
+            if s64 and isinstance(aft, (int, float)):
+                c_timeline[str(s64)].append((key_date, float(aft)))
+    for lst in c_timeline.values():
+        lst.sort()
+
+    def _before(timeline: list[tuple[str, float]], date_key: str, anchor: float) -> tuple[float, int]:
+        val, n = anchor, 0
+        for dk, aft in timeline:
+            if dk < date_key:
+                val, n = aft, n + 1
+            else:
+                break
+        return val, n
+
+    t_anchor = float((current or {}).get("anchor") or 1500.0)
+    c_anchor = float((cmdr_history or {}).get("anchor") or CMDR_ANCHOR_FALLBACK)
+    rows_out: list[dict[str, Any]] = []
+    t_hit = t_n = c_hit = c_n = 0
+    for g in small_games:
+        if not g["determined"]:
+            continue
+        date_key = _duel_sort_key(g["date"])
+        means: dict[int, float] = {}
+        hist_n: dict[int, float] = {}
+        cmdr_r: dict[int, float] = {}
+        cmdr_n: dict[int, int] = {}
+        for side in (1, 2):
+            rows_side = g["sides"][side]
+            vals = []
+            ns = []
+            for r in rows_side:
+                key = str(r.get("steam64") or r.get("name") or "")
+                v, n = _before(t_timeline.get(key) or [], date_key, t_anchor)
+                vals.append(v)
+                ns.append(n)
+            means[side] = mean(vals)
+            hist_n[side] = mean(ns)
+            leader = next((r for r in rows_side if r.get("is_commander")), rows_side[0])
+            cv, cn = _before(c_timeline.get(str(leader.get("steam64") or "")) or [], date_key, c_anchor)
+            cmdr_r[side], cmdr_n[side] = cv, cn
+        fav_t = 1 if means[1] > means[2] else (2 if means[2] > means[1] else None)
+        fav_c = 1 if cmdr_r[1] > cmdr_r[2] else (2 if cmdr_r[2] > cmdr_r[1] else None)
+        if fav_t is not None:
+            t_n += 1
+            t_hit += int(fav_t == g["winner_side"])
+        if fav_c is not None:
+            c_n += 1
+            c_hit += int(fav_c == g["winner_side"])
+        rows_out.append({
+            "match_id": g["match_id"], "date": g["date"][:10],
+            "shape": f"{g['n1']}v{g['n2']}", "uneven": g["uneven"],
+            "winner_side": g["winner_side"], "decided_by": g["decided_by"],
+            "team_mean_vtsr_t": {1: means[1], 2: means[2]},
+            "team_prior_rated_matches_mean": {1: hist_n[1], 2: hist_n[2]},
+            "leader_vtsr_c": {1: cmdr_r[1], 2: cmdr_r[2]},
+            "leader_prior_duels": {1: cmdr_n[1], 2: cmdr_n[2]},
+            "vtsr_t_pick_correct": (fav_t == g["winner_side"]) if fav_t else None,
+            "vtsr_c_pick_correct": (fav_c == g["winner_side"]) if fav_c else None,
+            "names": {1: [r.get("name") for r in g["sides"][1]],
+                      2: [r.get("name") for r in g["sides"][2]]},
+        })
+
+    small_rows_n = [g["n1"] + g["n2"] for g in small_games]
+    return {
+        "available": True,
+        "small_max_per_side": small_max_per_side,
+        "min_duration_sec": min_duration_sec,
+        "profile": {
+            "n_excluded_entries": len(excluded),
+            "by_reason": dict(sorted(reasons.items())),
+            "by_shape": dict(sorted(shapes.items(), key=lambda kv: -kv[1])),
+            "n_small_format": len(small_games),
+            "n_small_format_uneven": sum(1 for g in small_games if g["uneven"]),
+            "n_small_format_determined": sum(1 for g in small_games if g["determined"]),
+            "small_format_by_month": dict(sorted(months_small.items())),
+            "small_format_rated_rows_max": max(small_rows_n) if small_rows_n else None,
+        },
+        "dynamics": dynamics,
+        "transfer": {
+            "n_determined": len(rows_out),
+            "vtsr_t_team_mean": {
+                "n": t_n, "correct": t_hit,
+                "accuracy": (t_hit / t_n) if t_n else None,
+                "accuracy_ci": list(wilson_ci(t_hit, t_n)) if t_n else None,
+            },
+            "vtsr_c_leader_gap": {
+                "n": c_n, "correct": c_hit,
+                "accuracy": (c_hit / c_n) if c_n else None,
+                "accuracy_ci": list(wilson_ci(c_hit, c_n)) if c_n else None,
+            },
+            "rows": rows_out,
+        },
+        "degeneracy_note": (
+            "P_i is a lobby z-score: with 2 rated rows every axis is +-0.5 "
+            "by construction and with 4 the sigma estimate is noise, so the "
+            "composite cannot score these games. The wins ladder (team-mean "
+            "logistic) and VTSR-C (pairwise) are size-agnostic; the transfer "
+            "block is the test the composite cannot run."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Report writers
 # ---------------------------------------------------------------------------
 
@@ -3686,6 +4788,303 @@ def render_markdown_report(
         lines.append("- " + (t_term.get("skipped_reason") or "unavailable"))
     lines.append("")
 
+    # ------------------------------------------------------------------
+    # v1.7 (critique v4) diagnostic sections §15-§19. Descriptive only:
+    # nothing here changes a rating or feeds validation_summary.json.
+    # ------------------------------------------------------------------
+    pvw = results.get("perf_vs_wins") or {}
+    lines.append("## §15 — Performance ladder vs wins ladder (v1.7)")
+    lines.append("")
+    if pvw.get("available"):
+        lines.append(
+            "Per-player agreement between the published composite rating "
+            "(`thug_elo`) and the inert win/loss ladder (`wins_elo`, Stage E "
+            "R^W). `gap = thug_elo − wins_elo`: positive means the composite "
+            "rates the player above what their team results do. Descriptive "
+            "— neither ladder is the ground truth of the other.")
+        lines.append("")
+        lines.append(f"- **Players (≥ {pvw['min_matches']} matches):** {pvw['n_players']}")
+        lines.append(f"- **Spearman(thug_elo, wins_elo):** {_fmt_num(pvw.get('spearman'))}; "
+                     f"Pearson {_fmt_num(pvw.get('pearson'))}")
+        lines.append(f"- **Gap:** mean {_fmt_num(pvw.get('gap_mean'), 1)}, "
+                     f"stdev {_fmt_num(pvw.get('gap_stdev'), 1)}, "
+                     f"range {_fmt_num(pvw.get('gap_min'), 0)} to {_fmt_num(pvw.get('gap_max'), 0)}")
+        lines.append(f"- **Pearson(commander share, gap):** "
+                     f"{_fmt_num(pvw.get('pearson_gap_vs_commander_share'))}")
+        lines.append("")
+        lines.append("| player | thug_elo | wins_elo | gap | cmdr share | matches | W-L |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for p in pvw.get("players") or []:
+            rec = p.get("wins_record") or {}
+            lines.append(
+                f"| {p.get('name')} | {_fmt_num(p.get('thug_elo'), 0)} "
+                f"| {_fmt_num(p.get('wins_elo'), 0)} | {p.get('gap'):+.0f} "
+                f"| {_fmt_pct(p.get('commander_share'), 0)} | {p.get('matches_played')} "
+                f"| {rec.get('w', '-')}-{rec.get('l', '-')} |")
+    else:
+        lines.append("- " + (pvw.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    tod = results.get("team_outcome_dependence") or {}
+    lines.append("## §16 — Team-outcome dependence of thug P_i (v1.7)")
+    lines.append("")
+    if tod.get("available"):
+        lines.append(
+            "P_i is lobby-relative, so a thug on the losing side tends to "
+            "score below zero whatever they personally did. This measures how "
+            "much of a thug's rating movement is the team result.")
+        lines.append("")
+        lines.append("| cohort | n win / n loss | mean P win / loss | mean Δ win / loss "
+                     "| winners with Δ<0 | losers with Δ>0 | η² (P by outcome) |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for label, blk in (("all thugs", tod.get("thugs") or {}),
+                           (f"thugs rated ≥ {HIGH_RATED_THRESHOLD:.0f}", tod.get("high_rated_thugs") or {}),
+                           ("commanders", tod.get("commanders") or {})):
+            if not blk or not blk.get("n_winners") and not blk.get("n_losers"):
+                continue
+            lines.append(
+                f"| {label} | {blk.get('n_winners')} / {blk.get('n_losers')} "
+                f"| {_fmt_num(blk.get('winner_mean_p'))} / {_fmt_num(blk.get('loser_mean_p'))} "
+                f"| {_fmt_num(blk.get('winner_mean_delta'), 2)} / {_fmt_num(blk.get('loser_mean_delta'), 2)} "
+                f"| {_fmt_pct(blk.get('winners_negative_delta_share'))} "
+                f"| {_fmt_pct(blk.get('losers_positive_delta_share'))} "
+                f"| {_fmt_num(blk.get('eta_squared_p'))} |")
+    else:
+        lines.append("- " + (tod.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    sd = results.get("ship_denial") or {}
+    lines.append("## §17 — Ship-denial gradient (v1.7)")
+    lines.append("")
+    if sd.get("available"):
+        lines.append(
+            "Thug rows banded by `at_base_pilot_share` (share of the match on "
+            "foot inside their own base — waiting for a ship). **Confound:** "
+            "ships go unreplaced more often on losing teams, so the gradient "
+            "mixes commander supply with team outcome; the per-outcome columns "
+            "show what survives inside a fixed result.")
+        lines.append("")
+        lines.append(f"- **Rows:** {sd.get('n_rows')}; Spearman(share, Δ) "
+                     f"{_fmt_num(sd.get('spearman_share_vs_delta'))}; Spearman(share, P) "
+                     f"{_fmt_num(sd.get('spearman_share_vs_p'))}")
+        lines.append("")
+        lines.append("| at-base share | n | mean Δ | mean P | mean pre-R | team win share "
+                     "| Δ when won (n) | Δ when lost (n) |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for b in sd.get("bands") or []:
+            if not b.get("n"):
+                lines.append(f"| {b['band']} | 0 | - | - | - | - | - | - |")
+                continue
+            w = b.get("winners") or {}
+            l = b.get("losers") or {}
+            lines.append(
+                f"| {b['band']} | {b['n']} | {_fmt_num(b.get('mean_delta'), 2)} "
+                f"| {_fmt_num(b.get('mean_p'))} | {_fmt_num(b.get('mean_before'), 0)} "
+                f"| {_fmt_pct(b.get('win_share'))} "
+                f"| {_fmt_num(w.get('mean_delta'), 2)} ({w.get('n')}) "
+                f"| {_fmt_num(l.get('mean_delta'), 2)} ({l.get('n')}) |")
+    else:
+        lines.append("- " + (sd.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    cs = results.get("commander_selection") or {}
+    lines.append("## §18 — Commander selection + role-adjustment audit (v1.7)")
+    lines.append("")
+    if cs.get("available"):
+        lines.append(
+            "Who commands (pre-match VTSR-T percentile inside their own lobby, "
+            "0 = highest), how concentrated the job is, and what commanding "
+            "does to a rating relative to thugging (the v2.4 axis-shift audit).")
+        lines.append("")
+        lines.append(f"- **Commander rows:** {cs.get('n_commander_rows')} "
+                     f"({cs.get('distinct_commanders')} distinct commanders; top-4 hold "
+                     f"{_fmt_pct(cs.get('top4_commander_row_share'))} of rows)")
+        lines.append(f"- **Commander lobby percentile (0 = top):** mean "
+                     f"{_fmt_num(cs.get('commander_percentile_mean'))}, median "
+                     f"{_fmt_num(cs.get('commander_percentile_median'))}")
+        lines.append(f"- **Commander below own thug mean:** "
+                     f"{_fmt_pct(cs.get('commander_below_own_thug_mean_share'))} of "
+                     f"{cs.get('team_sides_with_both_roles')} team-sides")
+        lines.append(f"- **Cohort mean Δ per row:** commanders "
+                     f"{_fmt_num(cs.get('cohort_mean_delta_commander'), 2)} vs thugs "
+                     f"{_fmt_num(cs.get('cohort_mean_delta_thug'), 2)}")
+        lines.append("")
+        lines.append("| commander | rows |")
+        lines.append("|---|---|")
+        for t in cs.get("top_commanders") or []:
+            lines.append(f"| {t['name']} | {t['rows']} |")
+        lines.append("")
+        lines.append(f"Per-player mean Δ as commander vs as thug (≥ "
+                     f"{cs.get('min_rows_per_role')} rows in both roles):")
+        lines.append("")
+        lines.append("| player | Δ as cmdr (n) | Δ as thug (n) |")
+        lines.append("|---|---|---|")
+        for p in cs.get("per_player") or []:
+            lines.append(f"| {p['name']} | {p['mean_delta_commander']:+.2f} ({p['n_commander']}) "
+                         f"| {p['mean_delta_thug']:+.2f} ({p['n_thug']}) |")
+    else:
+        lines.append("- " + (cs.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    fe = results.get("faction_effect") or {}
+    lines.append("## §19 — Faction effect, controlling for the ratings (v1.7)")
+    lines.append("")
+    if fe.get("available"):
+        lines.append(
+            "Offset logistic regression on the VTSR-C duel stream: logit of "
+            "the canonical expected score (commander gap + λ·thug handicap) is "
+            "held fixed as the offset; two faction contrasts (Hadean-vs-ISDF, "
+            "Scion-vs-ISDF, coded +1/−1/0 by side) are fitted on top. Rating "
+            "points = coefficient × scale / ln 10. The full-corpus fit is the "
+            "DISCOVERY sample for `critique/decisions/phase-6-faction-advantage-term.md`; "
+            "only the confirmation fit (duels dated after "
+            f"{fe.get('discovery_cutoff')}) can ever promote the term.")
+        lines.append("")
+        lines.append(f"- **Duels with both factions known:** {fe.get('n_duels_with_factions')} "
+                     f"(telemetry {fe.get('n_telemetry')}, F9 {fe.get('n_f9')}; mirrors "
+                     f"{fe.get('n_mirror')}; missing faction {fe.get('n_missing_faction')}; "
+                     f"draws skipped {fe.get('n_draws_skipped')})")
+        lines.append("")
+        lines.append("| faction | team-sides | wins | win rate | mean pre-duel VTSR-C of its commanders |")
+        lines.append("|---|---|---|---|---|")
+        cb = fe.get("commander_vtsr_c_before_by_faction") or {}
+        for fname, pk in (fe.get("picks") or {}).items():
+            lines.append(f"| {fname} | {pk.get('picks')} | {pk.get('wins')} "
+                         f"| {_fmt_pct(pk.get('win_rate'))} "
+                         f"| {_fmt_num((cb.get(fname) or {}).get('mean'), 1)} (n={(cb.get(fname) or {}).get('n')}) |")
+        lines.append("")
+        lines.append("| matchup (non-mirror) | n | A wins | B wins | A win rate | 95% CI |")
+        lines.append("|---|---|---|---|---|---|")
+        for m in fe.get("matchups") or []:
+            ci = m.get("rate_a_ci") or [None, None]
+            lines.append(f"| {m['faction_a_name']} vs {m['faction_b_name']} | {m['n']} "
+                         f"| {m['wins_a']} | {m['wins_b']} | {_fmt_pct(m['rate_a'])} "
+                         f"| {_fmt_pair(ci[0], ci[1])} |")
+        lines.append("")
+        lines.append("| sample | n (non-mirror) | Hadean vs ISDF (logit ± SE, z, p) | ≈ pts "
+                     "| Scion vs ISDF (logit ± SE, z, p) | ≈ pts | LR χ² (p) "
+                     "| log-loss base → faction | acc base → faction |")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
+        for label in ("all", "telemetry", "f9", "confirmation"):
+            f = (fe.get("fits") or {}).get(label) or {}
+            if not f.get("fitted"):
+                lines.append(f"| {label} | {f.get('n', 0)} | not fitted — "
+                             f"{f.get('skipped_reason', 'n/a')} | | | | | | |")
+                continue
+            lines.append(
+                f"| {label} | {f['n']} "
+                f"| {f['coef_hadean_vs_isdf']:+.3f} ± {f['se_hadean_vs_isdf']:.3f}, "
+                f"z {_fmt_num(f.get('z_hadean_vs_isdf'), 2)}, p {_fmt_num(f.get('p_hadean_vs_isdf'))} "
+                f"| {f['rating_points_hadean_vs_isdf']:+.0f} "
+                f"| {f['coef_scion_vs_isdf']:+.3f} ± {f['se_scion_vs_isdf']:.3f}, "
+                f"z {_fmt_num(f.get('z_scion_vs_isdf'), 2)}, p {_fmt_num(f.get('p_scion_vs_isdf'))} "
+                f"| {f['rating_points_scion_vs_isdf']:+.0f} "
+                f"| {_fmt_num(f.get('lr_chi2_2df'), 2)} ({_fmt_num(f.get('lr_p_value'))}) "
+                f"| {_fmt_num(f.get('log_loss_baseline'), 4)} → {_fmt_num(f.get('log_loss_with_faction'), 4)} "
+                f"| {_fmt_pct(f.get('accuracy_baseline'))} → {_fmt_pct(f.get('accuracy_with_faction'))} |")
+        lines.append("")
+        pro = fe.get("promote") or {}
+        lines.append(f"**Frozen candidate term** (memo `{pro.get('memo')}`): "
+                     f"{pro.get('frozen_points')} rating points to the side fielding the "
+                     "faction, applied WITHOUT refit. Out-of-sample read per sample:")
+        lines.append("")
+        lines.append("| sample | n | log-loss base → frozen (Δ) | accuracy base → frozen (Δ) |")
+        lines.append("|---|---|---|---|")
+        for label in ("all", "telemetry", "f9", "confirmation"):
+            f = (fe.get("fits") or {}).get(label) or {}
+            ft = f.get("frozen_term") or {}
+            if not f.get("fitted"):
+                lines.append(f"| {label} | {f.get('n', 0)} | - | - |")
+                continue
+            lines.append(
+                f"| {label} | {f['n']} "
+                f"| {_fmt_num(f.get('log_loss_baseline'), 4)} → {_fmt_num(ft.get('log_loss'), 4)} "
+                f"({ft.get('log_loss_delta_vs_baseline', 0.0):+.4f}) "
+                f"| {_fmt_pct(f.get('accuracy_baseline'))} → {_fmt_pct(ft.get('accuracy'))} "
+                f"({ft.get('accuracy_delta_vs_baseline', 0.0) * 100:+.1f}pp) |")
+        lines.append("")
+        lines.append(f"- **Promote verdict (confirmation sample only):** **{pro.get('verdict')}**"
+                     + (f" — {'; '.join(pro.get('reasons') or [])}" if pro.get("reasons") else ""))
+        lines.append("")
+        lines.append("Hadean share of team-sides by month:")
+        lines.append("")
+        lines.append("| month | sides | Hadean share |")
+        lines.append("|---|---|---|")
+        for mrow in fe.get("hadean_share_by_month") or []:
+            lines.append(f"| {mrow['month']} | {mrow['sides']} | {_fmt_pct(mrow['hadean_share'], 0)} |")
+    else:
+        lines.append("- " + (fe.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    fg = results.get("format_gate") or {}
+    lines.append("## §20 — The format gate: what the size exclusion leaves out (v1.8)")
+    lines.append("")
+    if fg.get("available"):
+        prof = fg.get("profile") or {}
+        dyn = fg.get("dynamics") or {}
+        tr = fg.get("transfer") or {}
+        lines.append(
+            "Every excluded history entry by reason and team shape, the "
+            f"small-format (≤ {fg.get('small_max_per_side')} per side) games' "
+            "dynamics against the rated full-format games, and whether the "
+            "published ratings would have predicted the small-format winners. "
+            + fg.get("degeneracy_note", ""))
+        lines.append("")
+        lines.append(f"- **Excluded entries:** {prof.get('n_excluded_entries')} — by reason: "
+                     + ", ".join(f"{k} {v}" for k, v in (prof.get("by_reason") or {}).items()))
+        lines.append("- **By shape (non-campod rows per side):** "
+                     + ", ".join(f"{k} ×{v}" for k, v in (prof.get("by_shape") or {}).items()))
+        lines.append(f"- **Small-format games:** {prof.get('n_small_format')} "
+                     f"({prof.get('n_small_format_uneven')} uneven; "
+                     f"{prof.get('n_small_format_determined')} with a determined winner); by month: "
+                     + ", ".join(f"{k} {v}" for k, v in (prof.get("small_format_by_month") or {}).items()))
+        lines.append("")
+        lines.append(f"| metric (games ≥ {fg.get('min_duration_sec'):.0f} s) | small format | rated full format |")
+        lines.append("|---|---|---|")
+        s = dyn.get("small_format") or {}
+        f = dyn.get("rated_full_format") or {}
+        for label, key, dec in (("matches", "n_matches", 0), ("player rows", "n_rows", 0),
+                                ("duration (s, median)", "duration_sec_median", 0),
+                                ("kills per player-minute (median)", "kills_per_player_min_median", 2),
+                                ("deaths per player-minute (median)", "deaths_per_player_min_median", 2),
+                                ("damage per player-minute (median)", "damage_per_player_min_median", 0),
+                                ("PvE share of damage (median)", "pve_share_median", 2),
+                                ("peak pools per team (median)", "peak_pools_median", 1)):
+            sv, fv = s.get(key), f.get(key)
+            fmt = (lambda v: _fmt_int(v)) if dec == 0 and key.startswith("n_") else (lambda v: _fmt_num(v, dec))
+            lines.append(f"| {label} | {fmt(sv)} | {fmt(fv)} |")
+        lines.append("")
+        tt = tr.get("vtsr_t_team_mean") or {}
+        tc = tr.get("vtsr_c_leader_gap") or {}
+        ci_t = tt.get("accuracy_ci") or [None, None]
+        ci_c = tc.get("accuracy_ci") or [None, None]
+        lines.append(f"**Transfer test** ({tr.get('n_determined')} determined small-format games; "
+                     "pre-match ratings reconstructed from the rated history):")
+        lines.append("")
+        lines.append("| predictor | picks | correct | accuracy | 95% CI |")
+        lines.append("|---|---|---|---|---|")
+        lines.append(f"| higher team-mean VTSR-T | {tt.get('n')} | {tt.get('correct')} "
+                     f"| {_fmt_pct(tt.get('accuracy'))} | {_fmt_pair(ci_t[0], ci_t[1])} |")
+        lines.append(f"| higher leader VTSR-C | {tc.get('n')} | {tc.get('correct')} "
+                     f"| {_fmt_pct(tc.get('accuracy'))} | {_fmt_pair(ci_c[0], ci_c[1])} |")
+        lines.append("")
+        lines.append("| date | shape | winner | team-mean VTSR-T (1 / 2) | leader VTSR-C (1 / 2) | T pick | C pick | sides |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for r in tr.get("rows") or []:
+            tm = r.get("team_mean_vtsr_t") or {}
+            lc = r.get("leader_vtsr_c") or {}
+            mark = lambda v: ("✓" if v is True else ("✗" if v is False else "tie"))  # noqa: E731
+            lines.append(
+                f"| {r.get('date')} | {r.get('shape')}{' (uneven)' if r.get('uneven') else ''} "
+                f"| {r.get('winner_side')} | {_fmt_num(tm.get(1), 0)} / {_fmt_num(tm.get(2), 0)} "
+                f"| {_fmt_num(lc.get(1), 0)} / {_fmt_num(lc.get(2), 0)} "
+                f"| {mark(r.get('vtsr_t_pick_correct'))} | {mark(r.get('vtsr_c_pick_correct'))} "
+                f"| {', '.join(str(n) for n in (r.get('names') or {}).get(1, []))} vs "
+                f"{', '.join(str(n) for n in (r.get('names') or {}).get(2, []))} |")
+    else:
+        lines.append("- " + (fg.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
     # Active weights footer.
     lines.append("## Active weights")
     lines.append("")
@@ -3734,9 +5133,17 @@ def render_json_report(
     schema_version 7 (v1.6, VTSR-C opening semantics): adds
     ``vtsr_c_perf.promote`` and ``vtsr_c_perf.legacy_early_full``.
     Strictly additive.
+    schema_version 8 (v1.7, critique v4 diagnostics): adds top-level
+    ``perf_vs_wins`` (#15), ``team_outcome_dependence`` (#16),
+    ``ship_denial`` (#17), ``commander_selection`` (#18) and
+    ``faction_effect`` (#19). Strictly additive; none of them feeds
+    validation_summary.json.
+    schema_version 9 (v1.8, format gate): adds top-level ``format_gate``
+    (#20 -- excluded-match profile, small-vs-full dynamics, rating
+    transfer test). Strictly additive; not in validation_summary.json.
     """
     return {
-        "schema_version":   7,
+        "schema_version":   9,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -4107,45 +5514,88 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  WARN: failed to load {cmdr_history_path}: {exc}")
 
     # Run metrics.
-    print("[validate_elo] [1/14] rank correlation ...")
+    print("[validate_elo] [1/20] rank correlation ...")
     rank_correlation = metric_rank_correlation(history)
-    print("[validate_elo] [2/14] calibration ...")
+    print("[validate_elo] [2/20] calibration ...")
     calibration = metric_calibration(history)
-    print("[validate_elo] [3/14] self-consistency ...")
+    print("[validate_elo] [3/20] self-consistency ...")
     self_consistency = metric_self_consistency(history)
-    print(f"[validate_elo] [4/14] bootstrap stability ({args.bootstrap_runs} runs) ...")
+    print(f"[validate_elo] [4/20] bootstrap stability ({args.bootstrap_runs} runs) ...")
     bootstrap = metric_bootstrap_stability(
         history, current,
         runs=args.bootstrap_runs,
         seed=args.seed,
     )
-    print("[validate_elo] [5/14] synthetic-winner proxy ...")
+    print("[validate_elo] [5/20] synthetic-winner proxy ...")
     synthetic_winner = metric_synthetic_winner(history, per_match)
-    print("[validate_elo] [6+7/14] clean_win prediction + log-loss ...")
+    print("[validate_elo] [6+7/20] clean_win prediction + log-loss ...")
     clean_win_accuracy = metric_clean_win_accuracy(history, per_match)
-    print("[validate_elo] [8/14] single-axis ablation ...")
+    print("[validate_elo] [8/20] single-axis ablation ...")
     axis_ablation = metric_axis_ablation(history, current, weights)
-    print(f"[validate_elo] [9/14] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
+    print(f"[validate_elo] [9/20] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
     dirichlet_perturbation = metric_dirichlet_perturbation(
         history, weights,
         runs=args.dirichlet_runs,
         concentration=args.dirichlet_concentration,
         seed=args.seed + 1,
     )
-    print("[validate_elo] [10/14] VTSR-C prediction + lambda ablation ...")
+    print("[validate_elo] [10/20] VTSR-C prediction + lambda ablation ...")
     vtsr_c = metric_vtsr_c(cmdr_history)
-    print("[validate_elo] [11/14] axis-vs-outcome sign agreement ...")
+    print("[validate_elo] [11/20] axis-vs-outcome sign agreement ...")
     axis_outcome = metric_axis_outcome(history, per_match)
-    print("[validate_elo] [12/14] VTSR-C econ-axis sign agreement ...")
+    print("[validate_elo] [12/20] VTSR-C econ-axis sign agreement ...")
     cmdr_econ_axes = metric_cmdr_econ_axes(cmdr_history)
     print("[validate_elo] [12b] VTSR-C promote rule + legacy early-vs-full ...")
     cmdr_promote = metric_cmdr_promote(cmdr_history, per_match)
     cmdr_legacy = metric_legacy_early_full(cmdr_history, per_match)
-    print("[validate_elo] [13/14] VTSR-C alpha_c ablation ...")
+    print("[validate_elo] [13/20] VTSR-C alpha_c ablation ...")
     cmdr_alpha_ablation = metric_cmdr_alpha_ablation(cmdr_history)
-    print("[validate_elo] [14/14] Balonce Meter T-term ablation ...")
+    print("[validate_elo] [14/20] Balonce Meter T-term ablation ...")
     cmdr_t_term = metric_cmdr_t_term(cmdr_history, history, per_match)
     winner_funnel = count_winner_funnel(history, per_match)
+
+    # v1.7 (critique v4) descriptive diagnostics. The F9 ledger lives
+    # beside data/processed/ in data/external/; absent-safe (the faction
+    # section then runs on telemetry duels only).
+    f9_ledger = None
+    f9_ledger_path = processed_dir.parent / "external" / "f9_ledger.json"
+    if f9_ledger_path.exists():
+        try:
+            f9_ledger = _load_json(f9_ledger_path)
+        except Exception as exc:
+            print(f"  WARN: failed to load {f9_ledger_path}: {exc}")
+    print("[validate_elo] [15/20] performance ladder vs wins ladder ...")
+    perf_vs_wins = metric_perf_vs_wins(current)
+    rated_rows, rated_rows_meta = _build_rated_rows(history, per_match)
+    print(f"[validate_elo] [16/20] team-outcome dependence "
+          f"({rated_rows_meta['rows']} joined rows, "
+          f"{rated_rows_meta['unmatched']} unmatched) ...")
+    team_outcome_dependence = metric_team_outcome_dependence(rated_rows)
+    print("[validate_elo] [17/20] ship-denial gradient ...")
+    ship_denial = metric_ship_denial(rated_rows)
+    print("[validate_elo] [18/20] commander selection + role-adjustment audit ...")
+    commander_selection = metric_commander_selection(rated_rows)
+    print("[validate_elo] [19/20] faction effect controlling for ratings ...")
+    faction_effect = metric_faction_effect(cmdr_history, manifest, f9_ledger)
+    # v1.8: the format-gate audit is the one section that needs the
+    # EXCLUDED matches' per-match files (size / duration / cancelled /
+    # void entries). Loaded here, never merged into ``per_match``.
+    per_match_excluded: dict[str, Any] = {}
+    for entry in (history or {}).get("history") or []:
+        if not entry.get("match_excluded"):
+            continue
+        mid = entry.get("match_id")
+        if not mid:
+            continue
+        p = processed_dir / f"{mid}.json"
+        if p.exists():
+            try:
+                per_match_excluded[mid] = _load_json(p)
+            except Exception as exc:
+                print(f"  WARN: failed to load excluded match {p}: {exc}")
+    print(f"[validate_elo] [20/20] format gate ({len(per_match_excluded)} excluded match files) ...")
+    format_gate = metric_format_gate(history, per_match, per_match_excluded,
+                                     manifest, cmdr_history, current)
 
     # Player count totals (corpus-wide, for the report header).
     seen_keys: set[str] = set()
@@ -4221,6 +5671,17 @@ def main(argv: list[str] | None = None) -> int:
         # critique/decisions/balonce-meter-t-term.md).
         "cmdr_t_term":            cmdr_t_term,
         "winner_funnel":          winner_funnel,
+        # v1.7: critique-v4 descriptive diagnostics (#15-#19). Never
+        # feed validation_summary.json; the faction memo governs the one
+        # actionable candidate.
+        "perf_vs_wins":           perf_vs_wins,
+        "team_outcome_dependence": team_outcome_dependence,
+        "ship_denial":            ship_denial,
+        "commander_selection":    commander_selection,
+        "faction_effect":         faction_effect,
+        "rated_rows_join":        rated_rows_meta,
+        # v1.8: format-gate audit (#20). Descriptive; not in the summary.
+        "format_gate":            format_gate,
     }
 
     # Write outputs.
@@ -4313,6 +5774,31 @@ def main(argv: list[str] | None = None) -> int:
               f"{cmdr_alpha_ablation.get('n_telemetry_scored')}, "
               f"replay integrity "
               f"{_fmt_num(cmdr_alpha_ablation.get('replay_max_abs_diff'), decimals=4)} ELO")
+    if perf_vs_wins.get("available"):
+        print(f"  thug_elo vs wins_elo (sec 15): Spearman "
+              f"{_fmt_num(perf_vs_wins.get('spearman'))} over "
+              f"{perf_vs_wins.get('n_players')} players")
+    if team_outcome_dependence.get("available"):
+        th = team_outcome_dependence.get("thugs") or {}
+        print(f"  Stomp effect (sec 16):        eta^2 {_fmt_num(th.get('eta_squared_p'))}; "
+              f"winners with dR<0 {_fmt_pct(th.get('winners_negative_delta_share'))}, "
+              f"losers with dR>0 {_fmt_pct(th.get('losers_positive_delta_share'))}")
+    if faction_effect.get("available"):
+        fa = (faction_effect.get("fits") or {}).get("all") or {}
+        if fa.get("fitted"):
+            print(f"  Faction effect (sec 19, all): Hadean vs ISDF "
+                  f"{fa.get('coef_hadean_vs_isdf'):+.3f} logit "
+                  f"(z {_fmt_num(fa.get('z_hadean_vs_isdf'), 2)}, "
+                  f"~{fa.get('rating_points_hadean_vs_isdf'):+.0f} pts); "
+                  f"LR p {_fmt_num(fa.get('lr_p_value'))}")
+    if format_gate.get("available"):
+        tr = format_gate.get("transfer") or {}
+        tt = tr.get("vtsr_t_team_mean") or {}
+        tc = tr.get("vtsr_c_leader_gap") or {}
+        print(f"  Format gate (sec 20):         small-format games "
+              f"{(format_gate.get('profile') or {}).get('n_small_format')} "
+              f"({tr.get('n_determined')} determined); transfer VTSR-T "
+              f"{tt.get('correct')}/{tt.get('n')}, VTSR-C {tc.get('correct')}/{tc.get('n')}")
     print("==================================================")
     return 0
 

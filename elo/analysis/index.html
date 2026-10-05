@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTSR v4 &mdash; Both Sides of the Coin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#151e2e', 900: '#0f172a' },
+                        accent: '#38bdf8',
+                        danger: '#f43f5e',
+                        success: '#10b981',
+                        warning: '#fbbf24',
+                        violet2: '#a78bfa'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }
+        .glow-text { text-shadow: 0 0 15px rgba(56, 189, 248, 0.5); }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .cite { color: #7dd3fc; font-family: 'JetBrains Mono', monospace; font-size: 0.72em; text-decoration: none; vertical-align: super; margin-left: 1px; }
+        .cite:hover { color: #fff; text-decoration: underline; }
+        .src-item:target { background: rgba(56,189,248,0.10); border-radius: 0.5rem; }
+        .stat { font-family: 'JetBrains Mono', monospace; }
+        table.vt td, table.vt th { padding: 0.35rem 0.6rem; }
+        table.vt tr { border-bottom: 1px solid rgba(148,163,184,0.15); }
+        table.vt th { color: #94a3b8; font-weight: 500; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col md:flex-row">
+
+    <!-- Sidebar -->
+    <aside class="w-full md:w-72 md:fixed h-auto md:h-screen bg-slate-900 border-b md:border-b-0 md:border-r border-slate-700 p-6 z-20 overflow-y-auto">
+        <a href="../../index.html" class="flex items-center gap-2 mb-6 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm text-slate-300 hover:bg-slate-800 hover:border-slate-600 hover:text-white transition-colors" title="Back to the VT Stats dashboard">
+            <svg class="w-4 h-4 text-accent shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"></circle><path stroke-linecap="round" d="M12 2v4M12 18v4M2 12h4M18 12h4"></path></svg>
+            <span class="font-medium text-white">VT Stats</span>
+            <span class="ml-auto inline-flex items-center gap-1 text-xs text-slate-500">
+                Dashboard
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+            </span>
+        </a>
+        <div class="mb-6">
+            <div class="flex items-center gap-2 mb-2">
+                <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                <h1 class="text-xl font-bold text-white tracking-tight">VTSR Critique v4</h1>
+            </div>
+            <p class="text-xs text-slate-400">Both sides of the coin &middot; 2026-10-04</p>
+        </div>
+        <nav class="space-y-1 text-sm">
+            <a href="#sec-where" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">1 Where we are</a>
+            <a href="#sec-provenance" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">2 Where it comes from</a>
+            <a href="#sec-gate" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">3 How a number becomes a rule</a>
+            <a href="#sec-changed" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">4 What changed since v3</a>
+            <a href="#sec-complaint" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">5 The complaint, quantified</a>
+            <a href="#sec-steelman" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">6 The steelman</a>
+            <a href="#sec-faction" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">7 Faction-based ELO</a>
+            <a href="#sec-role" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">8 Role-based ELO</a>
+            <a href="#sec-ship" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">9 By-ship ELO</a>
+            <a href="#sec-format" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">10 Include all games?</a>
+            <a href="#sec-matchmaking" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">11 Matchmaking</a>
+            <a href="#sec-genre" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">12 FPS+RTS</a>
+            <a href="#sec-roadmap" class="block px-3 py-1.5 rounded-lg text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 font-medium">13 Roadmap</a>
+            <a href="#sec-history" class="block px-3 py-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white">14 History (v2 &rarr; v3)</a>
+            <a href="#sec-sources" class="block px-3 py-1.5 rounded-lg text-sky-400 hover:bg-slate-800 hover:text-sky-300 font-medium">15 Sources cited</a>
+            <a href="#sec-perspective" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">16 Perspective</a>
+        </nav>
+        <div class="mt-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+            <p class="text-xs text-slate-400 font-mono">Reference material</p>
+            <p class="text-xs text-slate-300 mt-1">critique/elo-analysis-v4.md</p>
+            <p class="text-xs text-slate-300 mt-1">critique/elo-analysis-simple-v4.md</p>
+            <p class="text-xs text-slate-300 mt-1">critique/decisions/*.md</p>
+            <p class="text-xs text-slate-400 mt-3">Regenerate every number:</p>
+            <p class="text-xs text-sky-300 font-mono mt-1">python scripts/validate_elo.py</p>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 md:ml-72 p-4 md:p-8 lg:p-12">
+        <header class="max-w-5xl mx-auto mb-12">
+            <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text">VTSR v4: Both Sides of the Coin</h2>
+            <p class="text-slate-400 text-lg leading-relaxed">
+                A performance-based thug rating and an outcome-based commander rating, re-examined at twice v3's corpus. Should the ratings be split by faction, by role, or by ship? Both sides argued, with the industry's own record and the corpus's own numbers.
+            </p>
+            <p class="text-sky-300/90 text-sm leading-relaxed mt-4 border-l-2 border-sky-500 pl-4">
+                Drafted with an AI assistant, as the previous three were. Every number on this page comes from <code class="text-xs">python scripts/validate_elo.py</code> (validator v1.8, &sect;1&ndash;&sect;20) run on 2026-10-04, and anyone with the repository can regenerate all of them. Every design change is governed by a rule written before the numbers that judge it existed. Several proposals the tooling itself drafted have been tested under those rules and refuted (&sect;3). Bracketed numbers are source citations; the full list is &sect;15.
+            </p>
+        </header>
+
+        <div class="max-w-5xl mx-auto space-y-16">
+
+            <!-- 1 Where we are -->
+            <section id="sec-where" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">1. Where we are</h3>
+                    <p class="text-slate-300 text-sm mb-6">228 recorded matches, 193 rated, 45 rated players, 170 rated matches with a determined winner; F9bomber's 505 community duels bring the commander ladder to 675 scored duels. <a class="cite" href="#src-76">[76]</a></p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Spearman &rho; (R &rarr; P)</div><div class="stat text-2xl text-white">0.495</div><div class="text-xs text-slate-500">v3: 0.462</div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Self-consistency</div><div class="stat text-2xl text-white">0.888</div><div class="text-xs text-slate-500">v3: 0.804</div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">Winner from team mean R</div><div class="stat text-2xl text-white">58.6%</div><div class="text-xs text-slate-500">n=169 &middot; v3: 43.3% (n=30)</div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-xs text-slate-400">VTSR-C duel prediction</div><div class="stat text-2xl text-white">65.4%</div><div class="text-xs text-slate-500">n=675 &middot; log-loss 0.624</div></div>
+                        </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[320px]"><canvas id="trendChart"></canvas></div>
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">Every validator run since August is a point. Winner prediction from team mean rating climbed from 37.5% on 32 determined matches to 58.6% on 169; the commander ladder went from 55% on 38 duels to 65.4% on 675 once the F9 ledger and the mechanically-applied outcome pairings landed in mid-September. The direction v3 predicted is the direction the numbers took. <a class="cite" href="#src-77">[77]</a></p>
+                            <p class="text-slate-300 text-sm leading-relaxed">Calibration error fell from 0.018 to 0.009. Mean-rating aggregation now beats hard-MAX at prediction time (58.6% vs 55.0%), reversing the v3-era preview. The first four lopsided matches (team rating gap &gt; 100) were all called correctly &mdash; encouraging, statistically nothing.</p>
+                            </div>
+                        </div>
+                                </div>
+            </section>
+
+            <!-- 2 Provenance map -->
+            <section id="sec-provenance" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">2. Where every mechanism comes from</h3>
+                    <p class="text-slate-300 text-sm mb-6">Nothing in VTSR is invented here except the eight axis definitions and their weights &mdash; and those are exactly what &sect;5 puts under test. Each row: a VTSR mechanism, and the shipped system or peer-reviewed method that uses the same idea.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Logistic expected score, 1500 anchor</div><div class="text-slate-400">Chess Elo <a class="cite" href="#src-1">[1]</a>; the Bradley&ndash;Terry model it approximates <a class="cite" href="#src-2">[2]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">K falls with games, rises with inactivity</div><div class="text-slate-400">Glicko / Glicko-2 rating deviation <a class="cite" href="#src-4">[4]</a><a class="cite" href="#src-5">[5]</a>; used by Lichess and US Chess <a class="cite" href="#src-7">[7]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Rating from in-match statistics, not only W/L</div><div class="text-slate-400">TrueSkill 2 (Microsoft Research / The Coalition): kills, deaths, quits, squads; Halo 5 prediction 52% &rarr; 68% <a class="cite" href="#src-9">[9]</a>; HLTV Rating 2.0 <a class="cite" href="#src-23">[23]</a>; PandaSkill <a class="cite" href="#src-27">[27]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Everyone measured against the room they played in</div><div class="text-slate-400">Elo-MMR for massive multiplayer contests <a class="cite" href="#src-13">[13]</a>; PandaSkill's free-for-all OpenSkill update <a class="cite" href="#src-27">[27]</a><a class="cite" href="#src-11">[11]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Separate commander and thug ladders</div><div class="text-slate-400">AllegSkill on Microsoft Research's Allegiance: &ldquo;separate skill ratings for commanders and pilots&rdquo; <a class="cite" href="#src-50">[50]</a>; Natural Selection 2 Hive Skill 3.0 <a class="cite" href="#src-58">[58]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Commander role adjustment</div><div class="text-slate-400">Baseball WAR's positional adjustment &mdash; a catcher and a first baseman on one scale <a class="cite" href="#src-19">[19]</a><a class="cite" href="#src-20">[20]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Team-strength handicap in the expected score</div><div class="text-slate-400">Bradley&ndash;Terry order effect: home advantage, white's first move <a class="cite" href="#src-3">[3]</a>; Aligulac's matchup-constrained SC2 ratings <a class="cite" href="#src-48">[48]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Spectators, partials and idlers left out, not penalized</div><div class="text-slate-400">TrueSkill 2's quit modelling <a class="cite" href="#src-9">[9]</a>; Hive 2.0's team-switch handling <a class="cite" href="#src-60">[60]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">A zero-sum W/L ladder beside the performance ladder</div><div class="text-slate-400">Classic Elo <a class="cite" href="#src-1">[1]</a>; the two-ladder structure of AllegSkill <a class="cite" href="#src-50">[50]</a> and Hive 3.0 <a class="cite" href="#src-58">[58]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Validation by out-of-sample prediction</div><div class="text-slate-400">The Cambridge CS:GO benchmark <a class="cite" href="#src-31">[31]</a>; TrueSkill 2's own test <a class="cite" href="#src-9">[9]</a>; WHR <a class="cite" href="#src-12">[12]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Rules written before the data that judges them</div><div class="text-slate-400">Registered Reports in the sciences <a class="cite" href="#src-74">[74]</a><a class="cite" href="#src-75">[75]</a></div></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Never reward underperformance</div><div class="text-slate-400">Elo-MMR's incentive-compatibility guarantee <a class="cite" href="#src-13">[13]</a>; opponent indifference <a class="cite" href="#src-14">[14]</a></div></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3 Gate + scoreboard -->
+            <section id="sec-gate" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">3. How a number becomes a rule</h3>
+                    <p class="text-slate-300 text-sm mb-6">Hypothesis &rarr; a rule written in a memo before any number exists &rarr; a forensic what-if rating file beside the real one &rarr; the validator scores both &rarr; PROMOTE / HOLD / DISCARD &rarr; only PROMOTE changes a published rating. Every proposal since v2 has gone through it. <a class="cite" href="#src-79">[79]</a></p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="bg-slate-900 rounded-xl p-5 border-l-4 border-l-success border border-slate-700">
+                            <div class="text-xs font-mono uppercase text-success mb-2">Shipped</div>
+                            <ul class="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                                <li>Inactivity K-boost (v2 &sect;7.1)</li>
+                                <li>Row-exclusion gates v2.5&ndash;v2.10</li>
+                                <li>Wins-ladder machinery (inert at &alpha;=0)</li>
+                                <li>F9bomber ledger import</li>
+                                <li>VTSR-C economy machinery (inert at &alpha;<sub>c</sub>=1)</li>
+                                <li>Ladder eligibility + 90-day inactivity (display)</li>
+                                <li>Balonce Meter (the validated VTSR-C formula)</li>
+                            </ul>
+                        </div>
+                        <div class="bg-slate-900 rounded-xl p-5 border-l-4 border-l-warning border border-slate-700">
+                            <div class="text-xs font-mono uppercase text-warning mb-2">Held</div>
+                            <ul class="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                                <li>ALPHA wins blend &mdash; twice</li>
+                                <li>Rank-based lobby scoring &mdash; three times <span class="text-slate-500">(June review)</span></li>
+                                <li>VTSR-C &alpha;<sub>c</sub> economy scoring</li>
+                                <li>Commander VTSR-T in the handicap</li>
+                                <li>Phase 6 faction term <span class="text-slate-500">(this document; not yet testable)</span></li>
+                            </ul>
+                        </div>
+                        <div class="bg-slate-900 rounded-xl p-5 border-l-4 border-l-danger border border-slate-700">
+                            <div class="text-xs font-mono uppercase text-danger mb-2">Refuted / stopped</div>
+                            <ul class="text-xs text-slate-300 space-y-1 list-disc list-inside">
+                                <li>Hard-MAX opponent reference <span class="text-slate-500">(v2 critique)</span> &mdash; &rho; 0.46 &rarr; 0.19, +522 drift</li>
+                                <li>Softmax opponent reference</li>
+                                <li>Unlocked commander priors <span class="text-slate-500">(v2 critique)</span> &mdash; below noise floor</li>
+                                <li>Converged re-rating</li>
+                                <li>Softmax / MAX thug handicap &mdash; &minus;2.5 to &minus;11.7 pp</li>
+                            </ul>
+                    </div>
+                        </div>
+                    <p class="text-slate-400 text-xs mt-4">Several held and refuted entries were drafted by automated reviewers &mdash; the v2 production-systems critique, the June 2026 review, and this document's own exploratory faction fit &mdash; and went through the same gate as a proposal from the developer. The data overrules the tooling. That is the point of the gate.</p>
+                    <p class="text-slate-300 text-sm mt-4 leading-relaxed"><strong class="text-white">The industry has not converged either.</strong> Valve split Dota 2 into Core/Support MMR in August 2019 <a class="cite" href="#src-38">[38]</a> and merged it into one rating with per-role handicaps in March 2020 <a class="cite" href="#src-40">[40]</a>. Riot previewed positional ranks and ended the preview after satisfaction fell 20&ndash;30 points <a class="cite" href="#src-42">[42]</a>. Blizzard kept per-role SR in Overwatch because the role is locked before the match <a class="cite" href="#src-44">[44]</a> and added per-race MMR to StarCraft II six years after launch <a class="cite" href="#src-36">[36]</a>. NS2's developers said separate team and commander skills were &ldquo;scrapped because there is no good way to implement any of it&rdquo; in 2016 <a class="cite" href="#src-61">[61]</a> and shipped exactly that in 2020 <a class="cite" href="#src-58">[58]</a>.</p>
+                </div>
+            </section>
+
+            <!-- 4 What changed -->
+            <section id="sec-changed" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">4. What changed since v3</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                        <div>
+                            <div class="text-xs font-mono uppercase text-success mb-2">Shipped (memo-gated, additive)</div>
+                            <ul class="text-slate-300 space-y-1.5 list-disc list-inside">
+                                <li>Wins ladder R<sup>W</sup> &mdash; real, 170 determined matches, blended at &alpha; = 0</li>
+                                <li>F9bomber ledger &rarr; VTSR-C v3 (505 duels, full K); 50 outcomes adjudicated mechanically from F9 pairings under six gates</li>
+                                <li>VTSR-C economy composite + opening-window amendment, &alpha;<sub>c</sub> = 1</li>
+                                <li>Ranked bars (25 matches / 8-or-25 duels), 90-day inactivity, 3-game comeback &mdash; display only</li>
+                                <li>Balonce Meter: one win-probability formula for Tools and the Outcome card</li>
+                                <li>Input corrections v11&ndash;v14 (each moved ratings &le; ~1 ELO)</li>
+                                <li>Validator v1.3&ndash;v1.8 (&sect;10&ndash;&sect;20)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <div class="text-xs font-mono uppercase text-warning mb-2">Tested, not shipped</div>
+                            <ul class="text-slate-300 space-y-1.5 list-disc list-inside">
+                                <li>ALPHA &isin; {0.10, 0.25, 0.50}: HOLD twice &mdash; accuracy and log-loss flat on 39 wins-rated matches; &rho; and self-consistency improve monotonically</li>
+                                <li>Rank scoring: HOLD three times &mdash; self-consistency up, bootstrap &sigma; worse</li>
+                                <li>Converged re-rating: STOP &mdash; reverted</li>
+                                <li>VTSR-C &alpha;<sub>c</sub> &lt; 1: HOLD &mdash; no axis clears the 0.55 lower bound on 26 confirmation duels</li>
+                                <li>Balonce T-term variants: HOLD / DISCARD &mdash; softmax degrades monotonically</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5 The complaint -->
+            <section id="sec-complaint" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">5. The complaint, quantified</h3>
+                    <p class="text-slate-300 text-sm mb-8">The community's reading: VTSR-T is a raw performance meter that punishes strong thugs for what their commander or team did. Six findings, each a validator section. <a class="cite" href="#src-77">[77]</a></p>
+
+                    <h4 class="text-white font-semibold mb-2">5.1 Performance ladder vs wins ladder (&sect;15)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[340px]"><canvas id="perfWinsChart"></canvas></div>
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">Across the 24 players with &ge; 20 matches, the published composite (<code>thug_elo</code>) and the inert win/loss ladder (<code>wins_elo</code>) correlate at <span class="stat text-white">Spearman 0.381</span>. Points above the line are rated higher by performance than by wins: Domakus +258 (37&ndash;37), VTrider +242, Cloaket +237 (16&ndash;34). Below it: judgeguns, Totokomo, dd and DraconisMarch at &minus;60 to &minus;70.</p>
+                            <p class="text-slate-300 text-sm leading-relaxed">Both readings are partly right: a strong player on balanced teams <em>should</em> go 37&ndash;37, and the composite <em>does</em> under-credit something the winners-who-don't-perform are doing (5.4). Commander share barely correlates with the gap (0.16). This is basketball's box-score-vs-plus-minus argument <a class="cite" href="#src-18">[18]</a><a class="cite" href="#src-16">[16]</a><a class="cite" href="#src-17">[17]</a>.</p>
+                        </div>
+                    </div>
+
+                    <h4 class="text-white font-semibold mb-2">5.2 Your team's result moves your rating (&sect;16)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">1,084 determined thug rows. Winners: mean P +0.136, &Delta; +7.6. Losers: &minus;0.096, &minus;5.6. Only 27% of winning thugs lose rating; only 24% of losing thugs gain. Win/loss alone explains <span class="stat text-white">&eta;&sup2; = 0.21</span> of thug P variance.</p>
+                            <p class="text-slate-300 text-sm leading-relaxed">Thugs rated &ge; 1650 on a losing team still out-perform the lobby on average (P +0.098) and still lose rating 76% of the time (&minus;6.5), because their expectation was higher. The rating does not fine a strong thug for losing; it fines them for not beating the room by as much as their rating said they would.</p>
+                                    </div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="stompChart"></canvas></div>
+                                </div>
+                                
+                    <h4 class="text-white font-semibold mb-2">5.3 Time on foot at base costs rating (&sect;17)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="shipDenialChart"></canvas></div>
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">Thug rows banded by the share of the match spent on foot inside their own base &mdash; waiting for a ship. Under 5%: &Delta; +9.0, team win share 79%. Over 30%: &Delta; <span class="stat text-white">&minus;11.4</span>, win share 13%. Spearman(share, &Delta;) = &minus;0.48. The gradient survives inside losses (&minus;2.0 at &lt;5% vs &minus;12.7 at &ge;30%).</p>
+                            <p class="text-slate-300 text-sm leading-relaxed"><strong class="text-warning">Confound, stated plainly:</strong> ships go unreplaced more often on losing teams. What this establishes is that ship denial costs rating, and that the low-tier lift (below 1460) does not reach most of these rows &mdash; the worst band's mean pre-match rating is 1499.</p>
+                            </div>
+                        </div>
+
+                    <h4 class="text-white font-semibold mb-2">5.4 Two core axes point the wrong way (&sect;11)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">Across 170 determined matches: how often does the winning team have the higher team-mean on each axis? Net damage share and mobility 88%, kill rate 86%, PvE share 79% &mdash; but <span class="stat text-white">efficiency 39%</span> and <span class="stat text-white">accuracy 39%</span>, and those two carry 31% of the composite weight.</p>
+                            <p class="text-slate-300 text-sm leading-relaxed">Winners shoot structures and AI (dilutes accuracy); losers get more kills per damage fighting through repairs. Whatever the cause, this is the honest version of the utility-vs-hunter debate: PvE work is already rewarded; the axes rewarding <em>clean</em> fighting over <em>effective</em> fighting are the ones that disagree with winning.</p>
+                        </div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[320px]"><canvas id="axisChart"></canvas></div>
+                    </div>
+
+                    <h4 class="text-white font-semibold mb-2">5.5 Who commands, and what commanding does to a rating (&sect;18)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[380px]"><canvas id="cmdrChart"></canvas></div>
+                        <div>
+                            <p class="text-slate-300 text-sm leading-relaxed mb-3">Commanders sit at the 48th percentile of their lobby by pre-match VTSR-T (median 0.44) and below their own thug mean 52% of the time &mdash; the middle, not the weakest. 33 distinct commanders; the top four (Sev 42, Lithium 36, F9bomber 34, Darkvale 32) hold 37% of commander rows.</p>
+                            <p class="text-slate-300 text-sm leading-relaxed">Commander rows gain <span class="stat text-white">+2.07</span> per match vs +0.93 for thug rows. The v2.4 adjustment is set to the <em>average</em> commander's shortfall, so strong fighters harvest it (Muffin +14.5, blue +11.3, Snake +8.4) while Lithium (&minus;4.0) and DraconisMarch (&minus;5.6) still bleed &mdash; the known failure mode of a population-baseline positional adjustment <a class="cite" href="#src-19">[19]</a><a class="cite" href="#src-21">[21]</a>.</p>
+                        </div>
+                    </div>
+
+                    <h4 class="text-white font-semibold mb-2">5.6 Faction is not neutral (&sect;19)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="factionChart"></canvas></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="hadeanShareChart"></canvas></div>
+                        </div>
+                    <p class="text-slate-300 text-sm leading-relaxed mt-4">Raw: Hadean beats ISDF 64.8% (79&ndash;43) and Scion 57.9% (62&ndash;45); Scion vs ISDF 49.2%. Controlling for both commanders' VTSR-C and both squads' mean VTSR-T (the canonical expected score as a fixed logistic offset), Hadean-vs-ISDF is <span class="stat text-white">+0.357 logit (z 2.27, p 0.023)</span> &asymp; <span class="stat text-white">+62 rating points</span>; Scion-vs-ISDF &minus;0.010. LR &chi;&sup2; 6.44 (p 0.040); log-loss 0.6179 &rarr; 0.6099; accuracy unchanged. Same sign in telemetry (+0.31) and F9 (+0.35). Hadean's pick share has gone from ~10% of sides in late 2025 to 37&ndash;38% &mdash; which is why this is treated as discovery and the frozen +60 candidate is judged only on games after 2026-10-04 <a class="cite" href="#src-79">[79]</a>.</p>
+                </div>
+            </section>
+
+            <!-- 6 Steelman -->
+            <section id="sec-steelman" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">6. Why the current design is defensible</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">It measures something persistent</div><p class="text-slate-400">Split-half self-consistency 0.888. Rating from per-match statistics is the move that lifted Halo 5 prediction from 52% to 68% <a class="cite" href="#src-9">[9]</a>.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">It is calibrated</div><p class="text-slate-400">Predicted vs observed lobby-relative performance agree within a percentage point (MAE 0.009) &mdash; what lets the Balonce Meter print a probability.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">It predicts, and improved with data</div><p class="text-slate-400">58.6% winner prediction with almost no lopsided games; the Cambridge benchmark's best win/loss-only system reached 64.1% on ten thousand pro matches <a class="cite" href="#src-31">[31]</a>. VTSR-C's 65.4% over 675 duels is above it.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Two ladders is the genre's own answer</div><p class="text-slate-400">AllegSkill: &ldquo;separate skill ratings for commanders and pilots&rdquo; <a class="cite" href="#src-50">[50]</a>. Hive 3.0: a high-ranked player in the chair &ldquo;will no longer be expected to carry to avoid losing skill&rdquo; <a class="cite" href="#src-58">[58]</a>.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The handicap is validated</div><p class="text-slate-400">&lambda; = 1.0 ablated against 0, 0.5, 1.5: most accurate of the four (65.4% vs 63.9% at &lambda; = 0).</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The exclusion gates do real work</div><p class="text-slate-400">Spectators, partials, idlers omitted rather than penalized &mdash; TrueSkill 2's instinct too <a class="cite" href="#src-9">[9]</a>. Top-20 Jaccard 0.83 under resampling.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The wrong-way axes are visible because it measures them</div><p class="text-slate-400">A pure W/L ladder would never have shown that accuracy anti-correlates with winning; a composite with a validator does, and can be re-weighted under a rule.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The process says no to its authors</div><p class="text-slate-400">The refuted list is longer than the shipped list. A system that mostly says no behaves like a measurement system should.</p></div>
+                            </div>
+                        </div>
+            </section>
+
+            <!-- 7 Faction -->
+            <section id="sec-faction" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">7. Faction-based ELO</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-6">
+                        <div class="bg-success/5 border border-success/20 rounded-xl p-4">
+                            <div class="text-xs font-mono uppercase text-success mb-2">The case for</div>
+                            <p class="text-slate-300 leading-relaxed">Faction asymmetry is real here (5.6); a rating that ignores it mis-prices every mixed lobby by ~60 points. Skill is partly faction-specific. Blizzard added per-race MMR to StarCraft II in 2016 because &ldquo;many people want to experience the ladder as other races without affecting the rank and MMR of their &lsquo;main&rsquo; race,&rdquo; seeding off-races from the main race with high uncertainty <a class="cite" href="#src-36">[36]</a><a class="cite" href="#src-37">[37]</a>. Aligulac rates pro SC2 per matchup, constrained so the overall rating is the mean <a class="cite" href="#src-48">[48]</a>. NS2 shipped per-team skill for truly asymmetric sides <a class="cite" href="#src-58">[58]</a>.</p>
+                            </div>
+                        <div class="bg-danger/5 border border-danger/20 rounded-xl p-4">
+                            <div class="text-xs font-mono uppercase text-danger mb-2">The case against</div>
+                            <p class="text-slate-300 leading-relaxed">SC2 is 1v1, the player picks their own race, the population is millions. Here the commander picks the faction for the whole team and there are 45 rated players: splitting them three ways gives <span class="stat text-white">111 player-faction cells with a median of 8 matches</span>; 26 reach the 25-match ranked bar; 11 players have &ge; 10 on all three factions. Small split pools are exactly where Glickman warns ratings drift <a class="cite" href="#src-6">[6]</a>. And VTSR-T is lobby-relative &mdash; both teams' faction effects sit in the same lobby and cancel &mdash; so a faction axis there measures nothing and charges thugs for a commander's choice <a class="cite" href="#src-81">[81]</a>.</p>
+                        </div>
+                        </div>
+                    <div class="text-sm">
+                        <div class="text-xs font-mono uppercase text-slate-400 mb-2">Designs, ranked</div>
+                        <ol class="text-slate-300 space-y-2 list-decimal list-inside">
+                            <li><span class="text-danger">Three per-player ladders (SC2 style)</span> &mdash; rejected on the arithmetic above; the precedent does not transfer.</li>
+                            <li><span class="text-warning">Per-player faction offset</span> (NS2 &ldquo;average skill + team bias&rdquo; <a class="cite" href="#src-58">[58]</a><a class="cite" href="#src-62">[62]</a>, Aligulac's mean-constrained matchup ratings <a class="cite" href="#src-48">[48]</a>) &mdash; the right design if per-player faction skill is ever wanted; viable later, display first.</li>
+                            <li><span class="text-success">A global faction-advantage term in the VTSR-C expected score</span> &mdash; the recommendation and the only thing v4 pre-registers: the Bradley&ndash;Terry order effect <a class="cite" href="#src-3">[3]</a>, applied to the matchup, not to either player. Frozen at +60 Hadean / 0 Scion / 0 ISDF; judged on &ge; 60 confirmation duels after 2026-10-04 by out-of-sample log-loss, accuracy and sign stability <a class="cite" href="#src-79">[79]</a>. Verdict today: not yet testable.</li>
+                            <li><span class="text-danger">A faction axis or shift in VTSR-T</span> &mdash; rejected; lobby-relative scoring makes it meaningless.</li>
+                        </ol>
+                        <p class="text-slate-400 text-xs mt-3">Where both sides agree: the faction matchup table and the pick-share trend belong on the Meta tab regardless of any rating decision.</p>
+                    </div>
+                            </div>
+            </section>
+
+            <!-- 8 Role -->
+            <section id="sec-role" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">8. Role-based ELO</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-6">
+                        <div class="bg-success/5 border border-success/20 rounded-xl p-4">
+                            <div class="text-xs font-mono uppercase text-success mb-2">The case for</div>
+                            <p class="text-slate-300 leading-relaxed">Thugs do different jobs; a kills-and-damage composite rates the hunter above the utility player even when the utility player wins more. Dota 2 <a class="cite" href="#src-38">[38]</a>, League <a class="cite" href="#src-41">[41]</a> and Overwatch <a class="cite" href="#src-44">[44]</a> all built role-aware ratings; PandaSkill models every League role independently <a class="cite" href="#src-27">[27]</a>; skill decomposes into player, hero and player-hero components <a class="cite" href="#src-28">[28]</a>. Our own commander adjustment is a role adjustment, and 5.5 shows it is miscalibrated.</p>
+                            </div>
+                        <div class="bg-danger/5 border border-danger/20 rounded-xl p-4">
+                            <div class="text-xs font-mono uppercase text-danger mb-2">The case against</div>
+                            <p class="text-slate-300 leading-relaxed">Every role rating that lasted has the role <strong class="text-white">declared and locked before the match</strong>. Overwatch's survived for that reason <a class="cite" href="#src-44">[44]</a><a class="cite" href="#src-45">[45]</a>. Dota 2's Core/Support split lasted seven months before Valve &ldquo;replace[d] the Core/Support separation with a single rank&rdquo; <a class="cite" href="#src-40">[40]</a>. Riot's positional ranks lasted one preview: players &ldquo;frustrated with the grindiness, low satisfaction of off-position games, and teammates not taking off-position games seriously&rdquo;; satisfaction down 20&ndash;30% <a class="cite" href="#src-42">[42]</a>. In BZCC the role is whatever ship and weapon the commander handed you &mdash; a burst-gun Xypos goes to pools, a slicer Xypos hunts <a class="cite" href="#src-80">[80]</a>. A role the system has to guess is a role a player can choose to flatter their rating, and a rating you can game stops measuring <a class="cite" href="#src-70">[70]</a><a class="cite" href="#src-71">[71]</a><a class="cite" href="#src-73">[73]</a><a class="cite" href="#src-13">[13]</a>. The data also says the premise is half right: PvE work is already rewarded (79%); what is over-rewarded is clean fighting (5.4) &mdash; a weights question, not a ladder question.</p>
+                        </div>
+                        </div>
+                    <div class="text-sm">
+                        <div class="text-xs font-mono uppercase text-slate-400 mb-2">Designs, ranked</div>
+                        <ol class="text-slate-300 space-y-2 list-decimal list-inside">
+                            <li><span class="text-danger">Separate inferred-role ladders</span> &mdash; rejected: gameable, fluid roles, the Riot precedent.</li>
+                            <li><span class="text-slate-400">Role as a declared pre-match input</span> &mdash; not available in this game's telemetry or lobby.</li>
+                            <li><span class="text-success">Recalibrate the commander adjustment to the player's own thug baseline</span> &mdash; the WAR analogy made honest <a class="cite" href="#src-19">[19]</a>; Phase 7(a) forensic alt mode.</li>
+                            <li><span class="text-success">Re-weight the composite toward win-agreeing axes</span> &mdash; off efficiency and accuracy; Phase 7(b), judged on future matches so the weights are not fitted to the games that judge them.</li>
+                            <li><span class="text-success">Ship-denied-time adjustment for all tiers</span> &mdash; generalize the v2.8 lift; Phase 7(c).</li>
+                            <li><span class="text-warning">Display-only playstyle descriptor</span> (pools / hunter / mixed) &mdash; vocabulary, no rating consequence.</li>
+                        </ol>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 9 Ship -->
+            <section id="sec-ship" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">9. By-ship ELO</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div class="bg-success/5 border border-success/20 rounded-xl p-4"><div class="text-xs font-mono uppercase text-success mb-2">For</div><p class="text-slate-300">Ships are where skill shows; champion-specific skill was a significant predictor in League of Legends <a class="cite" href="#src-28">[28]</a>.</p></div>
+                        <div class="bg-danger/5 border border-danger/20 rounded-xl p-4"><div class="text-xs font-mono uppercase text-danger mb-2">Against</div><p class="text-slate-300">The same study found it added little in Dota 2 <a class="cite" href="#src-28">[28]</a>. The commander builds the ship; it changes several times a match; per-player-ship cells are far thinner than per-faction. Accuracy is already weapon-normalized.</p></div>
+                        <div class="bg-slate-900 border border-slate-700 rounded-xl p-4"><div class="text-xs font-mono uppercase text-slate-400 mb-2">Verdict</div><p class="text-slate-300">Display-only ship profile (already the Loadout tab); ship-normalized axis baselines as a possible future input; never a ladder.</p></div>
+                        </div>
+                    </div>
+                </section>
+
+            <!-- 10 Include all games? -->
+            <section id="sec-format" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">10. Include all games regardless of size?</h3>
+                    <p class="text-slate-300 text-sm mb-6">A match rates today at &ge; 6 real players and &ge; 240 s &mdash; 3v3 and up. The proposal: drop the size gate. The author's position: 1v1 and 2v2 change the game too much. Validator &sect;20 tests both. <a class="cite" href="#src-77">[77]</a></p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-6">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="formatDynChart"></canvas></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="formatTransferChart"></canvas></div>
+                            </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-6">
+                            <div>
+                            <p class="text-slate-300 leading-relaxed mb-3"><strong class="text-white">What is left out.</strong> 23 small-format games (1v1 &times;12, 2v2 &times;7, four lopsided 2v1s), 15 with a determined winner; 14 of the 23 were played in the three weeks before this was written. <strong class="text-white">The dynamics do change:</strong> median duration 1295 s vs 968 s; kills per player-minute <span class="stat text-white">0.42 vs 0.31</span>; damage per player-minute 2754 vs 2206; PvE share 0.68 vs 0.60; deaths and pools unchanged. The author's premise holds &mdash; in exactly the axes the composite weights.</p>
+                            <p class="text-slate-300 leading-relaxed"><strong class="text-white">But the ratings transfer, partly.</strong> Reconstructing pre-match ratings, the higher team-mean VTSR-T side won <span class="stat text-white">10 of 15</span> (the same neighbourhood as its 58.6% on full games); the higher-rated commander won <span class="stat text-white">8 of 15</span>. A 1v1 is a fighting duel far more than a command duel.</p>
+                            </div>
+                            <div>
+                            <p class="text-slate-300 leading-relaxed mb-3"><strong class="text-white">The hard constraint is math, not taste.</strong> VTSR-T's P<sub>i</sub> is a lobby z-score: with two rated rows every axis is &plusmn;0.5 by construction (why the v14 gate counts real rows &mdash; a 1v1 with a camera-pod gallery used to rate), with four the &sigma; is noise. The composite cannot score these games. The wins ladder and VTSR-C are size-agnostic, so &ldquo;include&rdquo; is a real option for them.</p>
+                            <p class="text-slate-300 leading-relaxed"><strong class="text-white">The industry's answer to a different format is a separate ladder, never a mix:</strong> StarCraft II places per mode, 1v1 / 2v2 / 3v3 / 4v4 <a class="cite" href="#src-83">[83]</a><a class="cite" href="#src-84">[84]</a>; FIDE split rapid and blitz in 2012 because &ldquo;players have different levels of play depending on the speed of the game&rdquo; <a class="cite" href="#src-85">[85]</a>; TrueSkill 2 treats other modes as correlated-but-distinct <a class="cite" href="#src-9">[9]</a>; Overwatch 2 keeps Open and Role Queue apart <a class="cite" href="#src-47">[47]</a>; CS2 keeps Wingman on its own rank <a class="cite" href="#src-86">[86]</a>. F9bomber's ledger dropped its 1v1/2v2 rows at import too <a class="cite" href="#src-79">[79]</a>.</p>
+                            </div>
+                                </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                        <div class="bg-success/5 border border-success/20 rounded-xl p-4"><div class="text-xs font-mono uppercase text-success mb-2">For including</div><p class="text-slate-300">+12% corpus, 15 more known results; real, long, combat-heavy games; the players in them (HappyOtter, DraconisMarch, Maverick, sponge in nine of fifteen) are the mid/low-tier regulars who already have the fewest rated rows; TrueSkill-family systems rate any team size <a class="cite" href="#src-8">[8]</a><a class="cite" href="#src-10">[10]</a>; thug skill demonstrably carries over.</p></div>
+                        <div class="bg-danger/5 border border-danger/20 rounded-xl p-4"><div class="text-xs font-mono uppercase text-danger mb-2">Against mixing</div><p class="text-slate-300">Composite undefined below ~6 rows; dynamics differ in the weighted axes; VTSR-C's expectation assumes a squad; every precedent separates formats; commander ratings predicted these games at coin-flip.</p></div>
+                                </div>
+                    <div class="mt-4 text-sm">
+                        <div class="text-xs font-mono uppercase text-slate-400 mb-2">Designs, ranked</div>
+                        <ol class="text-slate-300 space-y-1.5 list-decimal list-inside">
+                            <li><span class="text-danger">Rate everything in the published VTSR-T</span> &mdash; rejected on the mathematics.</li>
+                            <li><span class="text-warning">Small games into the wins ladder R<sup>W</sup> only</span> &mdash; mechanically sound; invisible at &alpha; = 0; cheap forensic alt mode. Phase 7(d).</li>
+                            <li><span class="text-warning">1v1s as VTSR-C duels</span> &mdash; hold: 8/15 says the ladder would learn the wrong skill.</li>
+                            <li><span class="text-success">Separate small-format record, then ladder</span> &mdash; the SC2 / FIDE / Wingman pattern; display-only now, rated at &ge; 30 determined small games with a rule written first.</li>
+                            <li><span class="text-success">TrueSkill-2-style cross-mode prior</span> &mdash; the principled long-run version of (4).</li>
+                        </ol>
+                        <p class="text-slate-400 text-xs mt-3"><strong class="text-slate-300">Where the author's argument lands:</strong> &ldquo;too different&rdquo; is supported as <em>different enough to rate separately</em>, not as <em>too different to count</em>. Do not throw the games away; do not mix them into a room-relative composite; record them separately first.</p>
+                        </div>
+                    </div>
+                </section>
+
+            <!-- 11 Matchmaking -->
+            <section id="sec-matchmaking" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">11. Matchmaking</h3>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-4">Twenty to twenty-five active players, commanders volunteer, teams split by hand <a class="cite" href="#src-80">[80]</a>. No rating design fixes that; it can only describe it honestly.</p>
+                    <ul class="text-slate-300 text-sm space-y-3 list-disc list-inside">
+                        <li><strong class="text-white">Who commands:</strong> mid-lobby players by VTSR-T (5.5). The weakest-player story is not supported; the concentrated-load story is. The volunteer's dilemma is the textbook description <a class="cite" href="#src-69">[69]</a>.</li>
+                        <li><strong class="text-white">Records bend under the load:</strong> the two most frequent commanders hold the two lowest VTSR-C (Lithium 1289 over 135 duels, Darkvale 1311 over 107); F9bomber's ledger records Lithium 26&ndash;77 as commander <a class="cite" href="#src-76">[76]</a>. Skill or burden, a W/L ladder cannot tell &mdash; the argument for displaying games commanded beside the rating.</li>
+                        <li><strong class="text-white">Fairness is not the only objective:</strong> equal-skill matching is a special case of engagement optimization that &ldquo;rarely holds in reality&rdquo; <a class="cite" href="#src-65">[65]</a>; optimal matchmaking under losing-streak churn differs from skill-based by 4&ndash;6% engagement <a class="cite" href="#src-66">[66]</a>; slightly weaker opponents reduce churn more than fair matches do <a class="cite" href="#src-67">[67]</a>.</li>
+                        <li><strong class="text-white">Bribing people into the unpopular role fades:</strong> Overwatch's Priority Pass &ldquo;had a positive effect for several weeks, but its influence quickly faded,&rdquo; and loot-box / XP rewards for tanking could not &ldquo;put a dent in the demand for playing DPS&rdquo; <a class="cite" href="#src-47">[47]</a>. Make commanding measured fairly and visibly credited; do not pay for it with thug rating.</li>
+                        <li><strong class="text-white">Closed pools drift:</strong> Glickman's committee tracks a fixed cohort's mean rating <a class="cite" href="#src-7">[7]</a>; the validator's <code>mean_vtsr</code> history (1532 &rarr; 1543) is the same instrument here.</li>
+                    </ul>
+                            </div>
+            </section>
+
+            <!-- 11 Genre -->
+            <section id="sec-genre" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">12. The FPS+RTS lens</h3>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-3">Battlezone (1998) combined &ldquo;a tank simulation game, a first-person shooter and a real-time strategy game&rdquo; <a class="cite" href="#src-56">[56]</a>; Battlezone II (1999, remastered 2018) kept the formula <a class="cite" href="#src-57">[57]</a>. The lineage runs through Allegiance (Microsoft Research, 2000) <a class="cite" href="#src-52">[52]</a>, Natural Selection (2002) <a class="cite" href="#src-53">[53]</a>, Savage (2003) <a class="cite" href="#src-54">[54]</a>, Nuclear Dawn (2011) <a class="cite" href="#src-55">[55]</a>, NS2, Eximius <a class="cite" href="#src-64">[64]</a> and Silica <a class="cite" href="#src-63">[63]</a>. Two shipped public skill systems &mdash; AllegSkill <a class="cite" href="#src-50">[50]</a> and Hive <a class="cite" href="#src-58">[58]</a> &mdash; and both separate the commander from the field player.</p>
+                    <p class="text-slate-300 text-sm leading-relaxed mb-3">What makes the genre hard to rate is not that it has two jobs; it is that they are <strong class="text-white">coupled</strong>. A thug's measurable output depends on the commander's supply (5.3), and the commander's win depends on the thugs' fighting. Every thug is on a team whose coach controls their equipment mid-game &mdash; which is why the composite-vs-impact debate maps so cleanly onto VTSR-T vs the wins ladder <a class="cite" href="#src-16">[16]</a><a class="cite" href="#src-17">[17]</a>.</p>
+                    <p class="text-slate-300 text-sm leading-relaxed">Thug skill is FPS skill and is measurable per match &mdash; the statistics TrueSkill 2 found predictive in Halo <a class="cite" href="#src-9">[9]</a> and HLTV built a rating from <a class="cite" href="#src-23">[23]</a>. Commander skill is RTS skill: economy, timing, build order. RTS expertise is detectable from telemetry <a class="cite" href="#src-32">[32]</a>, and adding a macro-economic Spending Quotient lifted StarCraft II league prediction from 47% to 62% <a class="cite" href="#src-33">[33]</a> &mdash; the long-run case for VTSR-C's economy axes, recorded, not yet scored, judged by a confirmation sample <a class="cite" href="#src-79">[79]</a>.</p>
+                    </div>
+                </section>
+
+            <!-- 12 Roadmap -->
+            <section id="sec-roadmap" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">13. Roadmap v4</h3>
+                    <p class="text-slate-300 text-sm mb-4">Ranked by evidence available &times; leverage &divide; effort. Nothing below changes a published rating without a pre-registered rule passing.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-success"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-success"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 170 now. Same rule.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">4. Phase 7(b) &mdash; re-weight away from the wrong-way axes</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; pre-registered on the &sect;11 sign-agreement study with a hold-out of future matches.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">6. Phase 7(d) &mdash; small formats</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode admitting &le;2-per-side games to the wins ladder only; display-only small-format record on the player page; a rated small-format ladder, rule first, at &ge; 30 determined small games.</p></div>
+                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-accent"><div class="text-white font-medium">7. Display work, no rating consequence</div><p class="text-xs text-slate-400 mt-1">Faction matchup table and pick-share trend on the Meta tab; faction and playstyle profiles; commander burden beside VTSR-C.</p></div>
+                            </div>
+                    <div class="mt-6 bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm">
+                        <div class="text-xs font-mono uppercase text-danger mb-2">Do not do</div>
+                        <ul class="text-slate-300 space-y-1 list-disc list-inside text-xs">
+                            <li>Mix &le;2-per-side games into the lobby-relative composite (two-row z-scores are &plusmn;0.5 by construction)</li>
+                            <li>Three per-player faction ladders (median cell 8 matches)</li>
+                            <li>Inferred-role ladders (gameable; the Riot precedent)</li>
+                            <li>By-ship ladders (dilution; commander-assigned)</li>
+                            <li>A faction axis in VTSR-T (lobby-relative; penalizes thugs for a commander's choice)</li>
+                            <li>MAX or softmax as the opponent reference or the thug aggregation &mdash; both refuted</li>
+                            <li>Refit any frozen constant on the sample meant to judge it</li>
+                        </ul>
+                        </div>
+                    </div>
+                </section>
+
+            <!-- 13 History -->
+            <section id="sec-history" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">14. History: what v2 proposed and v3 found</h3>
+                    <p class="text-slate-300 text-sm mb-6">Condensed from the v3 page (full text in <code>critique/analysis-archive/elo-analysis-v3.md</code> <a class="cite" href="#src-78">[78]</a>). Two reforms refuted, one shipped.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                            <h4 class="text-white font-medium text-sm mb-2">Locked commander priors &mdash; refuted</h4>
+                            <p class="text-xs text-slate-400 mb-3">Re-rating with the two hand-tuned priors unlocked moved the most-affected player 3.9 ELO against a 27 ELO bootstrap noise floor. Kept canonical.</p>
+                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[260px]"><canvas id="priorsAblationChart"></canvas></div>
+                            </div>
+                            <div>
+                            <h4 class="text-white font-medium text-sm mb-2">MAX vs median opponent reference &mdash; refuted</h4>
+                            <p class="text-xs text-slate-400 mb-3">Hard MAX inflated the mean rating by +522, halved Spearman &rho; (0.46 &rarr; 0.19) and doubled bootstrap noise. Median kept. Inactivity K-boost (<code>+min(20, 0.05&middot;days)</code>) shipped the same phase.</p>
+                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[260px]"><canvas id="maxRatingDriftChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            <!-- 14 Sources -->
+            <section id="sec-sources" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">15. Sources cited</h3>
+                    <p class="text-slate-400 text-xs mb-6">Numbering is shared with <code>critique/elo-analysis-v4.md</code> Part IX, which carries full citation fields, access dates (2026-10-04) and a &ldquo;used for&rdquo; note per entry. Vendored PDFs are in <a class="text-sky-300" href="../../critique/publications/">critique/publications/</a>.</p>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-4 mb-2">A. Rating-system foundations</h4>
+                    <ol class="text-xs text-slate-300 space-y-1" start="1">
+                        <li id="src-1" class="src-item">[1] Elo, A. E. (1978). <em>The Rating of Chessplayers, Past and Present</em>. Arco (2nd ed. 1986).</li>
+                        <li id="src-2" class="src-item">[2] Bradley, R. A., &amp; Terry, M. E. (1952). Rank analysis of incomplete block designs: I. The method of paired comparisons. <em>Biometrika</em> 39(3/4), 324&ndash;345. doi:10.2307/2334029</li>
+                        <li id="src-3" class="src-item">[3] Davidson, R. R., &amp; Beaver, R. J. (1977). On extending the Bradley&ndash;Terry model to incorporate within-pair order effects. <em>Biometrics</em> 33(4), 693&ndash;702. doi:10.2307/2529467</li>
+                        <li id="src-4" class="src-item">[4] Glickman, M. E. (1999). Parameter estimation in large dynamic paired comparison experiments. <em>Applied Statistics</em> 48(3), 377&ndash;394. doi:10.1111/1467-9876.00159</li>
+                        <li id="src-5" class="src-item">[5] Glickman, M. E. (2001). Dynamic paired comparison models with stochastic variances. <em>J. Applied Statistics</em> 28(6), 673&ndash;689. <a class="text-sky-300" href="https://www.glicko.net/research/dpcmsv.pdf">glicko.net</a></li>
+                        <li id="src-6" class="src-item">[6] Glickman, M. E., &amp; Jones, A. C. (1999). Rating the chess rating system. <em>Chance</em> 12(2), 21&ndash;28. <a class="text-sky-300" href="https://glicko.net/research/chance.pdf">glicko.net</a></li>
+                        <li id="src-7" class="src-item">[7] Glickman, M. E. US Chess Ratings Committee report 2019 (<a class="text-sky-300" href="https://www.glicko.net/ratings/report19.txt">report19.txt</a>); <em>A Conversation with Mark Glickman</em>, Chess Life (<a class="text-sky-300" href="https://www.glicko.net/ratings/cl-article.pdf">cl-article.pdf</a>).</li>
+                        <li id="src-8" class="src-item">[8] Herbrich, R., Minka, T., &amp; Graepel, T. (2006). TrueSkill&trade;: A Bayesian skill rating system. <em>NIPS 19</em>, 569&ndash;576. <a class="text-sky-300" href="http://papers.neurips.cc/paper/3079-trueskilltm-a-bayesian-skill-rating-system.pdf">paper</a></li>
+                        <li id="src-9" class="src-item">[9] Minka, T., Cleven, R., &amp; Zaykov, Y. (2018). <em>TrueSkill 2: An improved Bayesian skill rating system</em>. MSR-TR-2018-8. <a class="text-sky-300" href="https://www.microsoft.com/en-us/research/publication/trueskill-2-improved-bayesian-skill-rating-system/">microsoft.com</a></li>
+                        <li id="src-10" class="src-item">[10] Weng, R. C., &amp; Lin, C.-J. (2011). A Bayesian approximation method for online ranking. <em>JMLR</em> 12, 267&ndash;300. <a class="text-sky-300" href="https://jmlr.org/papers/volume12/weng11a/weng11a.pdf">jmlr.org</a></li>
+                        <li id="src-11" class="src-item">[11] Joshy, V. (2024). OpenSkill: A faster asymmetric multi-team, multiplayer rating system. <em>JOSS</em> 9(93), 5901. doi:10.21105/joss.05901</li>
+                        <li id="src-12" class="src-item">[12] Coulom, R. (2008). Whole-History Rating. <em>Computers and Games (CG 2008)</em>, LNCS 5131, 113&ndash;124. <a class="text-sky-300" href="https://www.remi-coulom.fr/WHR/WHR.pdf">pdf</a></li>
+                        <li id="src-13" class="src-item">[13] Ebtekar, A., &amp; Liu, P. (2021). Elo-MMR: A rating system for massive multiplayer competitions. <em>WWW '21</em>. doi:10.1145/3442381.3450091; <a class="text-sky-300" href="https://arxiv.org/abs/2101.00400">arXiv:2101.00400</a></li>
+                        <li id="src-14" class="src-item">[14] Bodwin, G., &amp; Zhang, F. (2023). Opponent indifference in rating systems: A theoretical case for Sonas. <em>ITCS 2023</em>, LIPIcs 251. doi:10.4230/LIPIcs.ITCS.2023.21</li>
+                        <li id="src-15" class="src-item">[15] Rosenbaum, D. T. (2004). Measuring how NBA players help their teams win. <a class="text-sky-300" href="https://www.82games.com/comm30.htm">82games.com</a></li>
+                        <li id="src-16" class="src-item">[16] Sill, J. (2010). Improved NBA adjusted +/&minus; using regularization and out-of-sample testing. <em>MIT Sloan Sports Analytics Conference</em>.</li>
+                        <li id="src-17" class="src-item">[17] Ghimire, S., Ehrlich, J. A., &amp; Sanders, S. D. (2020). Does regularized adjusted plus minus isolate individual NBA player contributions? <em>PLOS ONE</em> 15(8): e0237920. doi:10.1371/journal.pone.0237920</li>
+                        <li id="src-18" class="src-item">[18] Hollinger, J. (2002). <em>Pro Basketball Prospectus: 2002 Edition</em>. Potomac Books; <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Player_efficiency_rating">PER (Wikipedia)</a>.</li>
+                        <li id="src-19" class="src-item">[19] FanGraphs Sabermetrics Library. <a class="text-sky-300" href="https://library.fangraphs.com/misc/war/positional-adjustment/">Positional Adjustment</a>; <a class="text-sky-300" href="https://library.fangraphs.com/war/war-position-players/">WAR for Position Players</a>; <a class="text-sky-300" href="https://library.fangraphs.com/the-beginners-guide-to-the-positional-adjustment/">Beginner's Guide</a>.</li>
+                        <li id="src-20" class="src-item">[20] Cameron, D. <a class="text-sky-300" href="https://blogs.fangraphs.com/position-adjustments/">Position Adjustments</a>. FanGraphs.</li>
+                        <li id="src-21" class="src-item">[21] FanGraphs. <a class="text-sky-300" href="https://blogs.fangraphs.com/the-issue-of-positional-inequality/">The Issue of Positional Inequality</a>.</li>
+                        <li id="src-22" class="src-item">[22] Tango, T., Lichtman, M., &amp; Dolphin, A. (2007). <em>The Book: Playing the Percentages in Baseball</em>. Potomac Books.</li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">B. Rating from in-match performance</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-23" class="src-item">[23] HLTV.org (2017). <a class="text-sky-300" href="https://www.hltv.org/news/20695/introducing-rating-20">Introducing Rating 2.0</a>.</li>
+                        <li id="src-24" class="src-item">[24] HLTV.org (2024). <a class="text-sky-300" href="https://www.hltv.org/news/40051/introducing-rating-21">Introducing Rating 2.1</a>.</li>
+                        <li id="src-25" class="src-item">[25] dave. <a class="text-sky-300" href="https://dave.xn--tckwe/posts/reverse-engineering-hltv-rating/">Reverse engineering the HLTV 2.0 rating</a>.</li>
+                        <li id="src-26" class="src-item">[26] Sardegna, C. <a class="text-sky-300" href="https://chrissardegna.com/blog/problems-with-csgo-rating-systems/">Exploring problems with Counter-Strike rating systems</a>.</li>
+                        <li id="src-27" class="src-item">[27] De Bois, M., Parmentier, F., Puget, R., Tanti, M., &amp; Peltier, J. (2025). PandaSkill &ndash; Player performance and skill rating in esports. <a class="text-sky-300" href="https://arxiv.org/abs/2501.10049">arXiv:2501.10049</a></li>
+                        <li id="src-28" class="src-item">[28] Chen, Z., Sun, Y., Seif El-Nasr, M., &amp; Nguyen, T.-H. D. (2016/2017). Player skill decomposition in MOBAs. <em>Meaningful Play 2016</em>; <a class="text-sky-300" href="https://arxiv.org/abs/1702.06253">arXiv:1702.06253</a></li>
+                        <li id="src-29" class="src-item">[29] Dehpanah, A., Ghori, M. F., Gemmell, J., &amp; Mobasher, B. (2021). Evaluating team skill aggregation in online competitive games. <em>IEEE CoG 2021</em>. <a class="text-sky-300" href="https://arxiv.org/abs/2106.11397">arXiv:2106.11397</a> (vendored PDF)</li>
+                        <li id="src-30" class="src-item">[30] Dehpanah, A., et al. (2021). The evaluation of rating systems in team-based battle royale games. <a class="text-sky-300" href="https://arxiv.org/abs/2105.14069">arXiv:2105.14069</a></li>
+                        <li id="src-31" class="src-item">[31] Bober-Irizar, M., Dua, N., &amp; McGuinness, M. (2024). Skill Issues: An analysis of CS:GO skill rating systems. <a class="text-sky-300" href="https://arxiv.org/abs/2410.02831">arXiv:2410.02831</a> (vendored PDF)</li>
+                        <li id="src-32" class="src-item">[32] Thompson, J. J., Blair, M. R., Chen, L., &amp; Henrey, A. J. (2013). Video game telemetry as a critical tool in the study of complex skill learning. <em>PLOS ONE</em> 8(9): e75129. doi:10.1371/journal.pone.0075129</li>
+                        <li id="src-33" class="src-item">[33] Chen, Y., Aitchison, M., &amp; Sweetser, P. (2020). Improving StarCraft II player league prediction with macro-level features. <em>AI 2020</em>, LNCS 12576, 256&ndash;268. doi:10.1007/978-3-030-64984-5_20</li>
+                        <li id="src-34" class="src-item">[34] Huang, J., Zimmermann, T., Nagappan, N., Harrison, C., &amp; Phillips, B. (2013). Mastering the art of war: How patterns of gameplay influence skill in Halo. <em>CHI 2013</em>. <a class="text-sky-300" href="https://jeffhuang.com/papers/HaloLearning_CHI13.pdf">pdf</a></li>
+                        <li id="src-35" class="src-item">[35] Lewis, J. M., Trinh, P., &amp; Kirsh, D. (2011). A corpus analysis of strategy video game play in StarCraft: Brood War. <em>CogSci 2011</em>. <a class="text-sky-300" href="https://escholarship.org/uc/item/3f69f8s4">escholarship</a></li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">C. Role- and faction-specific ratings in shipped games</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-36" class="src-item">[36] Blizzard Entertainment (2016). <a class="text-sky-300" href="https://news.blizzard.com/en-us/article/20308080/patch-3-7-separate-mmr-per-race">Patch 3.7: Separate MMR Per Race</a>.</li>
+                        <li id="src-37" class="src-item">[37] Blizzard Entertainment (2016). <a class="text-sky-300" href="https://news.blizzard.com/en-gb/article/20303494/starcraft-ii-legacy-of-the-void-3-7-0-patch-notes">StarCraft II: Legacy of the Void 3.7.0 Patch Notes</a>.</li>
+                        <li id="src-38" class="src-item">[38] Dota Team, Valve (2019-08-06). <em>Matchmaking Update</em> (Core and Support MMR). Text mirrored at <a class="text-sky-300" href="https://www.reddit.com/r/DotA2/comments/cmvnor/matchmaking_update/">r/DotA2</a>.</li>
+                        <li id="src-39" class="src-item">[39] Valve (2020-01-16). <a class="text-sky-300" href="https://store.steampowered.com/oldnews/57689">Dota 2 Update &ndash; January 16th, 2020</a>.</li>
+                        <li id="src-40" class="src-item">[40] Dota Team, Valve (2020-03-02). <a class="text-sky-300" href="http://blog.dota2.com/2020/03/ranked-roles-update/">Ranked Roles Update</a> (text mirrored at <a class="text-sky-300" href="https://devtrackers.gg/u/Dota%20Team">devtrackers.gg</a>).</li>
+                        <li id="src-41" class="src-item">[41] Altorfer, E. &ldquo;SapMagic&rdquo; (2018-08). <a class="text-sky-300" href="https://nexus.leagueoflegends.com/en-us/2018/08/dev-position-ranks-in-2019/">/dev: Position Ranks in 2019</a>. Riot Games.</li>
+                        <li id="src-42" class="src-item">[42] Altorfer, E. &ldquo;SapMagic&rdquo; (2019-03). <a class="text-sky-300" href="https://nexus.leagueoflegends.com/en-us/2019/03/dev-state-of-ranked/">/dev: State of Ranked</a>. Riot Games.</li>
+                        <li id="src-43" class="src-item">[43] Riot Games Developer Relations (2019-04-17). <a class="text-sky-300" href="https://www.riotgames.com/en/DevRel/riot-api-update-190417">Positional Ranking Deprecation</a>.</li>
+                        <li id="src-44" class="src-item">[44] Blizzard Entertainment (2019). <a class="text-sky-300" href="https://overwatch.blizzard.com/en-us/news/23060961/introducing-role-queue/">Introducing Role Queue</a>.</li>
+                        <li id="src-45" class="src-item">[45] Blizzard Entertainment, Overwatch forums (2019). <a class="text-sky-300" href="https://us.forums.blizzard.com/en/overwatch/t/role-queue-update/393978">Role Queue Update</a>.</li>
+                        <li id="src-46" class="src-item">[46] Dexerto (2019). <a class="text-sky-300" href="https://www.dexerto.com/overwatch/overwatch-developers-reveal-more-details-on-role-queue-820586/">Jeff Kaplan confirms role queue release date, role-based SR and more</a>.</li>
+                        <li id="src-47" class="src-item">[47] Mercer, S., &amp; Kaplan, J. (2020). <a class="text-sky-300" href="https://overwatch.blizzard.com/en-us/news/23572231/">The Whats, Whys, and Hows of the Overwatch Priority Pass</a>; Keller, A. (2024). <a class="text-sky-300" href="https://overwatch.blizzard.com/en-us/news/24104605/director-s-take-opening-up-the-conversation-on-5v5-and-6v6/">Director's Take: Opening up the conversation on 5v5 and 6v6</a>.</li>
+                        <li id="src-48" class="src-item">[48] Aligulac. <a class="text-sky-300" href="https://aligulac.com/about/faq/">Frequently Asked Questions</a>.</li>
+                        <li id="src-49" class="src-item">[49] Aligulac. <a class="text-sky-300" href="http://www.aligulac.com/db/">Database status</a>.</li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">D. FPS+RTS hybrids and their skill systems</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-50" class="src-item">[50] FreeAllegiance Wiki. <a class="text-sky-300" href="https://www.freeallegiance.org/FAW/index.php/Allegskill">AllegSkill</a>.</li>
+                        <li id="src-51" class="src-item">[51] FreeAllegiance Wiki. <a class="text-sky-300" href="https://www.freeallegiance.org/FAW/index.php/Stack_rating">Stack rating</a>.</li>
+                        <li id="src-52" class="src-item">[52] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Allegiance_(video_game)">Allegiance (video game)</a>.</li>
+                        <li id="src-53" class="src-item">[53] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Natural_Selection_(video_game)">Natural Selection (video game)</a>.</li>
+                        <li id="src-54" class="src-item">[54] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Savage:_The_Battle_for_Newerth">Savage: The Battle for Newerth</a>.</li>
+                        <li id="src-55" class="src-item">[55] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Nuclear_Dawn">Nuclear Dawn</a>.</li>
+                        <li id="src-56" class="src-item">[56] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Battlezone_(1998_video_game)">Battlezone (1998 video game)</a>.</li>
+                        <li id="src-57" class="src-item">[57] Wikipedia. <a class="text-sky-300" href="https://en.wikipedia.org/wiki/Battlezone_II:_Combat_Commander">Battlezone II: Combat Commander</a>.</li>
+                        <li id="src-58" class="src-item">[58] Unknown Worlds Entertainment (2020-10-16). <a class="text-sky-300" href="https://unknownworlds.com/en/news/introducing-hiveskill-3-0-per-team-and-commander-hiveskill-thank-you-moultano">Introducing Hiveskill 3.0: Per-Team and Commander Hiveskill</a>.</li>
+                        <li id="src-59" class="src-item">[59] Unknown Worlds Entertainment (2020-10-28). <a class="text-sky-300" href="https://unknownworlds.com/ns2/update-335-hive-3-0/">Update 335 &ndash; Hive Skill 3.0 Released!</a></li>
+                        <li id="src-60" class="src-item">[60] Unknown Worlds Entertainment (2016). <a class="text-sky-300" href="https://unknownworlds.com/ns2/build-310-now-live-steam/">Build 310 is now live on Steam!</a> (Hive 2.0).</li>
+                        <li id="src-61" class="src-item">[61] Unknown Worlds forums (2016). <a class="text-sky-300" href="https://forums.unknownworlds.com/discussion/146789/so-what-about-hive-2-0">So what about hive 2.0?</a></li>
+                        <li id="src-62" class="src-item">[62] Moultano (2014-08-04). <a class="text-sky-300" href="https://moultano.wordpress.com/2014/08/04/a-skill-ranking-system-for-natural-selection-2/">A skill ranking system for Natural Selection 2</a>.</li>
+                        <li id="src-63" class="src-item">[63] Steam. <a class="text-sky-300" href="https://store.steampowered.com/app/1494420/Silica/">Silica</a> (Bohemia Interactive, Early Access 2023).</li>
+                        <li id="src-64" class="src-item">[64] Steam. <a class="text-sky-300" href="https://store.steampowered.com/app/505740/Eximius_Seize_the_Frontline/">Eximius: Seize the Frontline</a> (Ammobox Studios).</li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">E. Matchmaking, engagement, small pools, incentives</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-65" class="src-item">[65] Chen, Z., Xue, S., Kolen, J., Aghdaie, N., Zaman, K. A., Sun, Y., &amp; Seif El-Nasr, M. (2017). EOMM: An engagement optimized matchmaking framework. <em>WWW 2017</em>. <a class="text-sky-300" href="https://arxiv.org/abs/1702.06820">arXiv:1702.06820</a></li>
+                        <li id="src-66" class="src-item">[66] Chen, M., Elmachtoub, A. N., &amp; Lei, X. (2024). Matchmaking strategies for maximizing player engagement in video games. <em>Management Science</em>. doi:10.1287/mnsc.2023.02957</li>
+                        <li id="src-67" class="src-item">[67] Kang, H., Suh, C., &amp; Kim, H. K. (2024). Match experiences affect interest: Impacts of matchmaking and performance on churn in a competitive game. <em>Heliyon</em> 10(3): e24891.</li>
+                        <li id="src-68" class="src-item">[68] Jaffe, A., Miller, A., Andersen, E., Liu, Y.-E., Karlin, A., &amp; Popovi&cacute;, Z. (2012). Evaluating competitive game balance with restricted play. <em>AIIDE 2012</em>.</li>
+                        <li id="src-69" class="src-item">[69] Diekmann, A. (1985). Volunteer's dilemma. <em>Journal of Conflict Resolution</em> 29(4), 605&ndash;610. doi:10.1177/0022002785029004003</li>
+                        <li id="src-70" class="src-item">[70] Strathern, M. (1997). &lsquo;Improving ratings&rsquo;: Audit in the British University system. <em>European Review</em> 5(3), 305&ndash;321.</li>
+                        <li id="src-71" class="src-item">[71] Campbell, D. T. (1979). Assessing the impact of planned social change. <em>Evaluation and Program Planning</em> 2(1), 67&ndash;90.</li>
+                        <li id="src-72" class="src-item">[72] Hardt, M., Megiddo, N., Papadimitriou, C., &amp; Wootters, M. (2016). Strategic classification. <em>ITCS 2016</em>, 111&ndash;122.</li>
+                        <li id="src-73" class="src-item">[73] Kleinberg, J., &amp; Raghavan, M. (2020). How do classifiers induce agents to invest effort strategically? <em>ACM TEAC</em> 8(4). doi:10.1145/3417742</li>
+                        <li id="src-74" class="src-item">[74] Nosek, B. A., &amp; Lakens, D. (2014). Registered Reports: A method to increase the credibility of published results. <em>Social Psychology</em> 45(3), 137&ndash;141. doi:10.1027/1864-9335/a000192</li>
+                        <li id="src-75" class="src-item">[75] Chambers, C. D. (2013). Registered Reports: A new publishing initiative at Cortex. <em>Cortex</em> 49(3), 609&ndash;610.</li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">F. Internal provenance</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-76" class="src-item">[76] <code>data/processed/elo_current.json</code> (schema 14, computed 2026-10-04), <code>elo_history.json</code>, <code>elo_commander_current.json</code> / <code>elo_commander_history.json</code> (schema 10, 675 duels), <code>matches.json</code> (228), <code>validation_summary.json</code>; <code>data/external/f9_ledger.json</code> + <code>f9_community.json</code> (<a class="text-sky-300" href="https://f9bomber.com">F9bomber</a>).</li>
+                        <li id="src-77" class="src-item">[77] <code>scripts/elo.py</code>, <code>scripts/elo_commander.py</code>, <code>scripts/validate_elo.py</code> v1.8 (&sect;1&ndash;&sect;20; &sect;15&ndash;&sect;19 regenerate every number in &sect;5 of this page, &sect;20 the numbers in &sect;10); <code>_validation/report.{md,json}</code> run of 2026-10-04.</li>
+                        <li id="src-78" class="src-item">[78] Prior reviews: <code>critique/analysis-archive/</code> (v1, v2, v3 and their plain editions); <code>fable/index.html</code> (June 2026 independent review); the external <code>.docx</code> critique.</li>
+                        <li id="src-79" class="src-item">[79] Decision memos in <code>critique/decisions/</code>: phase-2b (&times;2), 2c, 3, 4, 5, balonce-meter-t-term, f9-external-duels, vtsr-c-v2-composite, vtsr-c/t ladder eligibility, vtsr-inactivity-threshold, <strong>phase-6-faction-advantage-term</strong> (new).</li>
+                        <li id="src-80" class="src-item">[80] Operator answers recorded in the v4 planning thread (2026-10-04): faction chosen by the commander per team; volunteer commanders, hand-split teams; complaint mechanisms = lobby-relative scoring under a stomp + ship denial; roles are a blend of self-selection, commander direction and ship/weapon constraints.</li>
+                        <li id="src-81" class="src-item">[81] <code>ideas.txt</code> &sect;4 Faction Analytics (June 2026): faction balance is a meta property, not a player-skill property; the deferred faction-aware axis gate reassessed here.</li>
+                        <li id="src-82" class="src-item">[82] <code>DEVELOPER_GUIDE.md</code> &sect;13; <code>docs/DATA_DICTIONARY.md</code> &sect;11.</li>
+                    </ol>
+
+                    <h4 class="text-xs font-mono uppercase text-slate-400 mt-6 mb-2">G. Added in the format-gate addendum</h4>
+                    <ol class="text-xs text-slate-300 space-y-1">
+                        <li id="src-83" class="src-item">[83] Blizzard Entertainment. <a class="text-sky-300" href="https://news.blizzard.com/en-us/article/110519/leagues-and-ladders-faq">Leagues and Ladders FAQ</a> (StarCraft II: placement per mode, random-team rank per mode, arranged-team ratings).</li>
+                        <li id="src-84" class="src-item">[84] Liquipedia. <a class="text-sky-300" href="https://liquipedia.net/starcraft2/Battle.net_Leagues">Battle.net Leagues</a>.</li>
+                        <li id="src-85" class="src-item">[85] Chess.com (2012). <a class="text-sky-300" href="https://www.chess.com/news/view/first-rapid-and-blitz-rating-lists-to-appear-july-1st-2012">First rapid and blitz rating lists to appear July 1st, 2012</a>; FIDE (2012-06-30). <a class="text-sky-300" href="https://old.fide.com/component/content/article/1-fide-news/6270-july-2012-fide-rating-list.html">July 2012 FIDE Rating List</a>; Kosteniuk, A. (2012-07-01). <a class="text-sky-300" href="http://www.chessblog.com/2012/07/fide-inaugurates-new-rapid-and-blitz.html">FIDE inaugurates new Rapid and Blitz chess Rating Lists</a>.</li>
+                        <li id="src-86" class="src-item">[86] CSDB.gg. <a class="text-sky-300" href="https://csdb.gg/guides/ranks-guide/">How CS2 ranking works &mdash; Premier rating &amp; skill group system</a> (Wingman 2v2 on its own skill group). Third-party guide; Valve publishes no Wingman ranking documentation.</li>
+                    </ol>
+                                        </div>
+            </section>
+
+            <!-- 15 Perspective -->
+            <section id="sec-perspective" class="scroll-mt-8 mb-24">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">16. Author's perspective</h3>
+                    <div class="text-slate-300 text-sm leading-relaxed space-y-4">
+                        <p>I built this system, I command in it more than anyone else in the corpus, and I am rated by it the same way everyone else is. My own rows are in the tables above: forty-two commander matches at +3.3 a game, sixty-eight thug matches at &minus;0.7, a thug rating 98 points above my win ladder, a commander rating that sits in the middle of the pack. I did not pick those numbers and I cannot move them except by playing.</p>
+                        <p>The complaint is correct about the thing it is complaining about and wrong about the cause. VTSR-T is a performance rating. It was built to be one, and the data shows it behaving exactly like one: stable, calibrated, and disagreeing with winning in the specific way performance ratings always have &mdash; the way PER disagrees with plus-minus and HLTV disagrees with who lifted the trophy. When a strong thug loses rating on a lost game while out-performing the lobby, that is the system saying their expectation was higher than what they delivered against the room they were in. Whether that is the rating the community <em>wants</em> on the front page is a product question, and a fair one. It is not evidence that the math is unsound.</p>
+                        <p>What the complaint gets right is that two of the eight axes are rewarding the wrong thing, and that time on foot at base is being charged to the wrong account. Those are the two findings I would act on first, and both came out of looking rather than out of the argument.</p>
+                        <p>On factions: I was skeptical going in. The June position &mdash; meta property, not player property &mdash; still holds for VTSR-T. But the regression surprised me. A sixty-point Hadean effect that survives controlling for both commanders and both squads, with the same sign in two independent record sets, is not something I can call noise, and the honest response is the one in the memo: freeze a number, wait for games that have not been played, and let them decide. If the confirmation sample says I am wrong, the memo says so too.</p>
+                        <p>On roles and ships: no. Not because the people proposing them are wrong about what they are seeing, but because every version of a role rating that worked anywhere had the role declared before the match, and ours is a ship someone else built. The right fix for the commander adjustment is to measure a commander against their own thug numbers instead of the average commander's. That is an alt mode and a rule, like everything else.</p>
+                        <p>Every mechanism in this system is in use somewhere that pays people to get it right, and the two parts that are local inventions are the parts under test. Where the professionals disagree with each other &mdash; and on roles and factions they disagree with themselves across a single year &mdash; the only defensible position is to run the experiment with the rule written first. The memos have said no to me more often than yes, and several of the things they said no to were drafted by the tooling I am accused of trusting too much. The tooling does not get a vote. The validator does.</p>
+                        <p class="font-mono text-sky-300 text-xs">python scripts/validate_elo.py</p>
+                                        </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <script>
+        // ---- Chart defaults -------------------------------------------------
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = 'Inter, sans-serif';
+        Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(15, 23, 42, 0.92)';
+        Chart.defaults.plugins.tooltip.titleColor = '#fff';
+        Chart.defaults.plugins.tooltip.borderColor = '#334155';
+        Chart.defaults.plugins.tooltip.borderWidth = 1;
+        const grid = { color: '#1e293b' };
+
+        // ---- 1. Trend (validation_summary.json history, one point per distinct
+        // rated-match count; x = rated matches). Source: data/processed/validation_summary.json
+        // history[] as of 2026-10-04.
+        const trendRated = [107,110,111,112,113,115,118,119,120,121,122,123,124,125,128,129,132,136,139,144,145,146,147,150,157,160,161,162,165,166,167,168,170,171,172,173,174,175,178,179,180,181,186,188,190,193];
+        const trendCw   = [37.5,42.9,41.7,40.5,39.5,42.5,46.5,47.7,48.9,50.0,51.1,50.0,49.0,48.0,47.2,48.1,49.1,50.8,54.7,55.0,55.4,54.9,55.3,54.8,56.4,55.9,55.5,55.8,54.6,55.6,55.2,54.9,55.5,55.8,55.4,55.7,56.0,56.3,57.1,57.4,57.1,57.3,58.0,58.5,58.4,58.6];
+        const trendVc   = [null,null,56.8,55.3,53.8,56.1,54.5,55.6,56.5,57.4,58.3,57.1,58.0,58.8,61.1,61.8,60.3,61.3,63.1,66.2,66.2,66.3,66.2,66.0,66.3,66.1,66.2,66.1,65.9,65.8,65.9,65.8,65.7,65.8,65.7,65.7,65.8,65.7,65.7,65.7,65.6,65.7,65.5,65.4,65.4,65.4];
+        new Chart(document.getElementById('trendChart'), {
+            type: 'line',
+            data: {
+                labels: trendRated,
+                datasets: [
+                    { label: 'Winner from team mean R (%)', data: trendCw, borderColor: '#38bdf8', backgroundColor: 'transparent', tension: 0.25, borderWidth: 2, pointRadius: 2 },
+                    { label: 'VTSR-C duel prediction (%)', data: trendVc, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.25, borderWidth: 2, pointRadius: 2, spanGaps: true },
+                    { label: 'Coin flip', data: trendRated.map(() => 50), borderColor: '#64748b', borderDash: [4, 4], borderWidth: 1, pointRadius: 0 }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false,
+                scales: { x: { title: { display: true, text: 'Rated matches in corpus', color: '#64748b' }, grid, ticks: { maxTicksLimit: 8 } }, y: { min: 30, max: 75, grid, title: { display: true, text: '%', color: '#64748b' } } },
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, color: '#e2e8f0' } }, title: { display: true, text: 'Accuracy vs corpus size (every validator run since 2026-08-23)', color: '#e2e8f0', font: { size: 12 } } } }
+        });
+
+        // ---- 5.1 thug_elo vs wins_elo scatter (validator §15, players with >= 20 matches)
+        const pvw = [{"x":1501,"y":1760,"n":"Domakus"},{"x":1555,"y":1796,"n":"VTrider"},{"x":1393,"y":1630,"n":"Cloaket"},{"x":1519,"y":1700,"n":"Snake"},{"x":1588,"y":1766,"n":"Muffin"},{"x":1459,"y":1635,"n":"Nomad"},{"x":1465,"y":1603,"n":"Herp McDerperson"},{"x":1505,"y":1641,"n":"Vivify"},{"x":1507,"y":1616,"n":"F9bomber"},{"x":1556,"y":1656,"n":"Cyber"},{"x":1492,"y":1590,"n":"Sev"},{"x":1507,"y":1590,"n":"mort"},{"x":1561,"y":1619,"n":"blue"},{"x":1506,"y":1563,"n":"Certified Bad Guy"},{"x":1445,"y":1493,"n":"sponge"},{"x":1483,"y":1529,"n":"Darkvale"},{"x":1517,"y":1559,"n":"econchump"},{"x":1527,"y":1559,"n":"Lithium"},{"x":1493,"y":1480,"n":"HappyOtter"},{"x":1461,"y":1416,"n":"Monkey"},{"x":1508,"y":1447,"n":"dd"},{"x":1505,"y":1444,"n":"judgeguns"},{"x":1518,"y":1455,"n":"Totokomo"},{"x":1457,"y":1387,"n":"DraconisMarch"}];
+        new Chart(document.getElementById('perfWinsChart'), {
+            type: 'scatter',
+            data: { datasets: [
+                { label: 'Player (>= 20 matches)', data: pvw, backgroundColor: pvw.map(p => p.y - p.x > 0 ? '#38bdf8' : '#fbbf24'), pointRadius: 5 },
+                { label: 'thug_elo = wins_elo', type: 'line', data: [{x: 1380, y: 1380}, {x: 1620, y: 1620}], borderColor: '#64748b', borderDash: [5, 5], borderWidth: 1, pointRadius: 0 }
+            ] },
+            options: { responsive: true, maintainAspectRatio: false,
+                scales: { x: { title: { display: true, text: 'wins_elo (W/L ladder, inert)', color: '#64748b' }, min: 1380, max: 1620, grid }, y: { title: { display: true, text: 'thug_elo (published composite)', color: '#64748b' }, min: 1360, max: 1820, grid } },
+                plugins: { legend: { display: false }, title: { display: true, text: 'Spearman 0.381 · Pearson 0.425 · n = 24', color: '#e2e8f0', font: { size: 12 } },
+                    tooltip: { callbacks: { label: c => `${c.raw.n}: thug ${c.raw.y}, wins ${c.raw.x} (gap ${c.raw.y - c.raw.x > 0 ? '+' : ''}${c.raw.y - c.raw.x})` } } } }
+        });
+
+        // ---- 5.2 Stomp effect (validator §16)
+        new Chart(document.getElementById('stompChart'), {
+            type: 'bar',
+            data: { labels: ['Mean Δ, winners', 'Mean Δ, losers', 'Mean Δ, ≥1650 winners', 'Mean Δ, ≥1650 losers'],
+                datasets: [{ label: 'Mean rating change per match', data: [7.61, -5.59, 6.16, -6.49], backgroundColor: ['#10b981', '#f43f5e', '#10b981', '#f43f5e'], borderRadius: 4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: '1,084 determined thug rows · η² (P by outcome) = 0.21', color: '#e2e8f0', font: { size: 12 } } },
+                scales: { y: { grid, title: { display: true, text: 'ELO per match', color: '#64748b' } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+        });
+
+        // ---- 5.3 Ship-denial gradient (validator §17)
+        new Chart(document.getElementById('shipDenialChart'), {
+            type: 'bar',
+            data: { labels: ['<5%', '5–15%', '15–30%', '≥30%'],
+                datasets: [
+                    { label: 'Mean Δ (all)', data: [8.95, 2.48, -4.51, -11.41], backgroundColor: '#38bdf8', borderRadius: 3 },
+                    { label: 'Mean Δ when team won', data: [11.84, 6.80, 1.56, -2.71], backgroundColor: '#10b981', borderRadius: 3 },
+                    { label: 'Mean Δ when team lost', data: [-1.96, -2.73, -6.97, -12.67], backgroundColor: '#f43f5e', borderRadius: 3 }
+                ] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10, color: '#e2e8f0', font: { size: 10 } } }, title: { display: true, text: 'Share of match on foot at own base (n = 248 / 459 / 298 / 79)', color: '#e2e8f0', font: { size: 12 } } },
+                scales: { y: { grid, title: { display: true, text: 'ELO per match', color: '#64748b' } }, x: { grid: { display: false } } } }
+        });
+
+        // ---- 5.4 Axis sign agreement (validator §11, n = 170 determined matches)
+        new Chart(document.getElementById('axisChart'), {
+            type: 'bar',
+            data: { labels: ['net_damage_share (.20)', 'mobility (.08)', 'thug_kill_rate (.20)', 'pve_share (.12)', 'target_lock_pct (.005)', 'thug_efficiency (.16)', 'thug_accuracy (.15)', 'snipe_bonus (.005)'],
+                datasets: [{ label: 'Winner has the higher team mean (%)', data: [88.2, 88.2, 85.6, 78.8, 42.2, 39.4, 39.4, 22.4], backgroundColor: [88.2, 88.2, 85.6, 78.8, 42.2, 39.4, 39.4, 22.4].map(v => v >= 50 ? '#10b981' : '#f43f5e'), borderRadius: 3 }] },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Axis vs outcome: sign agreement (50% = no relation)', color: '#e2e8f0', font: { size: 12 } } },
+                scales: { x: { min: 0, max: 100, grid }, y: { grid: { display: false }, ticks: { font: { size: 10 } } } } },
+            plugins: [{ id: 'fifty', afterDraw: (chart) => { const ctx = chart.ctx, x = chart.scales.x.getPixelForValue(50), y = chart.scales.y; ctx.save(); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x, y.top); ctx.lineTo(x, y.bottom); ctx.stroke(); ctx.restore(); } }]
+        });
+
+        // ---- 5.5 Commander vs thug mean Δ per player (validator §18, >= 5 rows in both roles)
+        const cvt = [{"n":"Sev","c":3.31,"t":-0.72},{"n":"Lithium","c":-4.02,"t":3.04},{"n":"F9bomber","c":-0.31,"t":1.21},{"n":"Darkvale","c":-0.95,"t":0.82},{"n":"Snake","c":8.38,"t":-0.76},{"n":"Cloaket","c":6.82,"t":-1.27},{"n":"VTrider","c":0.76,"t":3.01},{"n":"Vivify","c":-0.43,"t":2.06},{"n":"Domakus","c":7.09,"t":2.03},{"n":"Nomad","c":0.25,"t":1.09},{"n":"Certified Bad Guy","c":2.44,"t":0.74},{"n":"blue","c":11.31,"t":-4.38},{"n":"DraconisMarch","c":-5.57,"t":-3.7},{"n":"econchump","c":0.97,"t":1.39},{"n":"Muffin","c":14.5,"t":4.12},{"n":"Cyber","c":-4.92,"t":8.43},{"n":"HappyOtter","c":-4.51,"t":0.17},{"n":"Herp McDerperson","c":3.17,"t":2.56},{"n":"dd","c":-2.39,"t":-2.05}];
+        new Chart(document.getElementById('cmdrChart'), {
+            type: 'bar',
+            data: { labels: cvt.map(p => p.n), datasets: [
+                { label: 'Mean Δ as commander', data: cvt.map(p => p.c), backgroundColor: '#a78bfa', borderRadius: 3 },
+                { label: 'Mean Δ as thug', data: cvt.map(p => p.t), backgroundColor: '#38bdf8', borderRadius: 3 }
+            ] },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10, color: '#e2e8f0', font: { size: 10 } } }, title: { display: true, text: 'Cohort means: commanders +2.07 · thugs +0.93 (ordered by commander rows)', color: '#e2e8f0', font: { size: 12 } } },
+                scales: { x: { grid, title: { display: true, text: 'ELO per match', color: '#64748b' } }, y: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+        });
+
+        // ---- 5.6 Faction: raw non-mirror matchups + adjusted effect (validator §19)
+        new Chart(document.getElementById('factionChart'), {
+            type: 'bar',
+            data: { labels: ['Hadean vs ISDF (n=122)', 'Hadean vs Scion (n=107)', 'Scion vs ISDF (n=177)'],
+                datasets: [{ label: 'First faction win rate (%)', data: [64.8, 57.9, 49.2], backgroundColor: ['#f43f5e', '#f43f5e', '#64748b'], borderRadius: 4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Raw non-mirror win rates · adjusted Hadean effect +0.357 logit ≈ +62 pts (z 2.27)', color: '#e2e8f0', font: { size: 11 } } },
+                scales: { y: { min: 0, max: 100, grid }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } },
+            plugins: [{ id: 'fifty2', afterDraw: (chart) => { const ctx = chart.ctx, y = chart.scales.y.getPixelForValue(50), x = chart.scales.x; ctx.save(); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x.left, y); ctx.lineTo(x.right, y); ctx.stroke(); ctx.restore(); } }]
+        });
+        const months = [["2025-01",40,35],["2025-02",14,21],["2025-03",2,50],["2025-04",40,25],["2025-05",26,19],["2025-06",8,0],["2025-07",32,16],["2025-08",76,16],["2025-09",74,8],["2025-10",76,9],["2025-11",26,15],["2025-12",48,10],["2026-01",98,12],["2026-02",120,12],["2026-03",106,25],["2026-04",172,20],["2026-05",144,17],["2026-06",16,19],["2026-07",6,33],["2026-08",58,33],["2026-09",134,37],["2026-10",34,38]];
+        new Chart(document.getElementById('hadeanShareChart'), {
+            type: 'line',
+            data: { labels: months.map(m => m[0]), datasets: [{ label: 'Hadean share of team-sides (%)', data: months.map(m => m[2]), borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,0.12)', fill: true, tension: 0.3, pointRadius: months.map(m => m[1] < 20 ? 2 : 4) }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Hadean pick share by month (small points = under 20 sides)', color: '#e2e8f0', font: { size: 11 } }, tooltip: { callbacks: { label: c => `${c.parsed.y}% of ${months[c.dataIndex][1]} sides` } } },
+                scales: { y: { min: 0, max: 60, grid }, x: { grid, ticks: { maxTicksLimit: 8, font: { size: 10 } } } } }
+        });
+
+        // ---- 10. Format gate (validator §20): small-format (<=2 per side, >=240 s, n=21) vs rated full format (n=193),
+        // each metric shown as a ratio to the full-format median so three scales fit one chart.
+        const fmtSmall = { kpm: 0.42, dmgpm: 2754, pve: 0.68, dpm: 0.16, dur: 1295 };
+        const fmtFull  = { kpm: 0.31, dmgpm: 2206, pve: 0.60, dpm: 0.17, dur: 968 };
+        const fmtKeys = ['kpm', 'dmgpm', 'pve', 'dpm', 'dur'];
+        const fmtLabels = ['Kills / player-min', 'Damage / player-min', 'PvE share', 'Deaths / player-min', 'Duration'];
+        new Chart(document.getElementById('formatDynChart'), {
+            type: 'bar',
+            data: { labels: fmtLabels, datasets: [
+                { label: 'Small format (≤2 per side), relative to full format', data: fmtKeys.map(k => +(fmtSmall[k] / fmtFull[k]).toFixed(3)), backgroundColor: '#a78bfa', borderRadius: 3 },
+                { label: 'Rated full format = 1.0', data: fmtKeys.map(() => 1.0), backgroundColor: '#475569', borderRadius: 3 }
+            ] },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, color: '#e2e8f0', font: { size: 10 } } }, title: { display: true, text: 'Game dynamics: small format as a ratio of the full-format median', color: '#e2e8f0', font: { size: 11 } },
+                    tooltip: { callbacks: { label: c => { const k = fmtKeys[c.dataIndex]; return c.datasetIndex === 0 ? `small ${fmtSmall[k]} vs full ${fmtFull[k]} (×${c.parsed.y})` : `full-format median ${fmtFull[k]}`; } } } },
+                scales: { y: { min: 0, max: 1.6, grid, title: { display: true, text: '× full-format median', color: '#64748b' } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+        });
+        // Transfer test: does the higher pre-match rating pick the small-format winner? (15 determined games)
+        new Chart(document.getElementById('formatTransferChart'), {
+            type: 'bar',
+            data: { labels: ['Higher team-mean VTSR-T', 'Higher leader VTSR-C', 'Team-mean VTSR-T on full games (ref.)'],
+                datasets: [{ label: 'Picked the winner (%)', data: [66.7, 53.3, 58.6], backgroundColor: ['#38bdf8', '#f43f5e', '#475569'], borderRadius: 4 }] },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, title: { display: true, text: 'Transfer test: 10/15 (CI 42–85%) vs 8/15 (CI 30–75%)', color: '#e2e8f0', font: { size: 11 } } },
+                scales: { y: { min: 0, max: 100, grid, title: { display: true, text: '%', color: '#64748b' } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } },
+            plugins: [{ id: 'fifty3', afterDraw: (chart) => { const ctx = chart.ctx, y = chart.scales.y.getPixelForValue(50), x = chart.scales.x; ctx.save(); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(x.left, y); ctx.lineTo(x.right, y); ctx.stroke(); ctx.restore(); } }]
+        });
+
+        // ---- 14. History charts (carried from the v3 page)
+        // Priors ablation: top 15 commander rating deltas canonical -> unlocked vs the 27 ELO noise floor.
+        // Source: critique/decisions/phase-2b-priors-ablation.md §4.
+        new Chart(document.getElementById('priorsAblationChart'), {
+            type: 'bar',
+            data: { labels: ['vacuum34','Darkvale','blue','Cloaket','Snake','Sev','Lithium','C.Bad Guy','Nomad','F9bomber','econchump','dd','VTrider','Waddles','judgeguns'],
+                datasets: [{ label: 'Rating delta (canonical → unlocked, ELO)', data: [-3.9,-3.8,-3.5,-3.3,-3.0,-3.0,-3.0,-3.0,-2.7,-2.7,-2.7,-2.6,-2.5,-2.5,-2.5], backgroundColor: '#94a3b8', borderRadius: 3 }] },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                scales: { x: { min: -30, max: 5, grid, title: { display: true, text: 'ELO delta', color: '#64748b', font: { size: 10 } } }, y: { grid: { display: false }, ticks: { font: { size: 9 } } } } },
+            plugins: [{ id: 'noiseFloor', afterDraw: (chart) => { const ctx = chart.ctx, xA = chart.scales.x, yA = chart.scales.y; const xL = xA.getPixelForValue(-27), xR = xA.getPixelForValue(0); ctx.save(); ctx.fillStyle = 'rgba(251,191,36,0.10)'; ctx.fillRect(xL, yA.top, xR - xL, yA.bottom - yA.top); ctx.strokeStyle = '#fbbf24'; ctx.setLineDash([4,4]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xL, yA.top); ctx.lineTo(xL, yA.bottom); ctx.stroke(); ctx.fillStyle = '#fbbf24'; ctx.font = '10px Inter'; ctx.fillText('27 ELO noise floor →', xL + 4, yA.top + 14); ctx.restore(); } }]
+        });
+        // MAX vs median: validator headline metrics, three full re-rates (n=100). Source: phase-2c-max-vs-median.md §1.
+        new Chart(document.getElementById('maxRatingDriftChart'), {
+            type: 'bar',
+            data: { labels: ['Spearman ρ (×1000)', 'Mean rating − 1500', 'Bootstrap σ (ELO)'],
+                datasets: [
+                    { label: 'Canonical (median)', data: [462, 32, 27], backgroundColor: '#10b981', borderRadius: 3 },
+                    { label: 'Softmax MAX (τ=200)', data: [359, 163, 32], backgroundColor: '#fbbf24', borderRadius: 3 },
+                    { label: 'Hard MAX', data: [188, 522, 50], backgroundColor: '#f43f5e', borderRadius: 3 }
+                ] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10, color: '#e2e8f0', font: { size: 10 } } } },
+                scales: { y: { grid }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+        });
+    </script>
+</body>
+</html>

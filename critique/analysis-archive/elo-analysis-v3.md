@@ -817,4 +817,4 @@ If the next critique pass surfaces a finding I have not anticipated, I would rat
 
 ---
 
-*v3 finalized after Phase 2B + 2C empirical work landed in commit `bb65e29`. Decision memos in [critique/decisions/](critique/decisions/) are canonical for the per-phase experimental records. v2 in [critique/elo-analysis-v2.md](critique/elo-analysis-v2.md) is preserved as historical reference.*
+*v3 finalized after Phase 2B + 2C empirical work landed in commit `bb65e29`. Decision memos in [critique/decisions/](critique/decisions/) are canonical for the per-phase experimental records. v2 in [critique/analysis-archive/elo-analysis-v2.md](critique/analysis-archive/elo-analysis-v2.md) is preserved as historical reference. Superseded by [critique/elo-analysis-v4.md](critique/elo-analysis-v4.md) (2026-10-04); archived here unchanged.*

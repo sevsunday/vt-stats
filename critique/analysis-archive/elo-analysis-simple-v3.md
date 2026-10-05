@@ -47,7 +47,7 @@ flowchart TD
     p2c --> v3
 ```
 
-Three decision memos document each Phase 2 experiment in detail. They are linked in the in-depth doc at [critique/elo-analysis-v3.md](critique/elo-analysis-v3.md) section 1, and live in `critique/decisions/`.
+Three decision memos document each Phase 2 experiment in detail. They are linked in the in-depth doc at [critique/analysis-archive/elo-analysis-v3.md](critique/analysis-archive/elo-analysis-v3.md) section 1, and live in `critique/decisions/`.
 
 ### 1.2. VTSR-T in one paragraph (recap)
 
@@ -261,7 +261,7 @@ Five items closed. Five items remain open in some form, all addressed in Part 5.
 
 ## Part 6 — Source critiques (preserved)
 
-The original v2 critique material is preserved in detail in the in-depth doc at [critique/elo-analysis-v3.md](critique/elo-analysis-v3.md) Appendices A-D. A condensed summary follows for readers staying in the plain edition.
+The original v2 critique material is preserved in detail in the in-depth doc at [critique/analysis-archive/elo-analysis-v3.md](critique/analysis-archive/elo-analysis-v3.md) Appendices A-D. A condensed summary follows for readers staying in the plain edition.
 
 ### 6.1. The two source critiques
 
@@ -349,4 +349,4 @@ If a future critic surfaces a finding I have not anticipated, I would rather see
 
 ---
 
-*v3 finalized after Phase 2B + 2C empirical work landed. Decision memos in `critique/decisions/` are canonical for the per-phase experimental records. v2 in `critique/elo-analysis-simple-v2.md` is preserved as historical reference.*
+*v3 finalized after Phase 2B + 2C empirical work landed. Decision memos in `critique/decisions/` are canonical for the per-phase experimental records. v2 in `critique/analysis-archive/elo-analysis-simple-v2.md` is preserved as historical reference. Superseded by `critique/elo-analysis-simple-v4.md` (2026-10-04); archived here unchanged.*
