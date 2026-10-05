@@ -17,7 +17,7 @@
 
 ## Reading guide
 
-Part 1 is where things stand (including a map of where every piece of the system comes from). Part 2 is the validation record and how a change gets made here. Part 3 is the complaint with numbers. Part 4 is the case for the current design. Part 5 is the proposals, both sides. Part 6 is matchmaking. Part 7 is what makes this genre different. Part 8 is the roadmap. Part 9 is a FAQ in the community's own questions. Part 10 is the sources. Part 11 is the author's view.
+Part 1 is where things stand (including a map of where every piece of the system comes from). Part 2 is the validation record and how a change gets made here. Part 3 is the complaint with numbers. Part 4 is the case for the current design. Part 5 is the proposals, both sides. Part 6 is matchmaking. Part 7 is what makes this genre different. Part 8 is the roadmap. Part 9 is a FAQ in the community's own questions (the web page at `/elo/analysis/` opens with the same questions as a "Quick answers" card). Part 10 is the sources. Part 11 is the author's view.
 
 ---
 
@@ -242,6 +242,9 @@ The hard part isn't two jobs, it's that the jobs are *coupled*: your measurable 
 **Why did my rating drop when my commander fed?**
 Because the rating compares you to the whole lobby, including the enemy team, and a stomped team scores below the room on almost every axis. Your team's result explains about a fifth of your per-match score (3.2). If you were on foot at base for a third of the match waiting for a ship, that alone averages −11 (3.3). The system is not fining you for the loss; it is fining you for not beating the room by as much as your rating said you would — and that is hard to do from the pad. v4 proposes extending the ship-denied-time correction to everyone (Part 8, item 5).
 
+**Why isn't win/loss part of VTSR-T?**
+It is already computed — a win/loss ladder (R^W) runs beside the performance rating on every rated match — but its weight in the published number is zero. Twice it has been tested as a blend and twice held, because it did not predict matches any better and a team result is a weak signal about one player in a ten-player game. It will be re-tested now that there are 170 matches with a known winner instead of 39 (3.1, Part 8 item 2). The commander rating, VTSR-C, is pure win/loss already (1.1).
+
 **Why not SC2-style faction MMR?**
 SC2 is 1v1, you pick your own race, and there are millions of players. Here the commander picks the faction and there are 45 of us; three ladders would leave most people provisional forever (median 8 matches per player-faction). What *does* transfer is the idea that the matchup itself carries an edge — so v4 proposes one faction term in the commander ladder's prediction, the same device chess uses for white's first move, to be confirmed on future games (5.1).
 
@@ -254,6 +257,12 @@ On average, the opposite: commander-matches gain +2.1 versus +0.9 for thug-match
 **Is Hadean OP?**
 Hadean wins more than its commanders' and thugs' ratings explain — about 62 commander-rating points' worth — and Hadean picks have tripled in a year. That is strong enough to pre-register a correction and not strong enough to ship one: it is judged on games played after this document (3.6).
 
+**Why no per-ship rating?**
+The commander builds your ship, it changes several times a match, and per-player-per-ship samples are far thinner than even per-faction ones. The one study that looked found hero-specific skill mattered in League and added little in Dota 2. Accuracy is already normalized per weapon. The Loadout tab shows your per-ship record; it never becomes a ladder (5.3).
+
+**What's the difference between VTSR-T and VTSR-C?**
+VTSR-T (thug) is a performance rating: eight in-match measurements scored against the lobby you played in, so it moves on how you played, not only on who won. VTSR-C (commander) is a classic win/loss rating between the two commanders, with a handicap for how strong each side's thugs were. Two ladders is the genre's own answer — Allegiance and Natural Selection 2 both split the commander from the field player — and it is why taking the chair does not touch your thug rating (1.1, Part 4).
+
 **Why don't 1v1s and 2v2s count?**
 Because the thug rating scores you against the room, and a room of two or four is too small to score — two players come out at exactly ±0.5 on every axis no matter what happened (5.4). The games aren't worthless: the better-rated side wins them 10 times in 15, so they carry real information. They just can't go into a rating built for six-to-ten-player rooms, and every big game that hit this problem (StarCraft II, chess, Counter-Strike's Wingman) put the small format on its own ladder instead. That's the roadmap here too: a separate small-format record first, a small-format ladder once there are enough results.
 
@@ -263,8 +272,14 @@ Because it is a performance rating, not a win rating, and the two have always di
 **Is any of this based on real statistics, or on what an AI said?**
 Every mechanism in the system is in use somewhere that pays people to get it right — the table in 1.3 names them: Elo, Glicko, TrueSkill 2, HLTV, PandaSkill, AllegSkill, Hive, baseball WAR, Bradley–Terry. The AI drafted documents and proposals; the proposals went through the same written-in-advance test as everyone else's, and the ones it drafted have mostly lost (2.3). Nothing changes a published rating without passing a rule written before the data existed.
 
+**Why doesn't the site just balance the teams for us?**
+With 20–25 active players, volunteer commanders and hand-split teams there is nothing to matchmake; the ratings can only describe the lobby honestly. The Tools page's Balonce Meter does exactly that — it prints the win probability the commander ladder assigns to any split, using the same formula that calls 65.4% of 675 duels. The research also says perfectly fair matches are not even the engagement optimum, and that paying people to take the unpopular role fades within weeks (Part 6).
+
 **How can I verify any of this myself?**
 Clone the repository and run `python scripts/validate_elo.py`. It writes `_validation/report.md`; sections §15–§19 are the numbers in Part 3, §20 is the small-format section (5.4), §1–§9 are Part 2, §10 is the commander ladder, §11 is the axis table. The decision memos are in `critique/decisions/`.
+
+**What is actually going to change?**
+Only what passes its pre-registered rule. Queued: the faction term in the commander ladder (needs 60 more duels), a fresh test of blending win/loss into VTSR-T (170 matches now against 39 last time), and three what-if versions of the thug rating — the commander adjustment against your own baseline, re-weighting away from the two wrong-way axes, ship-denied-time credit for all tiers — plus a small-format record. Nothing on the "Not doing" list is coming back (Part 8).
 
 ---
 

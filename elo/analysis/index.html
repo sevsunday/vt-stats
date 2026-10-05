@@ -42,6 +42,14 @@
         table.vt td, table.vt th { padding: 0.35rem 0.6rem; }
         table.vt tr { border-bottom: 1px solid rgba(148,163,184,0.15); }
         table.vt th { color: #94a3b8; font-weight: 500; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        /* Quick answers (FAQ): native <details>, no JS. */
+        .faq-q { list-style: none; cursor: pointer; }
+        .faq-q::-webkit-details-marker { display: none; }
+        .faq-q .faq-chev { transition: transform 0.15s ease; }
+        details[open] > .faq-q .faq-chev { transform: rotate(90deg); }
+        .faq-link { display: inline-flex; align-items: center; gap: 0.25rem; border: 1px solid #334155; background: #0f172a; border-radius: 0.375rem; padding: 0.125rem 0.5rem; color: #7dd3fc; font-size: 0.72rem; text-decoration: none; white-space: nowrap; }
+        .faq-link:hover { color: #fff; border-color: #475569; }
+        .faq-link.ext::after { content: '\2197'; font-size: 0.65rem; opacity: 0.7; }
     </style>
 </head>
 <body class="antialiased min-h-screen flex flex-col md:flex-row">
@@ -64,6 +72,7 @@
             <p class="text-xs text-slate-400">Both sides of the coin &middot; 2026-10-04</p>
         </div>
         <nav class="space-y-1 text-sm">
+            <a href="#sec-faq" class="block px-3 py-1.5 rounded-lg text-warning hover:bg-slate-800 hover:text-amber-200 font-medium">Quick answers</a>
             <a href="#sec-where" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">1 Where we are</a>
             <a href="#sec-provenance" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">2 Where it comes from</a>
             <a href="#sec-gate" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">3 How a number becomes a rule</a>
@@ -104,6 +113,128 @@
         </header>
 
         <div class="max-w-5xl mx-auto space-y-16">
+
+            <!-- Quick answers (FAQ). Unnumbered on purpose: the sixteen numbered
+                 sections and every in-text cross-reference stay stable. Each answer
+                 reuses figures already on this page and links to the section that
+                 carries them; "ext" links open the ELO page's explainer pills. -->
+            <section id="sec-faq" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">Quick answers</h3>
+                    <p class="text-slate-300 text-sm mb-4">The questions the community actually asks, in plain words. Every answer links to the numbered section that carries the numbers, and to the <a class="text-sky-300 hover:text-white" href="../">ELO page</a> where the mechanics are explained step by step.</p>
+                    <div class="divide-y divide-slate-700/70">
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why don&rsquo;t 1v1s and 2v2s count?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">VTSR-T scores you against the room you played in. With two players in the room every stat comes out at exactly &plusmn;0.5 no matter what happened, and with four the spread is noise &mdash; the math has nothing to measure. The games are not worthless: the better-rated side won 10 of the 15 we have a result for. So the plan is a separate small-format record first, and a small-format ladder once there are enough results &mdash; the way StarCraft II, chess and Counter-Strike&rsquo;s Wingman each handle a different format.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-format">&sect;10 Include all games?</a> <a class="faq-link" href="#roadmap-6">&sect;13 Roadmap, item 6</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why isn&rsquo;t win/loss part of VTSR-T?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">It is already computed &mdash; a win/loss ladder runs beside the performance rating on every rated match &mdash; but its weight in the published number is zero. Twice it has been tested as a blend and twice held, because it did not predict matches any better and a team result is a weak signal about one player in a ten-player game. It will be re-tested now that there are 170 determined matches instead of 39. The commander rating, VTSR-C, is pure win/loss already.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-complaint-1">&sect;5.1 Performance vs wins</a> <a class="faq-link" href="#roadmap-2">&sect;13 Roadmap, item 2</a> <a class="faq-link ext" href="../?tab=how">ELO &middot; How it works</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why did my rating drop when we got stomped, or when my commander fed?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Because you are measured against everyone in the lobby, both teams, and a stomped team scores below the room on almost every axis. Your team&rsquo;s result explains about a fifth of your per-match score; a third of the match spent on foot at base waiting for a ship averages &minus;11 on its own. Strong thugs on a losing team still out-perform the room on average &mdash; and still lose rating 76% of the time, because the bar their rating set was higher. The fix on the roadmap is to extend the ship-denied-time credit to every tier.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-complaint-2">&sect;5.2 Team result</a> <a class="faq-link" href="#sec-complaint-3">&sect;5.3 Time on foot</a> <a class="faq-link" href="#roadmap-5">&sect;13 Roadmap, item 5</a> <a class="faq-link ext" href="../?tab=fairness">ELO &middot; Commanders &amp; fairness</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why not StarCraft-style faction ratings? Is Hadean overpowered?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Hadean does win more than its commanders&rsquo; and thugs&rsquo; ratings explain &mdash; about 62 commander-rating points&rsquo; worth &mdash; and its pick share has roughly tripled in a year. But StarCraft&rsquo;s per-race MMR works because it is 1v1, you pick your own race and there are millions of players; here the commander picks the faction for the whole team and there are 45 rated players, so three ladders would leave most people provisional forever. What transfers is the chess idea that the matchup itself carries an edge: one faction term in the commander ladder&rsquo;s prediction, frozen at +60 Hadean and judged only on games played after this document.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-faction">&sect;7 Faction-based ELO</a> <a class="faq-link" href="#sec-complaint-6">&sect;5.6 Faction is not neutral</a> <a class="faq-link" href="#roadmap-1">&sect;13 Roadmap, item 1</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why isn&rsquo;t there a support / utility rating?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Every role rating that lasted has the role declared before the match (Overwatch); every one that guessed the role from stats died (Dota 2&rsquo;s Core/Support split in seven months, Riot&rsquo;s positional ranks after one preview). Here your role is whatever ship and weapon the commander handed you, and a role the system has to guess is a role players can pose for. The data also says the premise is half right: PvE work is already rewarded &mdash; the winning team has more of it 79% of the time. What is over-rewarded is clean fighting (accuracy, efficiency), and that is a weights fix, not a new ladder.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-role">&sect;8 Role-based ELO</a> <a class="faq-link" href="#sec-complaint-4">&sect;5.4 Two axes point the wrong way</a> <a class="faq-link ext" href="../?tab=axes">ELO &middot; The 8 axes</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Does commanding punish my rating?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">On average the opposite: commander-matches gain +2.1 versus +0.9 for thug-matches, because the commander adjustment lowers the bar. The catch is that the bar is set to the <em>average</em> commander, so strong fighters harvest it (Muffin +14.5 a game in the chair) while a few still bleed (Lithium &minus;4.0). Measuring each commander against their own thug numbers instead is roadmap item 3. Your win/loss record as commander lives in a separate rating, VTSR-C, where your thug rating is not touched.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-complaint-5">&sect;5.5 Who commands</a> <a class="faq-link" href="#sec-role">&sect;8 Role-based ELO</a> <a class="faq-link" href="#roadmap-3">&sect;13 Roadmap, item 3</a> <a class="faq-link ext" href="../?tab=fairness">ELO &middot; Commanders &amp; fairness</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why no per-ship rating?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">The commander builds your ship, it changes several times a match, and per-player-per-ship samples are far thinner than even per-faction ones. The one study that looked found champion-specific skill mattered in League of Legends and added little in Dota 2. Accuracy is already normalized per weapon. The verdict: the Loadout tab shows your per-ship record, and it never becomes a ladder.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-ship">&sect;9 By-ship ELO</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                What is the difference between VTSR-T and VTSR-C?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">VTSR-T (thug) is a performance rating: eight in-match statistics scored against the lobby you played in, so it moves on how you played, not only on who won. VTSR-C (commander) is a classic win/loss rating between the two commanders, with a handicap for how strong each side&rsquo;s thugs were. Two ladders is the genre&rsquo;s own answer &mdash; Allegiance and Natural Selection 2 both split the commander from the field player &mdash; and it is why taking the chair does not touch your thug rating.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-where">&sect;1 Where we are</a> <a class="faq-link" href="#sec-steelman">&sect;6 Why the design is defensible</a> <a class="faq-link ext" href="../?tab=how">ELO &middot; How it works</a> <a class="faq-link ext" href="../?tab=vtsr-c">ELO &middot; VTSR-C ladder</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Why doesn&rsquo;t the site just balance the teams for us?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">With 20&ndash;25 active players, volunteer commanders and hand-split teams there is nothing to matchmake; the ratings can only describe the lobby honestly. The Tools page&rsquo;s Balonce Meter does exactly that &mdash; it prints the win probability the commander ladder assigns to any split, using the same formula that calls 65.4% of 675 duels. The research also says perfectly fair matches are not even the engagement optimum, and that paying people to take the unpopular role fades within weeks.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-matchmaking">&sect;11 Matchmaking</a> <a class="faq-link ext" href="../../tools/">Tools &middot; Team Balonce</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                Is this real statistics, or just what an AI said?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Every mechanism in VTSR is in use somewhere that pays people to get it right &mdash; chess Elo, Glicko, Microsoft&rsquo;s TrueSkill 2, HLTV, baseball WAR, Bradley&ndash;Terry &mdash; and &sect;2 names the source for each one, row by row. The AI drafted documents and proposals; those proposals went through the same written-in-advance test as anyone else&rsquo;s, and most of the ones it drafted lost. Nothing changes a published rating without passing a rule written before the data existed.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-provenance">&sect;2 Where every mechanism comes from</a> <a class="faq-link" href="#sec-gate">&sect;3 How a number becomes a rule</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                How do I check any of these numbers myself?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Clone the repository and run <code class="text-xs text-sky-300">python scripts/validate_elo.py</code>. It rewrites <code class="text-xs">_validation/report.md</code>: &sect;15&ndash;&sect;19 are the numbers in section 5, &sect;20 is the small-format test, &sect;10 the commander ladder, &sect;11 the axis table. Every design decision is a memo under <code class="text-xs">critique/decisions/</code>, and every outside claim on this page has a numbered source.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-gate">&sect;3 How a number becomes a rule</a> <a class="faq-link" href="#sec-sources">&sect;15 Sources cited</a> <a class="faq-link ext" href="../?tab=accuracy">ELO &middot; Does it work?</a></div>
+                        </details>
+
+                        <details class="py-3">
+                            <summary class="faq-q flex items-start gap-2 text-sm md:text-base font-medium text-white">
+                                <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                What is actually going to change?
+                            </summary>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Only what passes its pre-registered rule. Queued: the faction term in the commander ladder (needs 60 more duels), a fresh test of blending win/loss into VTSR-T (170 matches now against 39 last time), and three what-if versions of the thug rating &mdash; the commander adjustment against your own baseline, re-weighting away from the two wrong-way axes, ship-denied-time credit for all tiers &mdash; plus a small-format record. Nothing on the do-not-do list is coming back.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-roadmap">&sect;13 Roadmap</a></div>
+                        </details>
+
+                    </div>
+                </div>
+            </section>
 
             <!-- 1 Where we are -->
             <section id="sec-where" class="scroll-mt-8">
@@ -229,7 +360,7 @@
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">5. The complaint, quantified</h3>
                     <p class="text-slate-300 text-sm mb-8">The community's reading: VTSR-T is a raw performance meter that punishes strong thugs for what their commander or team did. Six findings, each a validator section. <a class="cite" href="#src-77">[77]</a></p>
 
-                    <h4 class="text-white font-semibold mb-2">5.1 Performance ladder vs wins ladder (&sect;15)</h4>
+                    <h4 id="sec-complaint-1" class="text-white font-semibold mb-2 scroll-mt-8">5.1 Performance ladder vs wins ladder (&sect;15)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[340px]"><canvas id="perfWinsChart"></canvas></div>
                         <div>
@@ -238,7 +369,7 @@
                         </div>
                     </div>
 
-                    <h4 class="text-white font-semibold mb-2">5.2 Your team's result moves your rating (&sect;16)</h4>
+                    <h4 id="sec-complaint-2" class="text-white font-semibold mb-2 scroll-mt-8">5.2 Your team's result moves your rating (&sect;16)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">1,084 determined thug rows. Winners: mean P +0.136, &Delta; +7.6. Losers: &minus;0.096, &minus;5.6. Only 27% of winning thugs lose rating; only 24% of losing thugs gain. Win/loss alone explains <span class="stat text-white">&eta;&sup2; = 0.21</span> of thug P variance.</p>
@@ -247,7 +378,7 @@
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="stompChart"></canvas></div>
                                 </div>
                                 
-                    <h4 class="text-white font-semibold mb-2">5.3 Time on foot at base costs rating (&sect;17)</h4>
+                    <h4 id="sec-complaint-3" class="text-white font-semibold mb-2 scroll-mt-8">5.3 Time on foot at base costs rating (&sect;17)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="shipDenialChart"></canvas></div>
                         <div>
@@ -256,7 +387,7 @@
                             </div>
                         </div>
 
-                    <h4 class="text-white font-semibold mb-2">5.4 Two core axes point the wrong way (&sect;11)</h4>
+                    <h4 id="sec-complaint-4" class="text-white font-semibold mb-2 scroll-mt-8">5.4 Two core axes point the wrong way (&sect;11)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">Across 170 determined matches: how often does the winning team have the higher team-mean on each axis? Net damage share and mobility 88%, kill rate 86%, PvE share 79% &mdash; but <span class="stat text-white">efficiency 39%</span> and <span class="stat text-white">accuracy 39%</span>, and those two carry 31% of the composite weight.</p>
@@ -265,7 +396,7 @@
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[320px]"><canvas id="axisChart"></canvas></div>
                     </div>
 
-                    <h4 class="text-white font-semibold mb-2">5.5 Who commands, and what commanding does to a rating (&sect;18)</h4>
+                    <h4 id="sec-complaint-5" class="text-white font-semibold mb-2 scroll-mt-8">5.5 Who commands, and what commanding does to a rating (&sect;18)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center mb-10">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[380px]"><canvas id="cmdrChart"></canvas></div>
                         <div>
@@ -274,7 +405,7 @@
                         </div>
                     </div>
 
-                    <h4 class="text-white font-semibold mb-2">5.6 Faction is not neutral (&sect;19)</h4>
+                    <h4 id="sec-complaint-6" class="text-white font-semibold mb-2 scroll-mt-8">5.6 Faction is not neutral (&sect;19)</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="factionChart"></canvas></div>
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]"><canvas id="hadeanShareChart"></canvas></div>
@@ -435,13 +566,13 @@
                     <h3 class="text-xl md:text-2xl font-semibold text-white mb-4">13. Roadmap v4</h3>
                     <p class="text-slate-300 text-sm mb-4">Ranked by evidence available &times; leverage &divide; effort. Nothing below changes a published rating without a pre-registered rule passing.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-success"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-success"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 170 now. Same rule.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">4. Phase 7(b) &mdash; re-weight away from the wrong-way axes</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; pre-registered on the &sect;11 sign-agreement study with a hold-out of future matches.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-warning"><div class="text-white font-medium">6. Phase 7(d) &mdash; small formats</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode admitting &le;2-per-side games to the wins ladder only; display-only small-format record on the player page; a rated small-format ladder, rule first, at &ge; 30 determined small games.</p></div>
-                        <div class="glass-panel rounded-xl p-4 border-l-4 border-l-accent"><div class="text-white font-medium">7. Display work, no rating consequence</div><p class="text-xs text-slate-400 mt-1">Faction matchup table and pick-share trend on the Meta tab; faction and playstyle profiles; commander burden beside VTSR-C.</p></div>
+                        <div id="roadmap-1" class="glass-panel rounded-xl p-4 border-l-4 border-l-success scroll-mt-8"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
+                        <div id="roadmap-2" class="glass-panel rounded-xl p-4 border-l-4 border-l-success scroll-mt-8"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 170 now. Same rule.</p></div>
+                        <div id="roadmap-3" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
+                        <div id="roadmap-4" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">4. Phase 7(b) &mdash; re-weight away from the wrong-way axes</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; pre-registered on the &sect;11 sign-agreement study with a hold-out of future matches.</p></div>
+                        <div id="roadmap-5" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>
+                        <div id="roadmap-6" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning scroll-mt-8"><div class="text-white font-medium">6. Phase 7(d) &mdash; small formats</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode admitting &le;2-per-side games to the wins ladder only; display-only small-format record on the player page; a rated small-format ladder, rule first, at &ge; 30 determined small games.</p></div>
+                        <div id="roadmap-7" class="glass-panel rounded-xl p-4 border-l-4 border-l-accent scroll-mt-8"><div class="text-white font-medium">7. Display work, no rating consequence</div><p class="text-xs text-slate-400 mt-1">Faction matchup table and pick-share trend on the Meta tab; faction and playstyle profiles; commander burden beside VTSR-C.</p></div>
                             </div>
                     <div class="mt-6 bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm">
                         <div class="text-xs font-mono uppercase text-danger mb-2">Do not do</div>
