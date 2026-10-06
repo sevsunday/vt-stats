@@ -1696,7 +1696,7 @@
   </div>
 
   <!-- Build Order Log help. Layman key for QUEUE / BUILD / CANCEL, the
-       four-number chip, and the scrap-status dots. -->
+       four scrap columns, and the scrap-status dots. -->
   <div class="modal fade" id="economy-buildlog-help-modal" tabindex="-1"
        aria-labelledby="economy-buildlog-help-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
@@ -1715,16 +1715,17 @@
           <h6 class="mb-2">Events</h6>
           <ul class="mb-3">
             <li class="mb-1"><i class="bi bi-plus-circle me-1"></i><strong>Queue</strong> — the commander ordered the unit. If something else is already building, this sits in line and is not paid for yet.</li>
-            <li class="mb-1"><i class="bi bi-check-circle-fill me-1"></i><strong>Build</strong> — the unit finished. The four numbers still show the scrap bank from when it was queued, not when it rolled off the line.</li>
+            <li class="mb-1"><i class="bi bi-check-circle-fill me-1"></i><strong>Build</strong> — the unit finished. Cst, Bnk, Cap, and Pls still show the scrap bank from when it was queued, not when it rolled off the line.</li>
             <li class="mb-1"><i class="bi bi-x-circle me-1"></i><strong>Cancel</strong> — the commander dropped it from the queue.</li>
           </ul>
 
-          <h6 class="mb-2">The four numbers</h6>
-          <p class="mb-1"><span class="vt-econ-cost-chip"><span class="vt-econ-chip-seg">20</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">64</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">80</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">2</span></span></p>
+          <h6 class="mb-2">The four columns</h6>
           <p class="text-muted small mb-3">
-            <strong>cost | bank | cap | pools</strong> at the moment the unit was queued.
-            Bank is what the commander had to spend (the engine takes the scrap on the next tick).
-            Cap is storage (40 for a live recycler plus 20 per pool). Pools is how many extractors they held.
+            <strong>Cst</strong> is the scrap cost.
+            <strong>Bnk</strong> is what the commander had to spend when the unit was queued (the engine takes the scrap on the next tick).
+            <strong>Cap</strong> is storage (40 for a live recycler plus 20 per pool).
+            <strong>Pls</strong> is how many extractors they held.
+            A missing reading shows as an em dash.
           </p>
 
           <h6 class="mb-2">The colored dots</h6>

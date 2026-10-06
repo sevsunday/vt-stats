@@ -7229,21 +7229,56 @@ html.vt-cursor-active * {
 
 /* Tall enough to read a real build order without constant scrolling, but
    viewport-relative so the card never outgrows the screen it renders on.
-   The floor keeps short laptop viewports usable. */
+   The floor keeps short laptop viewports usable. overflow:auto covers both
+   axes so a table wider than the column scrolls sideways in the same pane. */
 .vt-econ-log-col {
     max-height: clamp(360px, 68vh, 820px);
-    overflow-y: auto;
+    overflow: auto;
     padding-right: 0.35rem;
 }
 
-.vt-econ-log-row {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.16rem 0;
+/* One table per team column. width 100% fills the column (and the doubled
+   col-12 when a single commander is scoped). No min-width: max-content and
+   no percentage width on a cell — that pair resolves to a cyclic percentage
+   and Chrome stretches the table to ~1e6 px. nowrap columns still force the
+   table past the scroller when the content itself is wider. */
+.vt-econ-log-table {
+    width: 100%;
     font-size: 0.82rem;
+    --bs-table-bg: transparent;
+    /* separate, not collapse: a collapsed border breaks position:sticky on th */
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.vt-econ-log-table > thead > tr > th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--kb-bg-card);
+    color: var(--kb-text-muted);
+    font-weight: 600;
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+    padding: 0.28rem 0.4rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.vt-econ-log-table > tbody > tr > td {
+    padding: 0.16rem 0.4rem;
+    vertical-align: middle;
+    white-space: nowrap;
     border-bottom: 1px solid var(--kb-border-subtle, color-mix(in oklab, var(--kb-text-primary) 6%, transparent));
-    flex-wrap: wrap;
+}
+
+/* Shrink-to-content on every column except Unit, which takes the leftover
+   when the column is wider than the row. width: 0.1% is a hint, not a
+   percentage of an indefinite max-content size. */
+.vt-econ-log-table > thead > tr > th:not(:nth-child(4)),
+.vt-econ-log-table > tbody > tr > td:not(.vt-econ-log-unit) {
+    width: 0.1%;
 }
 
 .vt-econ-log-row.vt-econ-row-cancel .vt-econ-log-name {
@@ -7251,40 +7286,36 @@ html.vt-cursor-active * {
     opacity: 0.65;
 }
 
-.vt-econ-log-ts {
+.vt-econ-log-ts,
+.vt-econ-log-num,
+.vt-econ-log-odf {
     font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.vt-econ-log-ts {
     color: var(--kb-text-muted);
-    min-width: 3.2em;
     font-size: 0.76rem;
 }
 
-.vt-econ-log-name {
-    min-width: 0;
+.vt-econ-log-num {
+    text-align: right;
 }
 
-/* The ODF stem sits flush against the unit name because econOdfChip()
-   concatenates the two with no separator. The margin has to be scoped to the
-   build log -- .vt-odf-link is shared with the kill feed, where the
-   surrounding template already supplies whitespace. */
-.vt-econ-log-odf {
-    margin-left: 0.3em;
+.vt-econ-log-ev,
+.vt-econ-log-src,
+.vt-econ-log-st,
+.vt-econ-log-vid {
+    text-align: center;
 }
 
-.vt-econ-cost-chip {
-    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
-    padding: 0.02rem 0.35rem;
-    border-radius: 999px;
-    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
-    color: var(--kb-primary);
-    white-space: nowrap;
+.vt-econ-log-vid .vt-video-link {
+    margin-left: 0;
 }
 
-/* Four-segment context badge: cost | bank | cap | pools. The dividers are
-   muted so the eye reads four numbers rather than one long string. */
-.vt-econ-chip-sep {
-    opacity: 0.4;
-    margin: 0 0.28em;
+.vt-econ-log-empty {
+    font-size: 0.85rem;
+    margin: 0.4rem 0 0;
 }
 
 .vt-econ-status-dot {

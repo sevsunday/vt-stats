@@ -3775,15 +3775,13 @@
     return name || (currentData && currentData.odf_map && currentData.odf_map[odf]) || odf || '';
   }
 
-  function econOdfChip(odf, name) {
-    // Unit NAME leads; the ODF stem rides as a mono chip cross-linking the
-    // ODF Browser (kill-feed convention).
+  function econOdfLink(odf, name) {
+    // ODF stem in its own column. No parentheses — the column header says
+    // what it is. Still cross-links the ODF Browser (kill-feed convention).
     const display = econRowDisplayName(odf, name);
     const base = (odf || '').toLowerCase();
-    const chip = base
-      ? `<a href="odf/index.html?odf=${encodeURIComponent(base)}" target="_blank" rel="noopener" class="vt-odf-link vt-econ-log-odf" title="View ${esc(display)} in ODF Browser">(${esc(base)})</a>`
-      : '';
-    return `<span class="fw-semibold">${esc(display)}</span>${chip}`;
+    if (!base) return '';
+    return `<a href="odf/index.html?odf=${encodeURIComponent(base)}" target="_blank" rel="noopener" class="vt-odf-link vt-econ-log-odf" title="View ${esc(display)} in ODF Browser">${esc(base)}</a>`;
   }
 
   // Rebuilt on every production-card render. Joins thug/commander rows to
@@ -4358,35 +4356,39 @@
         || (row.producer_resolved || row.producer || '').toLowerCase().includes(q);
   }
 
-  // Context badge: `cost | bank | cap | pools`, all read at the row's own
+  // Four plain cells: cost, bank, cap, pools, all read at the row's own
   // tick (match.schema_version 21). The three context fields are null on
   // build-data-only sessions and on events preceding the first resource
-  // tick, in which case the badge degrades to the bare cost it showed
-  // before. Tooltip copy must stay free of double quotes -- esc() escapes
-  // & < > but NOT ", which would terminate the title attribute early.
+  // tick — those cells are an em dash, never 0. Tooltip copy must stay
+  // free of double quotes -- esc() escapes & < > but NOT ", which would
+  // terminate the title attribute early.
   function econBuildChip(r) {
     const cost = (r.scrap_cost === null || r.scrap_cost === undefined) ? null : r.scrap_cost;
     const bank = r.scrap_at_event;
     const cap = r.max_scrap_at_event;
     const pools = r.pool_count_at_event;
     const hasCtx = bank !== null && bank !== undefined;
-    if (cost === null && !hasCtx) return '';
-
-    const segs = [cost === null ? '—' : String(cost)];
-    let tip = cost === null ? 'Cost unknown' : `Cost ${cost} scrap`;
-    if (hasCtx) {
-      segs.push(String(bank));
-      segs.push((cap === null || cap === undefined) ? '—' : String(cap));
-      segs.push((pools === null || pools === undefined) ? '—' : String(pools));
-      // Queue-time bank (v24): QUEUE rows are pre-purchase, and a matched
-      // BUILD copies the same triad so the chip is about the order.
-      tip += ` · queued at bank ${bank} of ${cap === null || cap === undefined ? '?' : cap} max`
-           + ` · ${pools === null || pools === undefined ? '?' : pools} pools`;
+    const dash = '\u2014';
+    const cell = (v) => (v === null || v === undefined) ? dash : String(v);
+    let tip = '';
+    if (cost !== null || hasCtx) {
+      tip = cost === null ? 'Cost unknown' : `Cost ${cost} scrap`;
+      if (hasCtx) {
+        // Queue-time bank (v24): QUEUE rows are pre-purchase, and a matched
+        // BUILD copies the same triad so the numbers are about the order.
+        tip += ` \u00b7 queued at bank ${bank} of ${cap === null || cap === undefined ? '?' : cap} max`
+             + ` \u00b7 ${pools === null || pools === undefined ? '?' : pools} pools`;
+      }
     }
-    const inner = segs
-      .map(s => `<span class="vt-econ-chip-seg">${esc(s)}</span>`)
-      .join('<span class="vt-econ-chip-sep">|</span>');
-    return `<span class="vt-econ-cost-chip" title="${esc(tip)}">${inner}</span>`;
+    return {
+      cells: [
+        cost === null ? dash : String(cost),
+        hasCtx ? String(bank) : dash,
+        hasCtx ? cell(cap) : dash,
+        hasCtx ? cell(pools) : dash,
+      ],
+      tip: tip,
+    };
   }
 
   function renderBuildLog() {
@@ -4407,10 +4409,24 @@
       cancel: '<i class="bi bi-x-circle" style="color:var(--kb-danger)" title="Cancelled"></i>',
     };
 
+    const logHead = `<thead><tr>
+        <th scope="col" title="Match time">T</th>
+        <th scope="col" title="Queue, build, or cancel">Ev</th>
+        <th scope="col" title="Producer">Src</th>
+        <th scope="col" title="Unit">Unit</th>
+        <th scope="col" title="ODF stem">ODF</th>
+        <th scope="col" class="text-end" title="Scrap cost">Cst</th>
+        <th scope="col" class="text-end" title="Bank when queued">Bnk</th>
+        <th scope="col" class="text-end" title="Storage cap">Cap</th>
+        <th scope="col" class="text-end" title="Pools held">Pls</th>
+        <th scope="col" title="Scrap status">St</th>
+        <th scope="col" title="Watch on YouTube">Vid</th>
+      </tr></thead>`;
+
     const renderCol = (side) => {
       const rows = byTeam[side].slice(0, buildlogShown);
       const more = byTeam[side].length - rows.length;
-      let html = '';
+      let body = '';
       rows.forEach(r => {
         const sec = Math.max(0, (r.tick - minTick) / tickRate);
         const ts = `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
@@ -4421,24 +4437,32 @@
         const producerIcon = r.producer_resolved || r.producer
           ? `<i class="bi ${ECON_PRODUCER_ICON[r.producer_resolved || r.producer] || 'bi-question-circle'}" style="color:var(--kb-text-muted)" title="${esc(r.producer_resolved || r.producer || '?')}"></i>`
           : '';
-        const cost = econBuildChip(r);
+        const chip = econBuildChip(r);
+        const tipAttr = chip.tip ? ` title="${esc(chip.tip)}"` : '';
+        const nums = chip.cells.map(s => `<td class="vt-econ-log-num"${tipAttr}>${esc(s)}</td>`).join('');
         const dupBadge = r.dedup_folded
           ? '<span class="badge vt-econ-inferred-badge" title="Duplicate wire event — counted once">dup</span>' : '';
         const struck = r.type === 'cancel' ? ' vt-econ-row-cancel' : '';
         const vod = vtVideoAnchorHtml(r.tick, { tickRate, minTick, hover: true });
-        html += `<div class="vt-econ-log-row${struck}">
-          <span class="vt-econ-log-ts">${ts}</span>
-          ${typeIcon[r.type] || ''}
-          ${producerIcon}
-          <span class="vt-econ-log-name">${econOdfChip(r.odf, r.name)}</span>
-          ${cost}${statusDot}${dupBadge}${vod}
-        </div>`;
+        const odf = econOdfLink(r.odf, r.name);
+        body += `<tr class="vt-econ-log-row${struck}">
+          <td class="vt-econ-log-ts">${ts}</td>
+          <td class="vt-econ-log-ev">${typeIcon[r.type] || ''}${dupBadge}</td>
+          <td class="vt-econ-log-src">${producerIcon}</td>
+          <td class="vt-econ-log-unit"><span class="fw-semibold vt-econ-log-name">${esc(econRowDisplayName(r.odf, r.name))}</span></td>
+          <td class="vt-econ-log-odf-cell">${odf || '<span class="text-muted">\u2014</span>'}</td>
+          ${nums}
+          <td class="vt-econ-log-st">${statusDot}</td>
+          <td class="vt-econ-log-vid">${vod}</td>
+        </tr>`;
       });
-      if (!rows.length) html = '<p class="text-muted" style="font-size:0.85rem">No matching events.</p>';
-      if (more > 0) {
-        html += `<button class="btn btn-sm btn-outline-secondary w-100 mt-2" data-buildlog-more type="button">Show ${Math.min(more, BUILDLOG_PAGE)} more (${more} hidden)</button>`;
-      }
-      return html;
+      const empty = rows.length
+        ? ''
+        : '<p class="text-muted vt-econ-log-empty">No matching events.</p>';
+      const moreBtn = more > 0
+        ? `<button class="btn btn-sm btn-outline-secondary w-100 mt-2" data-buildlog-more type="button">Show ${Math.min(more, BUILDLOG_PAGE)} more (${more} hidden)</button>`
+        : '';
+      return `<table class="table table-sm vt-econ-log-table mb-0">${logHead}<tbody>${body}</tbody></table>${empty}${moreBtn}`;
     };
 
     const teamHead = (side) => {
