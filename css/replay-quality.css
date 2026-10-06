@@ -273,10 +273,12 @@ html[data-mode="light"] .vt-rq select option {
   padding: 0;
   width: min(440px, calc(100vw - 24px));
   max-height: min(92vh, 760px);
-  display: flex;
-  flex-direction: column;
   /* Menus are portaled onto the dialog, so the card itself must not clip. */
   overflow: visible;
+}
+.vt-rq-dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .vt-rq-dialog::backdrop {

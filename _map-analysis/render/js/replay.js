@@ -64,23 +64,17 @@ import {
   modelsEnabled,
   setModelsEnabled,
   ensureMatchModels,
-  activeTextureSet,
-  loadTextureCatalog,
-  reapplyTextureSet,
 } from './replay-ship-models.js?v=lego1';
 import {
   ensureQualityChosen,
   openReplayDialog,
   patchFromTransport,
   readSettings,
+  readTextureSet,
   QUALITY_STORAGE_KEY,
   TEXTURE_SET_KEY,
   SLOW_LOAD_HINT_SEC,
-  ENHANCED_SET_ID,
-  ENHANCED_PACK_IDS,
-  LEGO_SET_ID,
-  TEXTURE_PACKS,
-} from '../../../js/replay-quality.js?v=rqscroll1';
+} from '../../../js/replay-quality.js?v=rqsite1';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -292,9 +286,39 @@ function stopLoadClock() {
   loadClock = null;
 }
 
+function qualityFingerprint() {
+  return JSON.stringify(readSettings()) + '\n' + (readTextureSet() || '');
+}
+
+function askParentQuality(action) {
+  if (!isEmbeddedReplay()) return false;
+  try {
+    window.parent.postMessage({ source: 'vt-replay', action }, location.origin);
+  } catch { /* parent gone */ }
+  return true;
+}
+
 function openQuality() {
+  if (askParentQuality('open-quality')) return Promise.resolve(readSettings());
   return openReplayDialog({
     reload: heavyBootStarted ? () => location.reload() : null,
+  });
+}
+
+/** Embedded first visit waits on the parent modal. A direct replay.html keeps the dialog. */
+function ensureBootQuality() {
+  if (!isEmbeddedReplay()) return ensureQualityChosen();
+  if (readSettings().chosen) return Promise.resolve(readSettings());
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (readSettings().chosen) {
+        resolve(readSettings());
+        return;
+      }
+      askParentQuality('need-quality');
+      setTimeout(tick, 400);
+    };
+    tick();
   });
 }
 
@@ -316,9 +340,12 @@ function wireQualityChrome() {
   }
 }
 
+let bootedQuality = '';
+
 function onQualityStorage(ev) {
   if (!heavyBootStarted) return;
   if (ev.key !== QUALITY_STORAGE_KEY && ev.key !== TEXTURE_SET_KEY) return;
+  if (qualityFingerprint() === bootedQuality) return;
   location.reload();
 }
 
@@ -339,9 +366,10 @@ async function boot() {
     console.error(err);
   }
   wireQualityChrome();
-  window.addEventListener('storage', onQualityStorage);
-  await ensureQualityChosen();
+  await ensureBootQuality();
+  bootedQuality = qualityFingerprint();
   heavyBootStarted = true;
+  window.addEventListener('storage', onQualityStorage);
   const quality = readSettings();
   setModelsEnabled(quality.models !== 'off');
   startLoadClock();
@@ -431,7 +459,6 @@ async function boot() {
   // Real meshes default on. Hold the log until this match's stems have
   // settled so the first frame is not a pop from primitives to hulls.
   initModelsPref();
-  syncModelsButton();
   if (modelsEnabled()) {
     statusStep('Model catalog · index.json');
     let modelStep = false;
@@ -482,7 +509,7 @@ async function boot() {
   wireKeyboard();
   wireReplayCanvasChrome();
 
-  wireHqToggle(resolvedFloor);
+  applySavedHq(resolvedFloor);
   if (resolvedFloor === 'tiles') {
     statusStep('Sky');
     try {
@@ -992,117 +1019,18 @@ function applyFloorMode(mode) {
   syncTerrainMaterial();
 }
 
-function syncHqButton() {
-  const btn = document.getElementById('btn-hq');
-  if (!btn) return;
-  const available = !!(STATE.mapData && STATE.mapData.tileComposite);
-  btn.disabled = !available;
-  const on = available && STATE.hqOn;
-  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.classList.toggle('is-active', on);
-  if (!available) btn.title = 'Game tiles unavailable for this map';
-  else if (STATE.hqLoad && !STATE.terrainTileMat && STATE.hqOn) btn.title = 'Loading high-quality tiles';
-  else btn.title = on ? 'High-quality tiles and sky' : 'Minimap ground';
+function applySavedHq(resolvedFloor) {
+  STATE.hqOn = resolvedFloor === 'tiles';
 }
-
-const TEX_SHORT = {
-  '3365986032': 'ISDF Redux',
-};
-const TEX_ORDER = ['3365986032'];
-const STEAM_ICON = '<svg class="t-steam-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M.329 10.333A8.01 8.01 0 0 0 7.99 16C12.414 16 16 12.418 16 8s-3.586-8-8.009-8A8.006 8.006 0 0 0 0 7.468l.003.006 4.304 1.769A2.2 2.2 0 0 1 5.62 8.88l1.96-2.844-.001-.04a3.046 3.046 0 0 1 3.042-3.043 3.046 3.046 0 0 1 3.042 3.043 3.047 3.047 0 0 1-3.111 3.044l-2.804 2a2.223 2.223 0 0 1-2.564 2.563l-2.563-1.049A2.23 2.23 0 0 1 .33 10.333"/><path fill="currentColor" d="M4.868 12.683a1.715 1.715 0 0 0 1.318-3.165 1.7 1.7 0 0 0-1.263-.02l1.023.424a1.261 1.261 0 1 1-.97 2.33l-.99-.41a1.7 1.7 0 0 0 .882.84zm3.726-6.687a2.03 2.03 0 0 0 2.027 2.029 2.03 2.03 0 0 0 2.027-2.029 2.03 2.03 0 0 0-2.027-2.027 2.03 2.03 0 0 0-2.027 2.027m2.03-1.527a1.524 1.524 0 1 1-.002 3.048 1.524 1.524 0 0 1 .002-3.048"/></svg>';
 
 let _menuOpen = null;
-let _texBusy = false;
-let _modelsBusy = false;
-
-function syncModelsButton() {
-  const btn = document.getElementById('btn-models');
-  const real = document.getElementById('models-real');
-  const on = modelsEnabled();
-  if (btn) {
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    btn.classList.toggle('is-active', on);
-    btn.title = on ? 'Models on' : 'Models';
-  }
-  if (real) {
-    real.setAttribute('aria-pressed', on ? 'true' : 'false');
-    real.classList.toggle('is-active', on);
-    real.disabled = _modelsBusy || _texBusy;
-  }
-  syncTextureRows();
-}
-
-function syncTextureRows() {
-  const active = activeTextureSet();
-  document.querySelectorAll('#models-tex-rows .t-dropup-row').forEach((row) => {
-    const on = (row.dataset.set || '') === active;
-    row.classList.toggle('is-active', on);
-    row.disabled = _texBusy || _modelsBusy;
-  });
-}
-
-function packLabel(pack) {
-  return TEX_SHORT[pack.id] || pack.label;
-}
-
-function buildTextureRows(packs) {
-  const host = document.getElementById('models-tex-rows');
-  if (!host || host.dataset.built === '1') return;
-  host.dataset.built = '1';
-  const ordered = [...packs].sort((a, b) => {
-    const ia = TEX_ORDER.indexOf(a.id);
-    const ib = TEX_ORDER.indexOf(b.id);
-    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-  });
-  const frag = document.createDocumentFragment();
-  const add = (id, label, title, urls) => {
-    const wrap = document.createElement('div');
-    wrap.className = 't-dropup-tex';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 't-dropup-row';
-    btn.dataset.set = id;
-    btn.textContent = label;
-    btn.title = title;
-    btn.addEventListener('click', () => { void onTexturePick(id); });
-    wrap.appendChild(btn);
-    for (const credit of urls || []) {
-      const link = document.createElement('a');
-      link.className = 't-dropup-steam';
-      link.href = credit.url;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      const linkTitle = credit.linkTitle || `Workshop page for ${credit.title}`;
-      link.title = linkTitle;
-      link.setAttribute('aria-label', linkTitle);
-      link.innerHTML = STEAM_ICON;
-      wrap.appendChild(link);
-    }
-    frag.appendChild(wrap);
-  };
-  add('', 'Stock', 'The original game textures', []);
-  const enhanced = TEXTURE_PACKS.find((p) => p.id === ENHANCED_SET_ID);
-  if (enhanced) add(enhanced.id, enhanced.label, enhanced.title, enhanced.urls);
-  for (const pack of ordered) {
-    if (ENHANCED_PACK_IDS.includes(pack.id)) continue;
-    add(pack.id, packLabel(pack), pack.label, pack.url ? [{ title: pack.label, url: pack.url }] : []);
-  }
-  const lego = TEXTURE_PACKS.find((p) => p.id === LEGO_SET_ID);
-  if (lego) add(lego.id, lego.label, lego.title, lego.urls);
-  host.appendChild(frag);
-  syncTextureRows();
-}
 
 function closeMenus() {
   _menuOpen = null;
-  for (const id of ['view-menu', 'models-menu']) {
-    const el = document.getElementById(id);
-    if (el) el.hidden = true;
-  }
-  for (const id of ['btn-view', 'btn-models']) {
-    const btn = document.getElementById(id);
-    if (btn) btn.setAttribute('aria-expanded', 'false');
-  }
+  const el = document.getElementById('view-menu');
+  if (el) el.hidden = true;
+  const btn = document.getElementById('btn-view');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
 function placeMenu(menu, btn) {
@@ -1117,28 +1045,19 @@ function placeMenu(menu, btn) {
 function toggleMenu(which) {
   const opening = _menuOpen !== which;
   closeMenus();
-  if (!opening) return;
-  const menu = document.getElementById(which === 'view' ? 'view-menu' : 'models-menu');
-  const btn = document.getElementById(which === 'view' ? 'btn-view' : 'btn-models');
+  if (!opening || which !== 'view') return;
+  const menu = document.getElementById('view-menu');
+  const btn = document.getElementById('btn-view');
   if (!menu || !btn) return;
   _menuOpen = which;
   btn.setAttribute('aria-expanded', 'true');
   placeMenu(menu, btn);
 }
 
-function remountSceneModels(force) {
-  applyShipModelMode(STATE.actors, force ? { force: true } : undefined);
-  applyStructureModelMode(STATE.structures, STATE.mapData);
-  applyStructureModelMode(STATE.recyclers, STATE.mapData);
-}
-
 function wireMenus() {
-  syncModelsButton();
   syncViewRows();
   const viewBtn = document.getElementById('btn-view');
-  const modelsBtn = document.getElementById('btn-models');
   if (viewBtn) viewBtn.addEventListener('click', () => toggleMenu('view'));
-  if (modelsBtn) modelsBtn.addEventListener('click', () => toggleMenu('models'));
   const viewMenu = document.getElementById('view-menu');
   if (viewMenu) {
     viewMenu.addEventListener('click', (e) => {
@@ -1148,114 +1067,17 @@ function wireMenus() {
       closeMenus();
     });
   }
-  const real = document.getElementById('models-real');
-  if (real) {
-    real.addEventListener('click', () => {
-      if (real.disabled) return;
-      closeMenus();
-      void onModelsToggle();
-    });
-  }
   document.addEventListener('pointerdown', (e) => {
     if (!_menuOpen) return;
     const t = e.target;
-    if (t.closest && (t.closest('.t-dropup') || t.closest('#btn-view') || t.closest('#btn-models'))) return;
+    if (t.closest && (t.closest('.t-dropup') || t.closest('#btn-view'))) return;
     closeMenus();
   });
   window.addEventListener('resize', () => {
-    if (!_menuOpen) return;
-    const menu = document.getElementById(_menuOpen === 'view' ? 'view-menu' : 'models-menu');
-    const btn = document.getElementById(_menuOpen === 'view' ? 'btn-view' : 'btn-models');
+    if (_menuOpen !== 'view') return;
+    const menu = document.getElementById('view-menu');
+    const btn = document.getElementById('btn-view');
     if (menu && btn) placeMenu(menu, btn);
-  });
-  loadTextureCatalog().then(buildTextureRows).catch((err) => {
-    console.warn('texture catalog', err);
-  });
-}
-
-async function onTexturePick(id) {
-  if (_texBusy || _modelsBusy) return;
-  if ((id || '') === activeTextureSet()) {
-    closeMenus();
-    return;
-  }
-  closeMenus();
-  _texBusy = true;
-  syncTextureRows();
-  const legoPick = (id || '') === LEGO_SET_ID;
-  const step = legoPick ? 'LEGO' : 'Textures';
-  statusStep(step);
-  try {
-    const applied = await reapplyTextureSet(id, (done, total, stem) => {
-      if (!total) {
-        if (legoPick) statusTick('LEGO · brick models');
-        else statusTick(id ? 'Textures · saved' : 'Textures · stock');
-        return;
-      }
-      const name = stem ? ` · ${stem}` : '';
-      statusTick(`${step} ${done}/${total}${name}`);
-    });
-    if (applied && modelsEnabled()) remountSceneModels(true);
-  } catch (err) {
-    console.warn('replay textures', err);
-  }
-  _texBusy = false;
-  setStatus(null);
-  syncModelsButton();
-}
-
-async function onModelsToggle() {
-  if (_modelsBusy) return;
-  const real = document.getElementById('models-real');
-  const next = !modelsEnabled();
-  setModelsEnabled(next);
-  patchFromTransport({ models: next ? 'on' : 'off' });
-  syncModelsButton();
-  _modelsBusy = true;
-  if (real) real.disabled = true;
-  if (next) {
-    statusStep('Models');
-    try {
-      await ensureMatchModels(STATE.matchData, (done, total, stem) => {
-        if (stem === 'catalog') {
-          statusTick('Model catalog · index.json');
-          return;
-        }
-        if (!total) {
-          statusTick('Models · none to load');
-          return;
-        }
-        const name = stem ? ` · ${stem}` : '';
-        statusTick(`Models ${done}/${total}${name}`);
-      });
-    } catch (err) {
-      console.warn('replay models', err);
-    }
-  }
-  remountSceneModels(false);
-  _modelsBusy = false;
-  setStatus(null);
-  syncModelsButton();
-}
-
-function wireHqToggle(resolvedFloor) {
-  STATE.hqOn = resolvedFloor === 'tiles';
-  syncHqButton();
-  const btn = document.getElementById('btn-hq');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    if (btn.disabled) return;
-    STATE.hqOn = !STATE.hqOn;
-    patchFromTransport({ ground: STATE.hqOn ? 'tiles' : 'minimap' });
-    syncHqButton();
-    if (STATE.hqOn) {
-      attachSky(STATE).catch((err) => console.warn('sky dome', err));
-      if (STATE.terrainTileMat) applyFloorMode('tiles');
-      else void loadHqFloor();
-    } else {
-      detachSkyKeepAtmosphere();
-      applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
-    }
   });
 }
 
@@ -1272,17 +1094,14 @@ function loadHqFloor() {
         STATE.terrainTileTextures = built.textures;
         return built.material;
       });
-    syncHqButton();
   }
   return STATE.hqLoad.then(mat => {
     STATE.hqLoad = null;
-    syncHqButton();
     if (!STATE.hqOn) return mat;
     if (!mat) {
       STATE.hqOn = false;
       detachSkyKeepAtmosphere();
       patchFromTransport({ ground: 'minimap' });
-      syncHqButton();
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
       return null;
     }
@@ -1294,7 +1113,6 @@ function loadHqFloor() {
     STATE.hqOn = false;
     detachSkyKeepAtmosphere();
     patchFromTransport({ ground: 'minimap' });
-    syncHqButton();
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
   });
 }

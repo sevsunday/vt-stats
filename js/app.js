@@ -2722,9 +2722,18 @@
     enterReplayExpand();
   }
 
+  function replayQualityModalOpen() {
+    const modal = document.getElementById('replay-quality-modal');
+    return !!(modal && modal.classList.contains('show'));
+  }
+
   function onReplayFullscreenChange() {
     const wrap = getReplayWrap();
     const fsEl = replayFsElement();
+    if (wrap && fsEl === wrap && replayQualityModalOpen()) {
+      exitReplayNativeFs();
+      return;
+    }
     if (wrap && fsEl === wrap) {
       replayNativeFs = true;
       if (!replayExpandActive) enterReplayExpand();
@@ -2753,7 +2762,15 @@
     } else if (ev.data.action === 'toggle-expand') {
       if (replayExpandActive) exitReplayExpand();
       else enterReplayExpand();
+    } else if (ev.data.action === 'need-quality' || ev.data.action === 'open-quality') {
+      openReplayQualityFromViewer();
     }
+  }
+
+  function openReplayQualityFromViewer() {
+    const wrap = getReplayWrap();
+    if (wrap && replayFsElement() === wrap) exitReplayNativeFs();
+    if (window.VTReplayQualityOpen) window.VTReplayQualityOpen();
   }
 
   function onReplayExpandKeydown(e) {

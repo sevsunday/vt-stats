@@ -721,6 +721,31 @@ export function ensureQualityChosen() {
   return openReplayDialog({ firstRun: true });
 }
 
+let qualityModalFirstRun = false;
+
+function qualityModalDismissers(modal) {
+  return modal.querySelectorAll('[data-bs-dismiss="modal"]');
+}
+
+/** First visit hides every dismiss control. A later open is Close + Save. */
+function applyQualityModalChrome(modal, save) {
+  qualityModalFirstRun = !readSettings().chosen;
+  for (const el of qualityModalDismissers(modal)) el.hidden = qualityModalFirstRun;
+  if (save) save.textContent = qualityModalFirstRun ? 'Continue' : 'Save';
+}
+
+/**
+ * Show the dashboard Replay quality modal. The gear item opens the same
+ * element through Bootstrap; show.bs.modal applies first-run chrome from
+ * `chosen`. app.js calls this after leaving native fullscreen.
+ */
+export function openDashboardQualityModal() {
+  const modal = document.getElementById('replay-quality-modal');
+  if (!modal || !window.bootstrap || !window.bootstrap.Modal) return;
+  const inst = window.bootstrap.Modal.getOrCreateInstance(modal);
+  inst.show();
+}
+
 function bootDashboard() {
   const modal = document.getElementById('replay-quality-modal');
   const host = document.getElementById('replay-quality-body');
@@ -728,16 +753,25 @@ function bootDashboard() {
   if (!modal || !host || !save || host.dataset.ready === '1') return;
   host.dataset.ready = '1';
   const panel = mountPanel(host);
-  modal.addEventListener('show.bs.modal', () => { panel.refresh(); });
+  modal.addEventListener('show.bs.modal', () => {
+    panel.refresh();
+    applyQualityModalChrome(modal, save);
+  });
+  modal.addEventListener('hide.bs.modal', (ev) => {
+    if (qualityModalFirstRun) ev.preventDefault();
+  });
   save.addEventListener('click', () => {
     const draft = panel.readDraft();
     writeSettings(draft);
     writeTextureSet(draft.textureSet);
+    qualityModalFirstRun = false;
+    applyQualityModalChrome(modal, save);
     if (window.bootstrap && bootstrap.Modal) {
       const inst = bootstrap.Modal.getInstance(modal) || bootstrap.Modal.getOrCreateInstance(modal);
       inst.hide();
     }
   });
+  window.VTReplayQualityOpen = openDashboardQualityModal;
 }
 
 window.addEventListener('storage', (ev) => {

@@ -98,7 +98,8 @@ body.replay-mode:not(.replay-compact) #btn-share-time { order: 2; }
 #btn-share-time {
   flex-shrink: 0;
 }
-#btn-share-time svg {
+#btn-share-time svg,
+#btn-quality svg {
   display: block;
   width: 14px;
   height: 14px;
@@ -109,12 +110,12 @@ body.replay-mode:not(.replay-compact) #btn-share-time { order: 2; }
 body.replay-mode:not(.replay-compact) .scrub-wrap { order: 3; }
 body.replay-mode:not(.replay-compact) .t-speed { order: 4; }
 body.replay-mode:not(.replay-compact) #btn-view,
-body.replay-mode:not(.replay-compact) #btn-models,
-body.replay-mode:not(.replay-compact) #btn-hq,
 body.replay-mode:not(.replay-compact) #btn-quality { order: 5; }
 body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
 
-.t-expand {
+/* Two classes so the icon's `overflow: visible` outranks the shared
+   `.t-btn { overflow: hidden }` label guard. */
+.t-btn.t-expand {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -507,7 +508,13 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   overflow: visible;
 }
 
+/* Shared transport-control contract. Every control in the row (buttons,
+   the Watch link, the speed select) sizes to its own label and never
+   shrinks: the compact row scrolls sideways instead of squeezing a text
+   button below its text. `overflow: hidden` + `nowrap` keep a label inside
+   its own border even if a control is ever given a hard width. */
 .t-btn {
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -521,6 +528,9 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
   transition: background 0.12s, border-color 0.12s;
 }
 
@@ -569,6 +579,7 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   fill: var(--vt-youtube);
   margin-right: 0.35rem;
   flex-shrink: 0;
+  overflow: hidden;
 }
 .t-watch-vod:hover .t-yt-icon {
   fill: var(--vt-youtube);
@@ -679,6 +690,7 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
 }
 
 .t-speed {
+  box-sizing: border-box;
   appearance: none;
   -webkit-appearance: none;
   color-scheme: dark;
@@ -693,7 +705,8 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   padding: 6px 26px 6px 10px;
   cursor: pointer;
   min-width: 4.5em;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
   text-align: left;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23d8dde6' d='M1 0h8L5 6z'/></svg>");
   background-repeat: no-repeat;
@@ -755,24 +768,6 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   color: var(--accent);
 }
 
-.t-toggle {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
-}
-
-.t-toggle.is-active {
-  background: rgba(106, 169, 255, 0.18);
-  color: var(--accent);
-  border-color: rgba(106, 169, 255, 0.45);
-}
-
-.t-toggle:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .t-menu {
   flex-shrink: 0;
 }
@@ -819,37 +814,6 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
   cursor: default;
 }
 
-.t-dropup-rule {
-  height: 1px;
-  margin: 4px 6px;
-  background: var(--border);
-}
-
-.t-dropup-tex {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.t-dropup-tex .t-dropup-row { flex: 1 1 auto; min-width: 0; }
-
-.t-dropup-steam {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  color: var(--text-muted);
-}
-.t-dropup-steam:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
-.t-steam-icon {
-  width: 14px;
-  height: 14px;
-  display: block;
-}
-
-body.replay-compact .t-toggle,
 body.replay-compact .t-menu {
   margin-left: 0;
   height: 32px;
@@ -1878,6 +1842,9 @@ body.replay-compact .t-row-controls {
   padding-bottom: 2px;
 }
 
+/* 32px is a floor only: controls keep `flex: 0 0 auto` from .t-btn, so an
+   icon button pads out to a square while a text button (Watch, Quality)
+   stays as wide as its label. */
 body.replay-compact .t-btn,
 body.replay-compact .t-btn-play {
   min-height: 32px;
@@ -1894,7 +1861,8 @@ body.replay-compact .t-btn-play {
 body.replay-compact .t-speed {
   height: 32px;
   min-width: 4.5em;
-  flex-shrink: 0;
+  padding: 4px 26px 4px 10px;
+  flex: 0 0 auto;
 }
 
 body.replay-compact .t-time {
