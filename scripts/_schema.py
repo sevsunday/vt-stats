@@ -244,8 +244,13 @@ def build_object_uids(bzn_objects: Iterable[Any]) -> list[dict]:
         idx = kind_counts.get(o.kind, 0)
         kind_counts[o.kind] = idx + 1
         uid = f"{o.kind}#{idx}"
-        out.append(make_object(uid, o.kind, o.obj_class,
-                              o.position[0], o.position[2]))
+        row = make_object(uid, o.kind, o.obj_class,
+                          o.position[0], o.position[2])
+        # Absent means the class is in the ODF database. Only the miss is
+        # recorded, so known pools stay the old shape.
+        if o.kind == "scrap_pool" and getattr(o, "odf_found", True) is False:
+            row["odf_found"] = False
+        out.append(row)
     return out
 
 

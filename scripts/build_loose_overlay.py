@@ -76,12 +76,15 @@ def _extent(stem: str) -> tuple[float, float, float, float] | None:
     return min_x, min_z, width, depth
 
 
-def _world_points(stem: str) -> dict[str, list[tuple[float, float]]]:
+def _world_points(stem: str) -> tuple[dict[str, list[tuple[float, float]]], list[str]]:
+    """Marker world points plus pool class names the ODF database does not have."""
     grouped = {"loose": [], "spawns": [], "pools": []}
+    unresolved: list[str] = []
     path = MAP_DATA / f"{stem}.json"
     if not path.is_file():
-        return grouped
+        return grouped, unresolved
     raw = json.loads(path.read_text(encoding="utf-8"))
+    seen: set[str] = set()
     for obj in raw.get("objects") or []:
         if not isinstance(obj, dict):
             continue
@@ -95,7 +98,57 @@ def _world_points(stem: str) -> dict[str, list[tuple[float, float]]]:
         except (KeyError, TypeError, ValueError):
             continue
         grouped[key].append((x, z))
-    return grouped
+        if key == "pools" and obj.get("odf_found") is False:
+            name = str(obj.get("obj_class") or "").strip().lower()
+            if name.endswith(".odf"):
+                name = name[:-4]
+            if name and name not in seen:
+                seen.add(name)
+                unresolved.append(name)
+    unresolved.sort()
+    return grouped, unresolved
+
+
+def _stored_views() -> dict[str, dict]:
+    """Camera rects already baked into the top-down photos."""
+    if not OUT.is_file():
+        return {}
+    try:
+        raw = json.loads(OUT.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out = {}
+    for stem, entry in (raw.get("maps") or {}).items():
+        view = entry.get("view") if isinstance(entry, dict) else None
+        if not isinstance(view, dict):
+            continue
+        try:
+            parsed = {
+                "min_x": float(view["min_x"]),
+                "min_z": float(view["min_z"]),
+                "width": float(view["width"]),
+                "depth": float(view["depth"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+        if parsed["width"] > 0 and parsed["depth"] > 0:
+            out[str(stem)] = parsed
+    return out
+
+
+def _points_inside(points: list[tuple[float, float]], view: dict) -> bool:
+    """True when every point projects into the stored photo, with rounding slack."""
+    min_x = view["min_x"]
+    min_z = view["min_z"]
+    width = view["width"]
+    depth = view["depth"]
+    max_z = min_z + depth
+    for x, z in points:
+        u = (x - min_x) / width
+        v = (max_z - z) / depth
+        if u < -1e-4 or v < -1e-4 or u > 1.0 + 1e-4 or v > 1.0 + 1e-4:
+            return False
+    return True
 
 
 def _padded_square(
@@ -155,21 +208,38 @@ def _margin(groups, min_x, min_z, width, depth) -> float:
 
 
 def main() -> int:
+    stored = _stored_views()
     maps = {}
     margins = []
+    kept_view = []
+    clamped = []
     for path in sorted(RENDER.glob("*.3d.json")):
         stem = path.name[: -len(".3d.json")]
         extent = _extent(stem)
         if extent is None:
             continue
         hm_min_x, hm_min_z, hm_w, hm_d = extent
-        grouped = _world_points(stem)
+        grouped, unresolved = _world_points(stem)
         flat = grouped["loose"] + grouped["spawns"] + grouped["pools"]
         if not flat:
             continue
-        min_x, min_z, width, depth = _padded_square(
-            flat, hm_min_x, hm_min_z, hm_w, hm_d,
-        )
+        previous = stored.get(stem)
+        # The committed photo was framed to the stored rect. Recomputing the
+        # square after new pools arrive would slide the rings off the meshes.
+        # A pool a hair outside that photo stays on the old rect; the page
+        # clamps the ring to the border instead of asking for a new capture.
+        if previous is not None:
+            min_x = previous["min_x"]
+            min_z = previous["min_z"]
+            width = previous["width"]
+            depth = previous["depth"]
+            kept_view.append(stem)
+            if not _points_inside(flat, previous):
+                clamped.append(stem)
+        else:
+            min_x, min_z, width, depth = _padded_square(
+                flat, hm_min_x, hm_min_z, hm_w, hm_d,
+            )
         entry = {
             "view": {
                 "min_x": round(min_x, 2),
@@ -184,11 +254,13 @@ def main() -> int:
             uv = _uv(grouped[key], vx["min_x"], vx["min_z"], vx["width"], vx["depth"])
             if uv:
                 entry[key] = uv
+        if unresolved:
+            entry["unresolved_pool_odfs"] = unresolved
         maps[stem] = entry
         margins.append((stem, _margin(grouped, vx["min_x"], vx["min_z"], vx["width"], vx["depth"])))
 
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "frame": "topdown",
         "maps": maps,
     }
@@ -208,7 +280,12 @@ def main() -> int:
             f"  side={entry['view']['width']}"
         )
     print("tightest margins " + ", ".join(f"{s}:{m:.3f}" for s, m in worst))
-    outside = [s for s, m in margins if m < 0]
+    print(f"kept photo frames {len(kept_view)}")
+    if clamped:
+        print("CLAMPED " + ", ".join(clamped))
+    # A brand-new frame that cannot hold its markers is a bug. A kept photo
+    # may clip a pool that sits just outside the old crop; the page clamps it.
+    outside = [s for s, m in margins if m < 0 and s not in clamped]
     if outside:
         print("OUTSIDE " + ", ".join(outside))
         return 1

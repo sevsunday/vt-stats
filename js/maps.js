@@ -579,6 +579,14 @@
     };
   }
 
+  function unresolvedPoolOdfs(stem) {
+    const maps = state.looseOverlay && state.looseOverlay.maps;
+    const entry = maps && maps[stem];
+    const list = entry && entry.unresolved_pool_odfs;
+    if (!Array.isArray(list)) return [];
+    return list.map(name => String(name || '').trim()).filter(Boolean);
+  }
+
   function hasMarkers(stem) {
     const m = markerLists(stem);
     return m.loose.length + m.spawns.length + m.pools.length > 0;
@@ -929,6 +937,14 @@
       chips.push(metaChip('arrow-left-right', 'Base-to-base', `${Math.round(row.canonical_b2b)}m`));
     }
     if (row.pools != null) chips.push(metaChip('archive', 'Pools', String(row.pools)));
+    const missingPoolOdfs = unresolvedPoolOdfs(row.key);
+    if (missingPoolOdfs.length) {
+      chips.push(metaChip(
+        'exclamation-triangle',
+        'ODF',
+        'not found: ' + missingPoolOdfs.join(', '),
+      ));
+    }
     if (row.loose != null) {
       chips.push(metaChip('coin', 'Loose scrap', row.loose < 0 ? 'Unlimited' : String(row.loose)));
     }

@@ -39,7 +39,9 @@ from _ter_full import TER_CELL_METERS, decode_v5_heights  # noqa: E402
 # ---------------------------------------------------------------------------
 # Object classification.
 #
-# Tier 1 (authoritative): the project's main ODF database at ../data/odf.min.json.
+# Tier 1 (authoritative): the project's main ODF database at data/odf.min.json
+# (repo root). The analyzer used to look beside this package, where the file
+# is not, and then classified every custom pool as "other".
 # Each ODF entry carries a pre-computed `inheritanceChain` listing every base
 # class it inherits from (e.g. mossyjagged01pool -> [tepool01, deposit]). Any
 # entry whose chain passes through a "known base" (`tepool01` for biometal
@@ -74,6 +76,10 @@ ODF_CATEGORY_TO_KIND_FALLBACK: dict[str, str] = {
     "Pilot": "starting_unit",   # pre-placed unit pilots (rare in MP maps)
 }
 
+# Unit names that are scrap pools even when the inheritance chain stops at
+# `deposit` (mntnpool, royalpool) and never names tepool01.
+POOL_UNIT_NAMES = frozenset({"Biometal Pool", "Biometal Deposit"})
+
 # Regex fallbacks: only for tokens NOT in the ODF DB. Order matters; first
 # match wins.
 OBJ_KIND_RULES_FALLBACK: list[tuple[str, str]] = [
@@ -96,7 +102,8 @@ OBJ_KIND_RULES_FALLBACK: list[tuple[str, str]] = [
 # Lazily loaded ODF DB. Keyed by lowercased ODF basename (no `.odf` suffix).
 # Each value is {category, classLabel, inheritanceChain, unitName}.
 _ODF_DB: dict[str, dict[str, Any]] | None = None
-_ODF_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "odf.min.json"
+# analyze_map.py lives in _map-analysis/scripts/, so parents[2] is the repo root.
+_ODF_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "odf.min.json"
 
 
 def _load_odf_db() -> dict[str, dict[str, Any]]:
@@ -105,22 +112,22 @@ def _load_odf_db() -> dict[str, dict[str, Any]]:
     The on-disk DB is keyed by top-level category (Vehicle / Weapon / Pilot /
     Building / Misc / ...) -> {filename.odf: entry}. We flatten across
     categories so a single lookup answers "what is this ODF".
+
+    A missing file used to return an empty map and silently drop every custom
+    pool. That is a hard error now.
     """
     global _ODF_DB
     if _ODF_DB is not None:
         return _ODF_DB
-    flat: dict[str, dict[str, Any]] = {}
-    if not _ODF_DB_PATH.exists():
-        _ODF_DB = flat
-        return flat
-    try:
-        raw = json.loads(_ODF_DB_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        _ODF_DB = flat
-        return flat
+    if not _ODF_DB_PATH.is_file():
+        raise FileNotFoundError(
+            f"ODF database missing: {_ODF_DB_PATH}. "
+            "Refusing to classify map objects against an empty database."
+        )
+    raw = json.loads(_ODF_DB_PATH.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        _ODF_DB = flat
-        return flat
+        raise ValueError(f"ODF database is not an object: {_ODF_DB_PATH}")
+    flat: dict[str, dict[str, Any]] = {}
     for category, entries in raw.items():
         if not isinstance(entries, dict):
             continue
@@ -158,14 +165,18 @@ def classify_objclass(odf: str) -> str:
 
     Strategy:
       1. ODF DB inheritance walk - reliable for anything that has an ODF file.
-      2. ODF DB category fallback - covers e.g. Pilot.
-      3. Regex fallback - covers BZN-only tokens (spawn slots, AI paths, etc).
+      2. Biometal Pool / Biometal Deposit unit names (chain may stop at deposit).
+      3. ODF DB category fallback - covers e.g. Pilot.
+      4. Regex fallback - covers BZN-only tokens (spawn slots, AI paths, etc).
+      5. Class name contains "pool" and the ODF is not in the database.
     """
     info = lookup_odf(odf)
     if info is not None:
         for base in info["inheritanceChain"]:
             if base in ODF_BASE_TO_KIND:
                 return ODF_BASE_TO_KIND[base]
+        if info.get("unitName") in POOL_UNIT_NAMES:
+            return "scrap_pool"
         cat = info.get("category")
         if cat in ODF_CATEGORY_TO_KIND_FALLBACK:
             return ODF_CATEGORY_TO_KIND_FALLBACK[cat]
@@ -174,6 +185,11 @@ def classify_objclass(odf: str) -> str:
     for pat, kind in OBJ_KIND_RULES_FALLBACK:
         if re.search(pat, s):
             return kind
+
+    # A pool-named class the database does not know is still a scrap pool.
+    # The map page draws the yellow ring and labels the missing ODF.
+    if info is None and "pool" in s:
+        return "scrap_pool"
 
     # Last-mile heuristic for vehicle-shaped names like `ivscout`, `evturr`,
     # etc. that came from custom ODFs not in the DB. Anything starting with
@@ -209,11 +225,15 @@ class GameObject:
     unit_name: str | None = None        # GameObjectClass.unitName, e.g. "Biometal Pool"
     db_category: str | None = None      # Top-level ODF DB category, e.g. "Building"
     inheritance_chain: list[str] = field(default_factory=list)
+    # False when obj_class is not in data/odf.min.json. Scrap pools still
+    # keep their marker; the map page says the ODF was not found.
+    odf_found: bool = True
 
 
 def enrich_game_object(obj: GameObject) -> GameObject:
     """Populate the optional ODF-DB fields on a GameObject in-place."""
     info = lookup_odf(obj.obj_class)
+    obj.odf_found = info is not None
     if info is not None:
         obj.unit_name = info.get("unitName") or None
         obj.db_category = info.get("category") or None
