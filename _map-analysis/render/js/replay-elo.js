@@ -5,7 +5,6 @@
  * Compact: the same list lives inside the roster bottom sheet.
  */
 
-const LUXURY_AXES = new Set(['snipe_bonus', 'target_lock_pct']);
 const MATCH_JSON_DIR = '../../data/processed';
 const ELO_STRIP_ENABLED = false;
 

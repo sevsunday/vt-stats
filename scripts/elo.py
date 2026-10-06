@@ -1,7 +1,7 @@
 """VTSR-T (VT Stats Rating - Thug): pipeline-side Thug ELO.
 
-Computes a per-player rating from chronological match data using an
-eight-axis thug composite + ELO-style updates with loss aversion and a
+Computes a per-player rating from chronological match data using a
+six-axis thug composite + ELO-style updates with loss aversion and a
 soft floor. Pure module (no I/O); writer lives in process_stats.py.
 
 The published rating is ``VTSR-T = alpha * R^W + (1 - alpha) * R^T``.
@@ -20,8 +20,9 @@ Per-match update:
 v2.4: per-match commander role adjustment. For each commander
 match-row, post-clip per-axis z-scores get shifted by the negation of a
 typical-commander baseline (then re-clipped to [-1, +1]). 4 audit-derived
-priors apply with shrinkage strength 30; 2 hand-tuned priors are locked
-(no shrinkage); 2 axes (thug_accuracy, snipe_bonus) are role-blind.
+priors apply with shrinkage strength 30; 1 hand-tuned prior (pve_share)
+is locked (no shrinkage); thug_accuracy is role-blind. v2.11 retired
+snipe_bonus and target_lock_pct, so they are no longer axes.
 Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
@@ -121,17 +122,13 @@ ELO_FLOOR_TAPER_WINDOW = 150.0
 # for auditability; tunable without a schema bump.
 ALPHA_PVE = 0.5
 
-# Thug composite weights. v2.10: snipe_bonus + target_lock_pct cut to
-# 0.005 each (were 0.05 / 0.04) so they stay visible as a dominance
-# preview but contribute ~1% of the rating combined -- a strong no-frills
-# thug is no longer handicapped for skipping the two "luxury" axes. The
-# six core axes are deliberately untouched, so the RAW dict now sums to
-# ~0.92 (NOT 1.00). This is fine: compute_performance_index() always
-# renormalizes available-axis weights at runtime
-# (`weights[a] = THUG_WEIGHTS[a] / sum(available)`), so each axis's
-# effective weight is `raw / 0.92` when all eight are present (the six
-# core axes each pick up a proportional ~8.7% uplift purely as a
-# side-effect; snipe / T-key land at ~0.5% effective each). Per-row
+# Thug composite weights (v2.11: six axes). snipe_bonus and
+# target_lock_pct were retired -- they sat at 0.005 only so bars could
+# show them, and players still read them as rating causes. Snipes stay
+# a per-match feed and highlight; T-key usage is a display stat on
+# Weapons & Accuracy, never a rating input. The raw dict sums to 0.91.
+# compute_performance_index() always renormalizes available-axis weights
+# at runtime (`weights[a] = THUG_WEIGHTS[a] / sum(available)`). Per-row
 # inline comments describe what each axis measures.
 THUG_WEIGHTS = {
     "net_damage_share":  0.20,   # damage you dealt minus what you took, vs lobby total
@@ -140,8 +137,6 @@ THUG_WEIGHTS = {
     "thug_efficiency":   0.16,   # (pvp_dealt + α * pve_to_AI) / max(1, total - structure)
     "pve_share":         0.12,   # pve_dealt / total_dealt (asset disruption)
     "mobility":          0.08,   # activity_score from positioning data
-    "snipe_bonus":       0.005,  # v2.10: luxury/preview axis (was 0.05); ~0.5% effective
-    "target_lock_pct":   0.005,  # v2.10: luxury/preview axis (was 0.04); ~0.5% effective
 }
 
 ALPHA = 0.0   # Wins-ELO blend weight. Stays 0 until the pre-registered
@@ -182,14 +177,6 @@ COMMANDER_AXIS_PRIOR = {
     "net_damage_share": -0.131,
     "thug_efficiency":  -0.106,
 
-    # ---- Hand-tuned: T-key cushion (LOCKED, no shrinkage).
-    # Audit said -0.466 (n=116), but T-key is universally available and
-    # commanders are common targets - they should be locking nearly as
-    # much as thugs. We pin a small cushion that doesn't fully accommodate
-    # the empirical reality. Locked so this design intent doesn't drift
-    # toward empirical over time.
-    "target_lock_pct":  -0.10,
-
     # ---- Hand-tuned: PvE reward boost (LOCKED, no shrinkage).
     # Seed-era audit said +0.111 (commanders naturally do more PvE). We
     # invert the sign so this becomes a +0.05 reward shift on commander
@@ -210,9 +197,9 @@ COMMANDER_AXIS_PRIOR = {
 
     # ---- Omitted (role-blind by design).
     # thug_accuracy: empirical +0.069 below noise floor at current corpus
-    # size (std 0.46, SE ~0.04). snipe_bonus: empirical +0.28 unreliable
-    # on n=22 commander rows. Treat both as role-blind until the data
-    # clearly warrants an adjustment.
+    # size (std 0.46, SE ~0.04). Treat it as role-blind until the data
+    # clearly warrants an adjustment. snipe_bonus and target_lock_pct
+    # left the composite in v2.11 and are no longer axes.
 }
 
 # Shrinkage strength (in pseudo-observations) for audit-derived axes.
@@ -224,7 +211,7 @@ COMMANDER_BASELINE_SHRINKAGE = 30.0
 # The running mean is still tracked (visibility only) so anyone reading
 # elo_current.json can see when reality has diverged enough from intent
 # to warrant a seed-value revisit.
-COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}
+COMMANDER_BASELINE_LOCKED_AXES = {"pve_share"}
 
 # Phase 2C (current): expected-performance opponent-reference modes.
 # Three options for aggregating per-opponent ratings into the single
@@ -343,7 +330,7 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # INPUT change only -- no axis math, weights, priors, or output shape change.
 # Ratings DO move, so **pre-v9 `peak_vtsr` is no longer comparable** (corpus
 # re-rated on the next pipeline run).
-# v10 (current) = snipe/T-key de-weight (pipeline v2.10). `snipe_bonus` and
+# v10 = snipe/T-key de-weight (pipeline v2.10). `snipe_bonus` and
 # `target_lock_pct` cut to 0.005 each (were 0.05 / 0.04) so they stay in the
 # composite as a dominance preview but no longer materially move the rating
 # (~1% combined). This is a genuine WEIGHTS change (not input-only): the
@@ -372,12 +359,18 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # P is taken from the lobby cut at that moment. Only that player's delta
 # moves. **pre-v13 `peak_vtsr` is not comparable** where the bench match
 # was the peak.
-# v14 (current) = the 6-player gate counts non-campod leaderboard rows,
+# v14 = the 6-player gate counts non-campod leaderboard rows,
 # not raw slot occupancy. A 1v1 with a camera-pod gallery used to rate
 # (two-person z-scores collapse to ±0.5). Idle thugs and partials still
 # count toward the gate. **pre-v14 `peak_vtsr` is not comparable** for
 # players whose peak was a match this newly excludes.
-ELO_SCHEMA_VERSION = 14
+# v15 (current) = v2.11 luxury-axis retirement. `snipe_bonus` and
+# `target_lock_pct` leave the composite (they were 0.005 each, kept only
+# so bars could show them). Output shape changes: `weights`,
+# `axis_means`, and `axis_contributions` now carry 6 keys. The locked
+# commander prior on `target_lock_pct` is gone; `pve_share` stays locked.
+# Ratings move, so **pre-v15 `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 15
 
 
 # ---------------------------------------------------------------------------
@@ -815,21 +808,6 @@ def _mobility_lobby(lobby: list[dict], pos_players: dict) -> list[float] | None:
     return out if any_present else None
 
 
-def _snipe_bonus_lobby(lobby: list[dict], snipes_by_player: dict) -> list[float] | None:
-    """Capped at min(snipes / 5, 1) BEFORE z-score so an outlier can't deform the lobby.
-
-    Returns None if no one sniped (axis omitted via redistribution).
-    """
-    any_present = False
-    out = []
-    for p in lobby:
-        c = snipes_by_player.get(p.get("name"), 0) or 0
-        if c > 0:
-            any_present = True
-        out.append(min(c / 5.0, 1.0))
-    return out if any_present else None
-
-
 def _pve_share_lobby(lobby: list[dict]) -> list[float] | None:
     """Player-dealt damage to enemy non-human assets / total dealt.
 
@@ -849,30 +827,6 @@ def _pve_share_lobby(lobby: list[dict]) -> list[float] | None:
         if pve_d > 0:
             any_present = True
         out.append(pve_d / max(1.0, total))
-    return out if any_present else None
-
-
-def _target_lock_pct_lobby(
-    lobby: list[dict], pos_players: dict, has_target_lock: bool
-) -> list[float] | None:
-    """Share of the match each player held an active T-key target lock.
-
-    Reads ``positioning.players[name].metrics.target_lock_pct`` (0-1
-    ratio). Gated on the match-global ``has_target_lock_data`` flag —
-    pre-schema sessions return ``None`` (axis-missing → redistribution).
-    """
-    if not has_target_lock:
-        return None
-    any_present = False
-    out = []
-    for p in lobby:
-        metrics = ((pos_players.get(p.get("name")) or {}).get("metrics") or {})
-        score = metrics.get("target_lock_pct")
-        if score is None:
-            out.append(0.0)
-        else:
-            any_present = True
-            out.append(max(0.0, min(1.0, float(score))))
     return out if any_present else None
 
 
@@ -907,7 +861,6 @@ def _bench_view(match_data: dict) -> dict | None:
     if not isinstance(end, (int, float)) or end <= 0:
         return None
     rows = []
-    snipe_counts = {}
     for row in match_data.get("leaderboard") or []:
         row2 = dict(row)
         pre = row.get("bench_prefix") or None
@@ -917,7 +870,6 @@ def _bench_view(match_data: dict) -> dict | None:
             row2["personal"] = personal
             if pre.get("weapon_breakdown") is not None:
                 row2["weapon_breakdown"] = pre["weapon_breakdown"]
-            snipe_counts[row.get("name")] = int(pre.get("snipes") or 0)
         rows.append(row2)
     match = dict(match_data.get("match") or {})
     match.pop("bench", None)
@@ -935,24 +887,15 @@ def _bench_view(match_data: dict) -> dict | None:
         if pre:
             if pre.get("activity_score") is not None:
                 metrics["activity_score"] = pre["activity_score"]
-            if pre.get("target_lock_pct") is not None:
-                metrics["target_lock_pct"] = pre["target_lock_pct"]
             if pre.get("at_base_pilot_sec") is not None:
                 metrics["at_base_pilot_sec"] = pre["at_base_pilot_sec"]
         pl2["metrics"] = metrics
         players[name] = pl2
     pos["players"] = players
-    snipes = dict(match_data.get("snipes") or {})
-    by_player = []
-    for name, count in snipe_counts.items():
-        if name and count > 0:
-            by_player.append({"name": name, "count": count})
-    snipes["by_player"] = by_player
     return {
         "match": match,
         "leaderboard": rows,
         "positioning": pos,
-        "snipes": snipes,
     }
 
 
@@ -1060,19 +1003,11 @@ def compute_performance_index(
     minutes = duration_sec / 60.0
 
     pos_players = ((match_data.get("positioning") or {}).get("players") or {})
-    snipes_by_player = {
-        row.get("name"): int(row.get("count", 0) or 0)
-        for row in ((match_data.get("snipes") or {}).get("by_player") or [])
-    }
-    has_target_lock = bool(
-        (match_data.get("match") or {}).get("has_target_lock_data")
-    )
     # v15 collector-gap gate: the first v3-collector batch records zero
     # BulletHit events (upstream exu2 hook regression), so every player's
     # accuracy is a degenerate 0 -- z-scoring that is meaningless. Treat
-    # the axis as unavailable (None -> weight redistribution), exactly
-    # like target_lock_pct on pre-target-lock sessions. Defaults True so
-    # pre-v15 match JSONs (field absent) keep their accuracy axis.
+    # the axis as unavailable (None -> weight redistribution). Defaults
+    # True so pre-v15 match JSONs (field absent) keep their accuracy axis.
     has_bullet_hit = bool(
         (match_data.get("match") or {}).get("has_bullet_hit_data", True)
     )
@@ -1085,8 +1020,6 @@ def compute_performance_index(
         "thug_efficiency":  _thug_efficiency_lobby(lobby),
         "pve_share":        _pve_share_lobby(lobby),
         "mobility":         _mobility_lobby(lobby, pos_players),
-        "snipe_bonus":      _snipe_bonus_lobby(lobby, snipes_by_player),
-        "target_lock_pct":  _target_lock_pct_lobby(lobby, pos_players, has_target_lock),
     }
 
     available = [a for a, v in raw.items() if v is not None]
@@ -1258,7 +1191,7 @@ def _shadow_score_match(
 
     A host-cancelled game is a real, fully-recorded match whose result was
     lost to a crash. It must never rate (`resolve_match_outcome` said
-    there is no winner, and `compute_elo` excludes it), but the 8-axis
+    there is no winner, and `compute_elo` excludes it), but the 6-axis
     composite still measured what everyone did, and the reader deserves to
     see it. So we run the SAME performance index and the SAME delta
     arithmetic the rated path uses, and label the answer as never applied.
@@ -1372,11 +1305,11 @@ def _rating_pass(
 
     Phase 2B unlocked-priors mode: when ``exclude_locked_priors=True``
     every commander axis listed in ``COMMANDER_AXIS_PRIOR`` rides the
-    shrunk rolling baseline. The two hand-tuned LOCKED axes
-    (``target_lock_pct`` cushion, ``pve_share`` reward boost) lose
-    their hand-tuned overrides and are blended with live empirical
-    means at shrinkage strength ``COMMANDER_BASELINE_SHRINKAGE``,
-    same as the audit-derived axes. The output dicts gain
+    shrunk rolling baseline. The hand-tuned LOCKED axis (``pve_share``
+    reward boost) loses its hand-tuned override and is blended with the
+    live empirical mean at shrinkage strength
+    ``COMMANDER_BASELINE_SHRINKAGE``, same as the audit-derived axes.
+    The output dicts gain
     ``excludes_locked_priors: True`` and ``commander_baseline_locked_axes``
     is empty on the alt JSON pair.
 
@@ -2050,7 +1983,7 @@ def _rating_pass(
         "commander_axis_prior":           dict(COMMANDER_AXIS_PRIOR),
         "commander_baseline_shrinkage":   COMMANDER_BASELINE_SHRINKAGE,
         # Effective lock set used during this rating run. Canonical:
-        # mirrors the module constant (``target_lock_pct`` + ``pve_share``).
+        # mirrors the module constant (``pve_share``).
         # Unlocked alt mode: empty list -- every axis rode the shrunk
         # rolling baseline. The module-constant view stays available via
         # ``commander_baseline_locked_axes_module_default`` for forensics.

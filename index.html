@@ -627,7 +627,7 @@
         <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Commander ladder this match <span class="vt-cohort-title-tag">VTSR-C · experimental</span></h5>
-            <span class="vt-match-elo-why">win/loss rating — not the 8-axis composite</span>
+            <span class="vt-match-elo-why">win/loss rating — not the 6-axis composite</span>
           </div>
           <div class="card-body" id="match-elo-vtsrc-body"></div>
           <div class="card-footer">
@@ -852,6 +852,12 @@
                   <th class="text-end">Accuracy</th>
                   <th class="text-end">Range</th>
                   <th class="text-end">Envelope</th>
+                  <th class="text-end">
+                    T-Key
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top"
+                       title="Share of the match with a T-key target lock active. Display only; not part of VTSR-T."></i>
+                  </th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1173,7 +1179,7 @@
                     VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug)<br>Fine-tuned combat ELO (eight-axis thug composite), anchored at 1500, soft floor at 1000. With Wins blend &alpha;=0 this equals the headline rating; full methodology in the VTSR-T Leaderboard card above."></i>
+                       title="<strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug)<br>Fine-tuned combat ELO (six-axis thug composite), anchored at 1500, soft floor at 1000. With Wins blend &alpha;=0 this equals the headline rating; full methodology in the VTSR-T Leaderboard card above."></i>
                   </th>
                   -->
                   <!-- Team column removed from the All Matches Career Leaderboard:
@@ -1423,6 +1429,32 @@
               </div>
               <div class="card-body" id="global-rivalries-container"></div>
             </div>
+          </div>
+        </div>
+        <div class="card mb-4" id="section-career-accuracy">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Career Accuracy &amp; T-Key</h5>
+            <button class="btn btn-sm" data-expand="section-career-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive vt-sticky-thead-card">
+            <table id="career-accuracy-table" class="table table-hover table-sm align-middle mb-0 vt-sticky-thead" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th data-sort="name">Player</th>
+                  <th data-sort="matches" class="text-end">Matches</th>
+                  <th data-sort="fired" class="text-end">Fired</th>
+                  <th data-sort="hit" class="text-end">Hit</th>
+                  <th data-sort="accuracy" class="text-end">Accuracy</th>
+                  <th data-sort="tkey" class="text-end">
+                    T-Key
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top"
+                       title="Averaged over matches that recorded T-key data. Display only; not part of VTSR-T."></i>
+                  </th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1766,7 +1798,7 @@
             <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
               <i class="bi bi-stars me-2"></i>VTSR-T Methodology
             </h5>
-            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.10 &middot; 8-axis composite</small>
+            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.11 &middot; 6-axis composite</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>

@@ -27,7 +27,7 @@ Phase 1 metrics (shipped):
        mean pre-match R_i. Anchored against Cambridge skillbench numbers.
     7. Log-loss on the clean_win subset (Cambridge punted on this; one
        extra column unlocks calibration analysis).
-    8. Single-axis ablation: drop each of the 8 axes, measure rank
+    8. Single-axis ablation: drop each of the 6 axes, measure rank
        displacement on per-player mean P_i (proxy for true rating
        displacement; full re-rating is Phase 2).
     9. Dirichlet weight perturbation: 50 samples around current
@@ -180,8 +180,6 @@ THUG_WEIGHTS_FALLBACK = {
     "thug_efficiency":   0.16,
     "pve_share":         0.12,
     "mobility":          0.08,
-    "snipe_bonus":       0.005,  # v2.10: luxury/preview axis (was 0.05)
-    "target_lock_pct":   0.005,  # v2.10: luxury/preview axis (was 0.04)
 }
 
 # Self-consistency floor: minimum matches per player to be included in
@@ -2833,8 +2831,8 @@ def metric_axis_ablation(
     weights: dict[str, float],
     top_n: int = TOP_N,
 ) -> dict[str, Any]:
-    """For each of the 8 axes, drop it from THUG_WEIGHTS and renormalize
-    the remaining 7. Recompute per-player mean P_i. Compare ranking to
+    """For each of the 6 axes, drop it from THUG_WEIGHTS and renormalize
+    the remaining 5. Recompute per-player mean P_i. Compare ranking to
     the baseline (full-weights mean P_i) via Spearman + top-N Jaccard.
 
     Documented Phase 1 simplification: ablation operates on per-player
@@ -3114,7 +3112,7 @@ def metric_perf_vs_wins(
     min_matches: int = PERF_VS_WINS_MIN_MATCHES,
 ) -> dict[str, Any]:
     """How much does the published performance rating (``thug_elo``, the
-    8-axis composite) agree with the win/loss ladder (``wins_elo``, the
+    6-axis composite) agree with the win/loss ladder (``wins_elo``, the
     Stage E R^W machinery that runs inert at ALPHA = 0)?
 
     Per-player comparison over everyone with at least ``min_matches``
@@ -4516,7 +4514,7 @@ def render_markdown_report(
     # §8 — axis ablation.
     lines.append("## §8 — Single-axis ablation")
     lines.append("")
-    lines.append("Drop each axis, renormalize the remaining 7, recompute per-player "
+    lines.append("Drop each axis, renormalize the remaining 5, recompute per-player "
                  "career mean P_i. Compare ranking to baseline. Axes whose removal "
                  "barely moves the ranking are dead weight; axes whose removal "
                  "moves it a lot are load-bearing.")

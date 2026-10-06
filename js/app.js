@@ -1942,6 +1942,7 @@
   // on All Matches load, so the sort-active header highlight lands on a
   // visible column.
   let careerSortState = { key: 'total_dealt', asc: false };
+  let careerAccuracySortState = { key: 'accuracy', asc: false };
   // Currently selected pair for the compare-mode radar on the Rivalries tab.
   // Reset on match switch; reconciled against the filtered leaderboard on
   // filter change, falling back to the first visible top_rivalries entry.
@@ -3502,6 +3503,7 @@
       registerTabRenderer('#all-tab-weapons', () => {
         renderGlobalWeaponMeta('global-weapon-chart', []);
         renderGlobalRivalries([]);
+        renderCareerAccuracyTable([]);
       });
       const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
       if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
@@ -3538,6 +3540,7 @@
     // a UI lens, not match-data state.
     careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
     careerSortState = { key: 'total_dealt', asc: false };
+    careerAccuracySortState = { key: 'accuracy', asc: false };
     remapCareerSortKeyForColumnView(careerColumnView);
 
     renderAggMeta(data.meta);
@@ -3577,6 +3580,7 @@
     registerTabRenderer('#all-tab-weapons', () => {
       renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
       renderGlobalRivalries(data.global_rivalries);
+      renderCareerAccuracyTable(data.career_stats || []);
     });
 
     registerTabRenderer('#all-tab-commanders', () => {
@@ -6987,6 +6991,17 @@
     const envOf = (p) => (typeof weaponEnvelopePct === 'function'
       ? weaponEnvelopePct(p.weapon_breakdown, channel, pctEdges) : null);
     const hasHits = matchHasBulletHitData();
+    // T-key is a display stat, joined from the unfiltered positioning
+    // block (the player filter narrows the leaderboard rows, not the
+    // metric). Missing flag or missing sample renders an em-dash.
+    const hasTkey = !!(currentData && currentData.match && currentData.match.has_target_lock_data);
+    const posPlayers = (currentData && currentData.positioning && currentData.positioning.players) || {};
+    const tkeyOf = (name) => {
+      if (!hasTkey) return null;
+      const metrics = ((posPlayers[name] || {}).metrics) || {};
+      const v = metrics.target_lock_pct;
+      return Number.isFinite(+v) ? +v : null;
+    };
     // Sort by engagement envelope (mean % of weapon max range) desc; players
     // with no %-of-max data sort last.
     const rows = leaderboard.map(p => ({ p, env: envOf(p) }));
@@ -7002,6 +7017,13 @@
       const accCell = hasHits
         ? `<span class="fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</span>`
         : `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
+      const tkey = tkeyOf(p.name);
+      const tkeyTip = hasTkey
+        ? 'No T-key samples for this player.'
+        : 'T-key data was not recorded for this match.';
+      const tkeyCell = tkey == null
+        ? `<span style="color:var(--kb-text-muted)" title="${tkeyTip}">—</span>`
+        : `${(tkey * 100).toFixed(1)}%`;
       return `<tr>
         <td class="fw-semibold">${esc(p.name)}</td>
         <td class="text-end">${ps.shots_fired.toLocaleString()}</td>
@@ -7009,9 +7031,10 @@
         <td class="text-end">${accCell}</td>
         <td class="text-end">${rangeFingerprintHtml(ps.distance_buckets, channel)}</td>
         <td class="text-end">${rangeEnvelopeHtml(env)}</td>
+        <td class="text-end">${tkeyCell}</td>
       </tr>`;
     }).join('');
-    ensureTooltips(tbody);
+    ensureTooltips(document.getElementById('accuracy-table'));
   }
 
   // --- Kill Feed ---
@@ -7907,16 +7930,6 @@
       formula: 'activity_score / 100  (positioning data)',
       desc:    'How much of the map you actually moved across. Driven by the same metric as the per-match Movement Profile column.',
     },
-    snipe_bonus: {
-      label: 'Snipe bonus',
-      formula: 'min(snipes / 5, 1)  (capped before z-score)',
-      desc:    'Sniper rifle hits, capped at 5 before z-score so one big game cannot deform the lobby distribution.',
-    },
-    target_lock_pct: {
-      label: 'T-key usage',
-      formula: 'target_lock_pct  (already 0-1)',
-      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at luxury weight (~0.5%).',
-    },
   };
 
 
@@ -7999,12 +8012,11 @@
   // commander. Commander rows are self-labeling via axis_contributions_meta
   // (emitted only when v2.4 applied a role-fairness shift). For the four
   // shifted axes (mobility, thug_kill_rate, net_damage_share,
-  // thug_efficiency) plus the two locked shifted axes (target_lock_pct,
-  // pve_share), we pull z_pre_shift so the v2.4 commander cushion is
-  // reversed - that cushion exists to make VTSR-T fair across roles, but
-  // for commander-vs-commander comparison it artificially flattens gaps.
-  // For the two role-blind axes (thug_accuracy, snipe_bonus) pre == post,
-  // so axis_contributions[axis] is the raw value.
+  // thug_efficiency) plus the locked shifted axis (pve_share), we pull
+  // z_pre_shift so the v2.4 commander cushion is reversed - that cushion
+  // exists to make VTSR-T fair across roles, but for commander-vs-commander
+  // comparison it artificially flattens gaps. For the role-blind axis
+  // (thug_accuracy) pre == post, so axis_contributions[axis] is the raw value.
   //
   // Returns { [steam64|name]: { axisMeans: {axis: meanZ}, n: int } }
   // where n is the count of commander matches contributing data for that
@@ -8811,6 +8823,87 @@
     });
     updateCareerColumnViewButtons();
     ensureTooltips(document.getElementById('career-table'));
+  }
+
+  // All Matches → Weapons & Rivalries. Career accuracy and T-key usage
+  // are display stats (not VTSR-T axes). Reads aggregator fields only.
+  function renderCareerAccuracyTable(stats) {
+    const tbody = document.querySelector('#career-accuracy-table tbody');
+    if (!tbody) return;
+    const rows = Array.isArray(stats) ? stats : [];
+    const num = (v) => (v == null || !Number.isFinite(+v)) ? null : +v;
+    const cmpNullLast = (va, vb, asc) => {
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === 'string') {
+        const c = va.localeCompare(vb);
+        return asc ? c : -c;
+      }
+      return asc ? va - vb : vb - va;
+    };
+    const key = careerAccuracySortState.key;
+    const asc = careerAccuracySortState.asc;
+    const sorted = rows.slice().sort((a, b) => {
+      const pick = (c) => {
+        const hitN = c.matches_with_bullet_hit_data || 0;
+        const tN = c.matches_with_target_lock_data || 0;
+        if (key === 'name') return (c.name || '').toLowerCase();
+        if (key === 'matches') return c.matches_played || 0;
+        if (key === 'fired') return hitN > 0 ? (c.total_shots_fired || 0) : null;
+        if (key === 'hit') return hitN > 0 ? (c.total_shots_hit || 0) : null;
+        if (key === 'accuracy') return hitN > 0 ? num(c.overall_accuracy) : null;
+        if (key === 'tkey') return tN > 0 ? num(c.mean_target_lock_pct) : null;
+        return null;
+      };
+      return cmpNullLast(pick(a), pick(b), asc);
+    });
+    const dash = '<span style="color:var(--kb-text-muted)">—</span>';
+    tbody.innerHTML = sorted.map((c) => {
+      const hitN = c.matches_with_bullet_hit_data || 0;
+      const tN = c.matches_with_target_lock_data || 0;
+      const played = c.matches_played || 0;
+      const acc = hitN > 0 ? num(c.overall_accuracy) : null;
+      const accColor = acc == null ? ''
+        : acc >= 0.7 ? 'var(--kb-success)' : acc >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
+      const accTip = (acc != null && hitN < played)
+        ? ` title="From ${hitN} of ${played} matches with hit data"`
+        : '';
+      const accCell = acc == null
+        ? dash
+        : `<span class="fw-bold" style="color:${accColor}"${accTip}>${(acc * 100).toFixed(1)}%</span>`;
+      const firedCell = hitN > 0 ? (c.total_shots_fired || 0).toLocaleString() : dash;
+      const hitCell = hitN > 0 ? (c.total_shots_hit || 0).toLocaleString() : dash;
+      const tkey = tN > 0 ? num(c.mean_target_lock_pct) : null;
+      const tkeyCell = tkey == null
+        ? dash
+        : `<span title="Averaged over ${tN} match${tN === 1 ? '' : 'es'} with T-key data">${(tkey * 100).toFixed(1)}%</span>`;
+      const nameCell = (typeof vtPlayerLinkHtml === 'function')
+        ? vtPlayerLinkHtml(c.name, c.steam64)
+        : esc(c.name);
+      return `<tr>
+        <td class="fw-semibold">${nameCell}</td>
+        <td class="text-end">${played.toLocaleString()}</td>
+        <td class="text-end">${firedCell}</td>
+        <td class="text-end">${hitCell}</td>
+        <td class="text-end">${accCell}</td>
+        <td class="text-end">${tkeyCell}</td>
+      </tr>`;
+    }).join('');
+    document.querySelectorAll('#career-accuracy-table th[data-sort]').forEach((th) => {
+      th.classList.toggle('sort-active', th.dataset.sort === key);
+      th.onclick = (ev) => {
+        if (ev.target && ev.target.closest && ev.target.closest('.vt-col-info')) return;
+        if (careerAccuracySortState.key === th.dataset.sort) {
+          careerAccuracySortState.asc = !careerAccuracySortState.asc;
+        } else {
+          careerAccuracySortState.key = th.dataset.sort;
+          careerAccuracySortState.asc = th.dataset.sort === 'name';
+        }
+        renderCareerAccuracyTable(rows);
+      };
+    });
+    ensureTooltips(document.getElementById('career-accuracy-table'));
   }
 
   // Sync the active class on the Totals|Per match segmented buttons in the

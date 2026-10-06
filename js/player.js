@@ -788,8 +788,6 @@
     { key: 'thug_accuracy',    label: 'Thug Accuracy',    icon: 'bi-bullseye' },
     { key: 'pve_share',        label: 'PvE Share',        icon: 'bi-building' },
     { key: 'mobility',         label: 'Mobility',         icon: 'bi-arrows-move' },
-    { key: 'snipe_bonus',      label: 'Snipe Bonus',      icon: 'bi-eye' },
-    { key: 'target_lock_pct',  label: 'T-Key Usage',      icon: 'bi-pin-angle' },
   ];
 
   // True when a rating row carries at least one finite VTSR-T axis mean.
@@ -954,10 +952,6 @@
       head: 'You\u2019re not moving enough.',
       body: 'This is your positioning activity score \u2014 how much of the map you covered relative to peers. Don\u2019t stay in base if you can help it, and use the minimap to find opportunities for PvE.',
     },
-    // v2.10: snipe_bonus + target_lock_pct are luxury/preview axes (~0.5%
-    // weight each) and no longer surface as coaching suggestions -- see the
-    // COACHING_EXCLUDE filter in renderCoachingPanel. Their copy was removed
-    // because there's nothing actionable for a player to gain from them now.
   };
 
   // Approximate ΔVTSR for a +0.5σ improvement on a given axis. Mirrors
@@ -3562,12 +3556,10 @@
     if (!ranked.length) {
       return '<p class="text-secondary mb-0">No axis breakdown available for this player.</p>';
     }
-    // v2.10: order by axis WEIGHT desc (heaviest signal first) rather than by
-    // z, so players read their most-affecting axes at the top and the two
-    // luxury axes (snipe_bonus / target_lock_pct, ~0.5% each) always sit at
-    // the bottom. Primary key = elo.weights[key]; tiebreak = canonical
-    // VTSR_AXES order (which is already authored heaviest-first), so this
-    // degrades gracefully to VTSR_AXES order if elo.weights is missing (404).
+    // Order by axis weight descending (heaviest signal first) rather than
+    // by z. Primary key = elo.weights[key]; tiebreak = canonical VTSR_AXES
+    // order (already authored heaviest-first), so this degrades gracefully
+    // if elo.weights is missing (404).
     const weights = (state.elo && state.elo.weights) || {};
     const axisOrder = new Map(VTSR_AXES.map((def, i) => [def.key, i]));
     const ordered = ranked.slice().sort((a, b) => {
@@ -3614,20 +3606,12 @@
       .join('');
   }
 
-  // v2.10 copy contract (shared with js/match-elo.js LUXURY_AXES):
-  // snipe_bonus + target_lock_pct are luxury/preview axes (~0.5% weight
-  // each). They stay on Strengths & weaknesses / radar / bar grids so we
-  // can measure them. They must NEVER appear in causal rating copy
-  // (coaching, helped/hurt, "why Δ moved"). Copy this exclude set, not the
-  // z-score, when adding a new copy surface.
-  const COACHING_EXCLUDE = new Set(['snipe_bonus', 'target_lock_pct']);
-
   function renderCoachingPanel(ranked) {
     // Rank by impact (|z| * weight) instead of raw z so heavy axes outrank
     // low-weight axes regardless of how negative their z is.
     const weights = (state.elo && state.elo.weights) || {};
     const weak = ranked
-      .filter(e => e.z < 0 && !COACHING_EXCLUDE.has(e.axisDef.key))
+      .filter(e => e.z < 0)
       .map(e => ({ ...e, impact: Math.abs(e.z) * (+weights[e.axisDef.key] || 0) }))
       .sort((a, b) => b.impact - a.impact)
       .slice(0, 3);
@@ -3902,7 +3886,7 @@
     // matches. Two-column at lg+; single-column on phones.
     const html = `
       <div class="row g-3">
-        <!-- 8-axis radar overlay (top-left) -->
+        <!-- 6-axis radar overlay (top-left) -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">

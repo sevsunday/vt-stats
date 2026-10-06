@@ -1428,7 +1428,7 @@ BZCC's **T-key** activates target mode against the nearest enemy, giving a small
 - **Edge case — field present but no player ever activated target mode**: collapses to `has_target_lock_data=false`, same as pre-schema. This is an unavoidable limitation of protobuf's implicit presence: the wire format cannot distinguish "never set" from "explicit false". In practice both cases are correctly labeled "no data" because neither carries a meaningful T-key signal.
 - **Contrast with `activity_score`**: unlike `activity_score` (match-relative, p95-normalized across the roster), `target_lock_pct` is **absolute** — a 0.25 ratio means the player had a target lock active for a quarter of their kept samples regardless of how anyone else played. This is why `career_stats[].mean_target_lock_pct` is a **straight direct average** across matches (valid), whereas `mean_movement_score` is an average-of-relatives (approximation, noted in the career Mobility tooltip).
 - **Career aggregation**: `career_stats[].mean_target_lock_pct` and `career_stats[].matches_with_target_lock_data`; also surfaced as `meta.matches_with_target_lock_data` on the in-memory aggregate (built client-side by `VTAggregate.build()` from `match_contributions.json`). Only matches where `has_target_lock_data=true` contribute to the average — that prevents pre-schema zero-fill from diluting real values.
-- **UI surface**: the 8th "T-Key Usage" axis on the Player Performance Radar in all four modes (single / compare / team / career). The career Radar reads `mean_target_lock_pct` directly; the per-match Radar reads per-player `target_lock_pct`. Both tooltips fall back to "T-Key: no data" when the availability flag is false.
+- **UI surface**: the 8th "T-Key Usage" axis on the Player Performance Radar in all four modes (single / compare / team / career) — that radar is not the VTSR-T composite. Also a T-Key column on the per-match Weapons & Accuracy table and the All Matches → Weapons & Rivalries Career Accuracy & T-Key table. **Not a VTSR-T axis** (v2.11). The career Radar reads `mean_target_lock_pct` directly; the per-match Radar reads per-player `target_lock_pct`. Both tooltips fall back to "T-Key: no data" when the availability flag is false.
 
 ##### Worked example
 
@@ -1757,7 +1757,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Snipe Count** | Number of snipe events in a match | `UnitSniped` | Count per match |
 | **Snipe Feed (Phase 3)** | Per-snipe entries with sniper / victim context | `UnitSniped` events with `shooter_team`, `shooter_odf`, `victim_team`, `victim_odf` (Phase 3-enriched fields). The wire-level `shooter` / `victim` Steam64 fields were collector-bug poisoned through ~2026-05-04 — pipeline ignores them and slot-derives identity from `header.teamnum_to_s64[shooter_team]` / `[victim_team]`; see [`§ UnitSniped`](#unitsniped) for the erratum | Routed to `snipes.{feed, by_player, totals}`. Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` (protobuf defaults). Combat-tab card auto-hides when feed is empty |
 | **Submitter** | Who submitted the session data | Filesystem | Parent folder name of the `.binpb.gz` file |
-| **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player had a target lock active (the T-key activates a tap-to-toggle target mode against the nearest enemy; gives a small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar |
+| **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player had a target lock active (the T-key activates a tap-to-toggle target mode against the nearest enemy; gives a small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar (not a VTSR-T axis) plus the per-match Accuracy & Range T-Key column and the All Matches Career Accuracy & T-Key table |
 | **Terrain Bounds** | Full 3D world-space extents of the map | `StatHeader.terrain_min_*` / `terrain_max_*` (fields 12-17) | `{min:{x,y,z}, max:{x,y,z}}`, axis convention +X East / +Y Up / +Z North. `null` for pre-schema sessions (all-zero fallback). Surfaced on `positioning.terrain_bounds` and mirrored to `match.terrain_bounds`. Drives `positioning.map_bounds` when present (`map_bounds_source = "terrain"`); observed player extents fallback otherwise |
 | **Timeline** | Damage over time in 10-second windows | `DamageDealt` | Damage per bucket = `(tick - min_tick) / (bucket_seconds * tick_rate)` |
 | **Tug-of-War (Replay)** | Cumulative faction damage as a two-segment bar during playback | `timeline.by_faction["1" / "2"]` | Segment width = `cumulative_faction_total / combined_total × 100%` |
@@ -3177,21 +3177,19 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
   "rows_excluded_zero_damage": 0,        // schema 30: thug rows skipped for personal.dealt == 0
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
-               "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08,
-               "snipe_bonus": 0.005, "target_lock_pct": 0.005 },  // v2.10: luxury axes cut to 0.005; raw sum ≈0.92, runtime-renormalized
+               "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08 },  // v2.11: 6 axes; raw sum 0.91, runtime-renormalized
   "commander_axis_prior": {
     "mobility": -0.488, "thug_kill_rate": -0.164, "net_damage_share": -0.131,
-    "thug_efficiency": -0.106, "target_lock_pct": -0.10, "pve_share": -0.05
+    "thug_efficiency": -0.106, "pve_share": -0.05
   },
   "commander_baseline_shrinkage": 30.0,
-  "commander_baseline_locked_axes": ["pve_share", "target_lock_pct"],
+  "commander_baseline_locked_axes": ["pve_share"],
   "steam64_aliases": { "76561199317457354": "76561199066952713" },  // silent identity aliases; see §10.4
   "commander_baseline_observed": {
     "mobility":         { "n": 116, "running_mean": -0.488, "shrunk_baseline_at_corpus_end": -0.488, "locked": false },
     "thug_kill_rate":   { "n": 116, "running_mean": -0.164, "shrunk_baseline_at_corpus_end": -0.164, "locked": false },
     "net_damage_share": { "n": 116, "running_mean": -0.131, "shrunk_baseline_at_corpus_end": -0.131, "locked": false },
     "thug_efficiency":  { "n": 116, "running_mean": -0.106, "shrunk_baseline_at_corpus_end": -0.106, "locked": false },
-    "target_lock_pct":  { "n": 116, "running_mean": -0.466, "shrunk_baseline_at_corpus_end": -0.10,  "locked": true  },
     "pve_share":        { "n": 116, "running_mean":  0.111, "shrunk_baseline_at_corpus_end": -0.05,  "locked": true  }
   },
   "ratings": [{
@@ -3215,7 +3213,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
     "peak_vtsr": 2708.9,
     "peak_at": "2026-05-04T03-06-22",
     "win_history": [12.4, 8.1, -3.2, 5.7],
-    "axis_means": { "net_damage_share": 0.42, "thug_kill_rate": 0.38, "thug_accuracy": 0.21, "thug_efficiency": 0.30, "pve_share": -0.15, "mobility": 0.18, "snipe_bonus": 0.05, "target_lock_pct": 0.10 }
+    "axis_means": { "net_damage_share": 0.42, "thug_kill_rate": 0.38, "thug_accuracy": 0.21, "thug_efficiency": 0.30, "pve_share": -0.15, "mobility": 0.18 }
   }]
 }
 ```
@@ -3241,10 +3239,10 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
-| `weights` | object | Snapshot of `THUG_WEIGHTS` for transparency. **v2.3**: 8 keys (`net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy`, `pve_share`, `mobility`, `snipe_bonus`, `target_lock_pct`). The Python dict was renamed `COMBAT_WEIGHTS` → `THUG_WEIGHTS` in v2.3 to align with the Combat ELO → Thug ELO rename. The `pve_share` axis (was `structure_share` pre-v2.3) covers ALL enemy non-human damage — structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`. The three "thug" axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`) credit PvE work at fractional weight `alpha_pve` (default 0.5). **v2.10**: `snipe_bonus` + `target_lock_pct` cut from 0.05 / 0.04 to **0.005 each** (luxury/preview axes — kept in the composite so the leaderboard detail + radar still show who's dominating them, but ~0.5% effective weight each so they don't handicap no-frills thugs). Because only those two knobs moved, the **raw dict now sums to ≈0.92, not 1.00** — `compute_performance_index()` renormalizes available-axis weights at runtime (`weights[a] / Σ available`), so each axis's effective weight is `raw / 0.92` when all eight are present. Consumers that render per-axis weight % should renormalize over the axes actually present (the dashboard `renderVtsrAxisGrid` / player radar already do). |
-| `commander_axis_prior` | object | **v2.4** — snapshot of `COMMANDER_AXIS_PRIOR` for transparency. Up to 8 keys (1 per axis); axes omitted from this dict are role-blind (currently `thug_accuracy`, `snipe_bonus`). Values are in **post-clip space** (i.e. measured in the same units as `clip(z, -2, +2) / 2`). For commander rows on each listed axis, the per-match shift applied is `-baseline[axis]`, where `baseline` comes from `commander_shrunk_baseline()` (audit-derived axes blend with the running mean; locked axes equal the prior exactly). |
+| `weights` | object | Snapshot of `THUG_WEIGHTS` for transparency. **v2.11**: 6 keys (`net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy`, `pve_share`, `mobility`). The Python dict was renamed `COMBAT_WEIGHTS` → `THUG_WEIGHTS` in v2.3 to align with the Combat ELO → Thug ELO rename. The `pve_share` axis (was `structure_share` pre-v2.3) covers ALL enemy non-human damage — structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`. The three "thug" axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`) credit PvE work at fractional weight `alpha_pve` (default 0.5). **v2.11** removed `snipe_bonus` and `target_lock_pct` (v2.10 had cut them to 0.005 and left them on the bars). The raw dict sums to **0.91**; `compute_performance_index()` renormalizes available-axis weights at runtime (`weights[a] / Σ available`). Snipes and T-key usage are display stats, not rating inputs. `ELO_SCHEMA_VERSION` 15; pre-v15 `peak_vtsr` is not comparable. |
+| `commander_axis_prior` | object | **v2.4** — snapshot of `COMMANDER_AXIS_PRIOR` for transparency. **v2.11**: 5 keys. The omitted axis is role-blind (`thug_accuracy`). Values are in **post-clip space** (i.e. measured in the same units as `clip(z, -2, +2) / 2`). For commander rows on each listed axis, the per-match shift applied is `-baseline[axis]`, where `baseline` comes from `commander_shrunk_baseline()` (audit-derived axes blend with the running mean; locked axes equal the prior exactly). |
 | `commander_baseline_shrinkage` | float | **v2.4** — shrinkage strength (in pseudo-observations) used for audit-derived axes. Live data takes over the seed prior smoothly as the corpus grows. Default `30.0`. Locked axes ignore this constant. |
-| `commander_baseline_locked_axes` | array<string> | **v2.4** — sorted list of axis names whose baselines are locked at the seed prior (no shrinkage). Default `["pve_share", "target_lock_pct"]` — the two hand-tuned priors whose design intent should not silently drift toward live empirical means. |
+| `commander_baseline_locked_axes` | array<string> | **v2.4** — sorted list of axis names whose baselines are locked at the seed prior (no shrinkage). **v2.11** default `["pve_share"]` — the remaining hand-tuned prior. `target_lock_pct` left with the axis. |
 | `commander_baseline_observed` | object | **v2.4** — per-axis snapshot of the rolling baseline state at the end of the corpus walk. Keys match `commander_axis_prior`. Each value: `{ "n": int, "running_mean": float, "shrunk_baseline_at_corpus_end": float, "locked": bool }`. `n` is the number of commander rows that contributed to the running mean across the corpus. `running_mean` is the empirical mean of pre-shift post-clip z-scores observed for commander rows on this axis (visibility only when `locked: true`). `shrunk_baseline_at_corpus_end` is the value `commander_shrunk_baseline()` would return at corpus end — equals the prior exactly when `locked: true`; for unlocked axes it sits between `prior` and `running_mean`, weighted toward `running_mean` as `n` grows past `commander_baseline_shrinkage`. `locked: true` is a clear signal in the JSON that this axis's prior is hand-tuned and not drift-tracking. |
 | `excludes_commanders` | bool | **v2.7 retired — no longer emitted.** Was a sentinel distinguishing the canonical file from a deleted thug-only alt pair. Stale `false` may linger on disk until the next pipeline run. |
 | `rows_excluded_commander_mode` | int | **v2.7 retired — no longer emitted.** Was the alt-file count of commander rows dropped before scoring. Stale `0` may linger on disk until the next pipeline run. |
@@ -3298,20 +3296,17 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
         "delta": 17.2, "performance": 0.42, "expected": 0.05,
         "axis_contributions": { "net_damage_share": 0.85, "thug_kill_rate": 0.40,
                                  "thug_accuracy": 0.10, "thug_efficiency": 0.30,
-                                 "pve_share": -0.20, "mobility": 0.50,
-                                 "snipe_bonus": 0.0, "target_lock_pct": 0.15 } },
+                                 "pve_share": -0.20, "mobility": 0.50 } },
       { "name": "Snake", "steam64": "...", "before": 1500.0, "after": 1503.1,
         "delta": 3.1, "performance": 0.05, "expected": -0.02,
         "axis_contributions": { "net_damage_share": 0.0, "thug_kill_rate": -0.05,
                                  "thug_accuracy": 0.10, "thug_efficiency": -0.05,
-                                 "pve_share": 0.16, "mobility": 0.0,
-                                 "snipe_bonus": 0.0, "target_lock_pct": -0.366 },
+                                 "pve_share": 0.16, "mobility": 0.0 },
         "axis_contributions_meta": {
           "mobility":         { "z_pre_shift": -0.488, "shift": 0.488, "z_post_shift": 0.0 },
           "thug_kill_rate":   { "z_pre_shift": -0.214, "shift": 0.164, "z_post_shift": -0.05 },
           "net_damage_share": { "z_pre_shift": -0.131, "shift": 0.131, "z_post_shift": 0.0 },
           "thug_efficiency":  { "z_pre_shift": -0.156, "shift": 0.106, "z_post_shift": -0.05 },
-          "target_lock_pct":  { "z_pre_shift": -0.466, "shift": 0.10,  "z_post_shift": -0.366 },
           "pve_share":        { "z_pre_shift": 0.111,  "shift": 0.05,  "z_post_shift": 0.161 }
         } }
     ]

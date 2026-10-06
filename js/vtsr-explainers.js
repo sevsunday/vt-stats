@@ -81,7 +81,7 @@
   // 13.1 final equation: the published rating is a blend of two dials.
   const BLEND_STEPS = [
     { term: 'eq-rt', title: 'The Performance dial', x: 63, y: 63,
-      body: 'Thug ELO &mdash; everything on this page: the 8-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
+      body: 'Thug ELO &mdash; everything on this page: the 6-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
       body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
@@ -93,10 +93,10 @@
     + '\\htmlId{eq-alpha}{\\alpha} \\cdot \\htmlId{eq-rw}{R^{W}} \\;+\\; '
     + '(1 - \\alpha) \\cdot \\htmlId{eq-rt}{R^{T}}';
 
-  // The 8 axes (v2.10 weights). Single source for the mixing board, the
+  // The 6 axes (v2.11). Single source for the mixing board, the
   // weights table, and the methodology modal table. Raw weights sum to
-  // ~0.92 (the two luxury axes were cut to 0.005 in v2.10); the pipeline
-  // renormalizes over present axes at runtime.
+  // 0.91; the pipeline renormalizes over present axes at runtime.
+  // Snipes and T-key usage are display stats, not axes.
   const AXES = [
     { key: 'net_damage_share', label: 'Net damage share', weight: 0.20,
       blurb: 'Damage you dealt minus took, vs the lobby total.' },
@@ -110,10 +110,6 @@
       blurb: 'Damage on enemy bases, scavs, AI tanks.' },
     { key: 'mobility', label: 'Mobility', weight: 0.08,
       blurb: 'How much of the map you covered.' },
-    { key: 'snipe_bonus', label: 'Snipe bonus', weight: 0.005,
-      blurb: 'Sniper rifle hits, capped. Luxury axis &mdash; barely moves your rating.' },
-    { key: 'target_lock_pct', label: 'T-key usage', weight: 0.005,
-      blurb: 'How often you held a target lock. Luxury axis &mdash; barely moves your rating.' },
   ];
 
   // Mixing-board steps (solo mode: one callout at a time, anchored to
@@ -368,20 +364,19 @@
       { hint: 'Press <strong>Next</strong> to meet the two dials.' });
   }
 
-  // The 8-axes mixing board: a horizontal weight bar whose segments are
+  // The 6-axes mixing board: a horizontal weight bar whose segments are
   // the step anchors (solo mode — one spotlight at a time). No KaTeX.
   function axesBoardHtml() {
     const totalW = AXES.reduce((s, a) => s + a.weight, 0);
     const segs = AXES.map((a) => {
       const pct = (a.weight / totalW) * 100;
-      const luxury = a.weight < 0.01;
-      const label = luxury ? '' : `<span class="vt-axesboard-seg-label">${a.label}</span>`;
-      return `<span class="vt-axesboard-seg${luxury ? ' is-luxury' : ''}"
+      const label = `<span class="vt-axesboard-seg-label">${a.label}</span>`;
+      return `<span class="vt-axesboard-seg"
         data-axis="${a.key}" style="flex-basis:${pct.toFixed(2)}%;"
         title="${esc(a.label)} \u00b7 weight ${a.weight}">${label}</span>`;
     }).join('');
     const board = `<div class="vt-axesboard" role="img"
-      aria-label="The 8 scoring axes sized by weight">${segs}</div>`;
+      aria-label="The 6 scoring axes sized by weight">${segs}</div>`;
     return buildStageBlock('axes', AXES_STEPS, board,
       { mode: 'solo', hint: 'Press <strong>Next</strong> to spotlight each axis.' });
   }
@@ -421,22 +416,22 @@
         <li><strong>Easier on 4 axes</strong> &middot; mobility, kill rate, damage share, efficiency &mdash; the role-driven shortfalls.</li>
         <li><strong>Small bonus on PvE share</strong> &middot; commanders get a little extra credit for hitting enemy base / scavs.</li>
       </ul>
-      <p class="mb-0 text-muted small">T-key and snipe are not adjusted &mdash; they barely move anyone&rsquo;s rating. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
+      <p class="mb-0 text-muted small">Accuracy is not adjusted &mdash; commanders already sit near the lobby on it. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
   }
 
   // Worked example (real numbers from data/processed/elo_history.json:
-  // Domakus 2026-05-08T23-46-02 — before=1712.00, after=1727.03,
-  // delta=+15.03, performance=+0.5582, expected=+0.2913, K back-solved
-  // = 15.03 / (2.5 * 0.2669) = 22.53). Re-read that history entry after
+  // Domakus 2026-05-08T23-46-02 — before=1709.81, after=1725.89,
+  // delta=+16.08, performance=+0.5559, expected=+0.2703, K back-solved
+  // = 16.08 / (2.5 * 0.2856) = 22.52). Re-read that history entry after
   // any re-rate; the values shift even though the story doesn't.
   function workedExampleHtml() {
-    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1712.0</strong> to <strong>1727.0</strong> (+15.0).</p>
+    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1709.8</strong> to <strong>1725.9</strong> (+16.1).</p>
       <ul class="mb-2">
         <li>Match performance: <strong>+0.56</strong> (top of the lobby &mdash; the scale runs roughly &minus;1 to +1, where 0 is an average game)</li>
-        <li>Expected: <strong>+0.29</strong> (already a high-rated player &mdash; the bar was high)</li>
-        <li>Move speed (K): <strong>~22</strong> (settled veteran)</li>
+        <li>Expected: <strong>+0.27</strong> (already a high-rated player &mdash; the bar was high)</li>
+        <li>Move speed (K): <strong>~23</strong> (settled veteran)</li>
       </ul>
-      <p class="mb-0">He beat the bar by +0.27, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
+      <p class="mb-0">He beat the bar by +0.29, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
   }
 
   // ------------------------------------------------------------------
@@ -445,8 +440,8 @@
   // annotated stage (scope control): a plain pre-rendered KaTeX handicap
   // formula + the mirror-blend story + a worked example with real corpus
   // numbers (elo_commander_history.json, 2026-08-23T03-25-36 Oldboy:
-  // team_handicap.diff=31.96, F9bomber before 1576.26 expected 0.6607
-  // delta -13.21, mort before 1492.48 expected 0.3393 delta +13.21.
+  // team_handicap.diff=32.11, F9bomber before 1582.24 expected 0.6676
+  // delta -13.35, mort before 1493.22 expected 0.3324 delta +13.35.
   // Re-read that duel after any re-rate; _investigation/check_explainer_examples.mjs
   // fails when these digits move).
   // Returns '' while KaTeX is still loading (callers render it after
@@ -463,7 +458,7 @@
       <p class="mb-2"><em>R</em> is each commander&rsquo;s rating; <em>T</em> is each team&rsquo;s average thug rating (their pre-match VTSR-T); <em>&lambda;</em> converts a thug-team edge into rating points (currently 1:1 &mdash; a 100-point average-thug advantage counts like 100 rating points). Winning with the weaker roster pays big; losing with it barely costs.</p>
       <p class="mb-2">The ladder&rsquo;s history also includes hundreds of <strong>hand-logged community duels</strong> from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>&rsquo;s match ledger (2025 onward, 3v3/4v4/5v5 only, deduplicated against our own recordings &mdash; a recorded match always supersedes the ledger). They rate at the same K as recorded duels; the thug handicap applies whenever the players involved already had ratings at that point in history, and reads zero before the rating era began &mdash; exactly like our own earliest matches. Community-sourced duels are tagged on every ladder row and duel log.</p>
       <p class="mb-2">Since the proto-v4 collector, every duel also records an <strong>opening economy read</strong> against the other commander: pool tempo (who reached 3 extractors first), combat conversion (how much of the first 4 minutes of scrap became combat ships), and regen tempo (how much of that opening was spent in the fast-regen band). Three further readouts &mdash; ships built per ship lost, upgrade share, and loose share (across the whole match, how much of the scrap earned was loose collected by scavengers) &mdash; are shown and not scored. The blend weight &alpha;<sub>c</sub> sits at 1 (outcome-pure). It stays there until a fresh sample, recorded after 23 Sep 2026, clears a pre-registered rule that asks for more than &ldquo;the leader of the stat also won that match.&rdquo; The formula can&rsquo;t be tuned to fit the matches that judge it. The first real telemetry match is the humility anchor: the composite pointed at the commander who lost.</p>
-      <p class="mb-0 text-muted small">Real example: in the 2026-08-23 Oldboy match, F9bomber was already the higher-rated commander (1576 vs 1492) and his thugs averaged <strong>+32 stronger</strong>, so he was the <strong>66% favorite</strong>. He lost anyway: <strong>&minus;13.2</strong> for the stacked favorite, <strong>+13.2</strong> for mort. New commanders move fast (K decays 40 &rarr; 20 over the first 5 duels) and stay <strong>provisional</strong> below 5 rated games. A ranked <code>#</code> additionally requires <strong>8 proto-v4 games or 25 older games</strong> (pre-v4 recordings and F9Stats), a game within 90 days of the newest match, and a command game within 90 days (or 3 commander games after going stale while still thugging); everyone else stays visible in the Unranked table.</p>`;
+      <p class="mb-0 text-muted small">Real example: in the 2026-08-23 Oldboy match, F9bomber was already the higher-rated commander (1582 vs 1493) and his thugs averaged <strong>+32 stronger</strong>, so he was the <strong>67% favorite</strong>. He lost anyway: <strong>&minus;13.4</strong> for the stacked favorite, <strong>+13.4</strong> for mort. New commanders move fast (K decays 40 &rarr; 20 over the first 5 duels) and stay <strong>provisional</strong> below 5 rated games. A ranked <code>#</code> additionally requires <strong>8 proto-v4 games or 25 older games</strong> (pre-v4 recordings and F9Stats), a game within 90 days of the newest match, and a command game within 90 days (or 3 commander games after going stale while still thugging); everyone else stays visible in the Unranked table.</p>`;
   }
 
   // ------------------------------------------------------------------
@@ -487,7 +482,7 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The 8 axes</h6>
+        <h6>The 6 axes</h6>
         ${weightsTableHtml()}
         <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
       </section>

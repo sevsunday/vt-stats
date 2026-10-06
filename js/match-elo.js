@@ -3,7 +3,7 @@
 // Joins the currently loaded match against elo_history.json (already
 // fetched on dashboard boot into window.__vtEloHistory) and explains
 // how this lobby moved VTSR-T: a full-lobby Δ list, a selected-player
-// verdict + 8-axis breakdown, and a P-vs-E scatter. When
+// verdict + 6-axis breakdown, and a P-vs-E scatter. When
 // elo_commander_history.json has a duel for this match, a compact
 // VTSR-C two-row strip is appended (hidden on the historical
 // undetermined corpus — no empty card).
@@ -15,11 +15,7 @@
 //   preselects a row when exactly one player is in the filter.
 // - Default selection is the biggest VTSR-T gainer (rated[0], already
 //   sorted Δ descending), not the largest |Δ|.
-// - Luxury axes (snipe_bonus, target_lock_pct) are PREVIEW-ONLY
-//   (v2.10, ~0.5% weight each). They stay on the bar grid / radar so we
-//   can measure them. They must NEVER appear in helped/hurt, coaching,
-//   or any "why Δ moved" sentence. Same contract as COACHING_EXCLUDE
-//   in js/player.js — copy the exclude set, not the z-score.
+// - Snipes and T-key usage are display stats, not VTSR-T axes (v2.11).
 // - No aggregation: every number comes from the pipeline-emitted delta
 //   or the commander-history duel row.
 // - Depends on charts.js globals (activeCharts, glassTooltipConfig,
@@ -35,11 +31,10 @@
   const VERDICT_EPS = 0.08;
   const SENTENCE_CONTRIB_MIN = 0.01;
   const HANDICAP_GAP_MIN = 50;
-  const LUXURY_AXES = new Set(['snipe_bonus', 'target_lock_pct']);
 
   const EXPECTED_TIP_HTML =
     '<div><strong>Played vs expected</strong></div>' +
-    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 8-axis composite versus everyone here. Above the dashed line means you outperformed that prediction \u2014 that is what moved the number, win or lose.</div>';
+    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 6-axis composite versus everyone here. Above the dashed line means you outperformed that prediction \u2014 that is what moved the number, win or lose.</div>';
 
   const VTSR_AXIS_META = {
     net_damage_share: {
@@ -66,14 +61,6 @@
       label: 'Mobility',
       desc: 'How much of the map you actually moved across this match.',
     },
-    snipe_bonus: {
-      label: 'Snipe bonus',
-      desc: 'Sniper rifle hits. Luxury axis — kept visible so we can measure it, but it barely moves the rating.',
-    },
-    target_lock_pct: {
-      label: 'T-key usage',
-      desc: 'Share of the match you held a T-key target lock. Luxury axis — measured, not a rating cause (~0.5% weight).',
-    },
   };
 
   const MATCH_ELO_COPY = {
@@ -83,8 +70,6 @@
     thug_efficiency: { noun: 'fight efficiency' },
     pve_share: { noun: 'PvE work' },
     mobility: { noun: 'mobility' },
-    snipe_bonus: { noun: 'snipes' },
-    target_lock_pct: { noun: 'T-key usage' },
   };
 
   let selectedKey = null;
@@ -263,10 +248,7 @@
   }
 
   function axisSentence(axisMap, weights) {
-    // Luxury axes are visualization-only (v2.10). Never name them as
-    // helped/hurt — a large lobby z on T-key/snipes is not a rating cause.
     const scored = Object.entries(axisMap || {})
-      .filter(([k]) => !LUXURY_AXES.has(k))
       .map(([k, z]) => ({
         k, z: z || 0, contrib: (z || 0) * (weights[k] || 0),
         noun: (MATCH_ELO_COPY[k] && MATCH_ELO_COPY[k].noun) || k,
@@ -292,12 +274,8 @@
 
   function sortedAxisKeys(axisMap) {
     const keys = Object.keys(axisMap || {});
-    const core = keys.filter((k) => !LUXURY_AXES.has(k));
-    const luxury = keys.filter((k) => LUXURY_AXES.has(k));
-    const byAbs = (a, b) => Math.abs(axisMap[b] || 0) - Math.abs(axisMap[a] || 0);
-    core.sort(byAbs);
-    luxury.sort(byAbs);
-    return core.concat(luxury);
+    keys.sort((a, b) => Math.abs(axisMap[b] || 0) - Math.abs(axisMap[a] || 0));
+    return keys;
   }
 
   function axisGridHtml(axisMap) {
@@ -308,7 +286,6 @@
     const rows = keys.map((a) => {
       const z = axisMap[a] || 0;
       const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
-      const luxury = LUXURY_AXES.has(a) ? ' vt-match-elo-axis-luxury' : '';
       const widthPct = Math.min(100, Math.abs(z) * 50);
       const fillStyle = z >= 0
         ? `left:50%; width:${widthPct.toFixed(2)}%;`
@@ -316,7 +293,7 @@
       const meta = VTSR_AXIS_META[a] || { label: a, desc: '' };
       const reading = Math.abs(z) < 0.05 ? 'Average' : (z > 0 ? 'Above lobby' : 'Below lobby');
       const tip = `<div><strong>${esc(meta.label)}</strong></div><div>${esc(meta.desc)}</div>`;
-      return `<div class="vt-axis-bar-row ${cls}${luxury}"
+      return `<div class="vt-axis-bar-row ${cls}"
                    data-bs-toggle="tooltip" data-bs-html="true"
                    data-bs-placement="top" title="${esc(tip)}">
         <span class="vt-axis-bar-name">${esc(meta.label)}</span>

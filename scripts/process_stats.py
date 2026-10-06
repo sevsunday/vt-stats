@@ -10630,10 +10630,10 @@ def main():
         print(f"WARN: failed to compute VTSR-C ({e}); skipping.")
 
     # ----- VTSR-T (unlocked-priors alt mode, Phase 2B) -----
-    # Re-runs the rating loop with `exclude_locked_priors=True`. The two
-    # hand-tuned LOCKED commander axes (target_lock_pct cushion,
-    # pve_share reward boost) lose their hand-tuned overrides and ride
-    # the shrunk rolling baseline same as the audit-derived axes.
+    # Re-runs the rating loop with `exclude_locked_priors=True`. The
+    # hand-tuned LOCKED commander axis (pve_share reward boost) loses
+    # its hand-tuned override and rides the shrunk rolling baseline
+    # same as the audit-derived axes.
     # Forensic / decision input only -- the validator (--elo-mode unlocked)
     # scores this against canonical to determine whether the locks are
     # doing useful predictive work or whether they should be dropped.

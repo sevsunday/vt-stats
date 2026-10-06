@@ -13,7 +13,7 @@
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
  *                             example (from the shared js/vtsr-explainers.js).
- *   The 8 axes              — annotated mixing-board + weights table.
+ *   The 6 axes              — annotated mixing-board + weights table.
  *   Commanders & fairness   — the fairness rules as plain-language cards.
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
@@ -315,16 +315,6 @@
       label: 'Mobility',
       formula: 'activity_score / 100  (positioning data)',
       desc:    'How much of the map you actually moved across. Driven by the same metric as the per-match Movement Profile column.',
-    },
-    snipe_bonus: {
-      label: 'Snipe bonus',
-      formula: 'min(snipes / 5, 1)  (capped before z-score)',
-      desc:    'Sniper rifle hits, capped at 5 before z-score so one big game cannot deform the lobby distribution.',
-    },
-    target_lock_pct: {
-      label: 'T-key usage',
-      formula: 'target_lock_pct  (already 0-1)',
-      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at luxury weight (~0.5%).',
     },
   };
 
@@ -1388,7 +1378,7 @@
   }
 
   // ----------------------------------------------------------------------
-  // Tab: The 8 axes.
+  // Tab: The 6 axes.
   // ----------------------------------------------------------------------
 
   function renderAxesTab() {
@@ -1398,7 +1388,7 @@
     pane.innerHTML = `<div class="vt-elo-doc">
       <section class="vt-vtsr-doc-section">
         <h6>What gets measured</h6>
-        <p class="mb-1">Your match score isn&rsquo;t one stat &mdash; it&rsquo;s <strong>8 of them, mixed by weight</strong>. Think of it as a mixing board: the wider the slider, the more that axis moves your rating. Step through each one:</p>
+        <p class="mb-1">Your match score isn&rsquo;t one stat &mdash; it&rsquo;s <strong>6 of them, mixed by weight</strong>. Think of it as a mixing board: the wider the slider, the more that axis moves your rating. Step through each one:</p>
         ${E.axesBoardHtml()}
         <p class="mb-0 mt-2 text-muted small">Every axis is scored <em>against the lobby you played in</em> &mdash; being average earns roughly zero, beating the room earns positive, trailing it earns negative.</p>
       </section>
@@ -1406,13 +1396,12 @@
       <section class="vt-vtsr-doc-section">
         <h6>The weights</h6>
         ${E.weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
-        <p class="mb-0 text-muted small mt-2">The two hairline sliders &mdash; <strong>Snipe bonus</strong> and <strong>T-key usage</strong> &mdash; are deliberately set to ~0.5% each. They stay on the board as bragging-rights stats, but skipping them costs a strong no-frills thug essentially nothing.</p>
+        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters. Snipes and T-key usage are recorded on the match page and are not part of this rating.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
+        <p class="mb-1">These 6 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;
@@ -1722,7 +1711,7 @@
       }).join('');
       axisOutcomeHtml = `<div class="vt-elo-acc-section">
         <h6>Which axes actually win games?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% the axis lined up with the losing side. These measure one player\u2019s game, not the win itself \u2014 a team can win while shooting less accurately or less efficiently than the other. Updated every pipeline run. (50% = the axis says nothing about winning; low n on self-omitting axes like Snipe bonus means treat with care.)</p>
+        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% the axis lined up with the losing side. These measure one player\u2019s game, not the win itself \u2014 a team can win while shooting less accurately or less efficiently than the other. Updated every pipeline run. (50% = the axis says nothing about winning; a self-omitting axis has a smaller sample, so treat a thin one with care.)</p>
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;
     }
