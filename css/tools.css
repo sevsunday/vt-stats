@@ -150,7 +150,7 @@
 }
 
 /* Labeled sibling of the square header icons. Same height, width from
-   the "Auto balance" label so it sits beside swap and reset. */
+   the "Suggest" label so it sits beside swap and reset. */
 .vt-tools-balonce-auto {
     font-size: 0.72rem;
     font-weight: 600;
@@ -1026,6 +1026,66 @@
 .vt-tools-balonce-manual-banner-action:focus-visible {
     outline: 2px solid var(--kb-warning);
     outline-offset: 1px;
+}
+
+/* "Suggested balance, not a verdict" note — shown only while the columns
+   still hold Suggest's layout. Info-tinted twin of the manual banner. */
+.vt-tools-balonce-suggest-note {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.65rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-info) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-info) 35%, transparent);
+    color: color-mix(in oklab, var(--kb-info) 80%, var(--kb-text-primary) 20%);
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+
+.vt-tools-balonce-suggest-note-icon {
+    font-size: 0.95rem;
+    color: var(--kb-info);
+    flex-shrink: 0;
+}
+
+.vt-tools-balonce-suggest-note-text {
+    flex-grow: 1;
+}
+
+.vt-tools-balonce-suggest-note-action {
+    flex-shrink: 0;
+    border: 1px solid color-mix(in oklab, var(--kb-info) 45%, transparent);
+    background-color: color-mix(in oklab, var(--kb-info) 22%, transparent);
+    color: var(--kb-info);
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.vt-tools-balonce-suggest-note-action:hover {
+    background-color: color-mix(in oklab, var(--kb-info) 38%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-tools-balonce-suggest-note-action:focus-visible {
+    outline: 2px solid var(--kb-info);
+    outline-offset: 1px;
+}
+
+.vt-tools-balonce-suggest-howto-body ul {
+    padding-left: 1.1rem;
+}
+
+.vt-tools-balonce-suggest-howto-body li + li {
+    margin-top: 0.4rem;
 }
 
 .vt-tools-balonce-basis {

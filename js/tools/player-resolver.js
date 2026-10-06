@@ -51,7 +51,7 @@
  *   - getKnownHostNames() : Map<steam64, string>
  *   - getVsrMapByFile()   : Map<lowercased mapFile, vsrmaplist entry>
  *   - getKnownHosts()     : Set<steam64>
- *   - getEloMeta()        : { anchor, ratings_count, ... } | null
+ *   - getEloMeta()        : { anchor, rating_floor, ratings_count, computed_at, ... } | null
  *
  * Resolved object shape:
  *   {
@@ -169,6 +169,9 @@
     eloMeta = {
       schema_version: data.schema_version,
       anchor: data.anchor || PROVISIONAL_ANCHOR_VTSR,
+      // VTSR-T soft floor — what Team Balonce values an empty seat at
+      // under its uneven-lobby rule. Read from the file, never hardcoded.
+      rating_floor: Number.isFinite(data.rating_floor) ? data.rating_floor : 1000,
       ratings_count: Array.isArray(data.ratings) ? data.ratings.length : 0,
       computed_at: data.computed_at || null,
     };

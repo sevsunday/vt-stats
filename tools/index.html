@@ -263,8 +263,8 @@
           <div class="vt-tools-card-header-actions">
             <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-balonce-auto"
                     id="vt-tools-balonce-auto-suggest"
-                    title="Pick both commanders and the thug split closest to even (switches to Manual)">
-              <i class="bi bi-magic" aria-hidden="true"></i>Auto balance
+                    title="Suggest both commanders and an even thug split closest to 50% (switches to Manual)">
+              <i class="bi bi-magic" aria-hidden="true"></i>Suggest
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
                     id="vt-tools-balonce-swap-cmdrs" disabled
@@ -854,6 +854,74 @@
           <a href="https://drand.love" target="_blank" rel="noopener"
              class="me-auto small">
              Learn more about drand
+             <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+          </a>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       HOW SUGGEST WORKS MODAL
+       Opened from the "Suggested balance, not a verdict" note that
+       Team Balonce shows after a Suggest. Plain-language account of the
+       search, its objective, and what it cannot tell you (the plateau,
+       ratings-as-loaded, the uneven-lobby empty-seat rule).
+       ============================================================ -->
+  <div class="modal fade" id="vt-tools-balonce-suggest-modal" tabindex="-1"
+       aria-labelledby="vt-tools-balonce-suggest-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-balonce-suggest-modal-title">
+            <i class="bi bi-magic me-2" style="color: var(--kb-primary);"></i>How Suggest works
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-tools-balonce-suggest-howto-body">
+          <p class="mb-3">
+            Suggest is a search, not a judgment. It tries every pair of commanders
+            in the lobby and, for each pair, every way to split the rest into two
+            even teams (one extra player on a side only when the lobby is odd).
+            Each layout is scored with the same formula the Balonce Meter uses
+            &mdash; the commander VTSR-C gap plus the gap in average thug VTSR-T
+            &mdash; and the layout closest to a 50% win chance wins. Ties go to
+            the smaller total-rating gap, then to the layout that moves fewer
+            people.
+          </p>
+          <ul class="small mb-0">
+            <li>
+              <strong>One fair answer, not <em>the</em> answer.</strong> In a typical
+              ten-player lobby about half the commander pairings have a split within
+              half a point of even. Drag players around and watch the meter: many
+              layouts are just as fair.
+            </li>
+            <li>
+              <strong>It only knows the ratings loaded on this page.</strong> Ratings
+              update after every pushed match, so two people can get different
+              suggestions minutes apart. The footer shows when these ratings were
+              computed.
+            </li>
+            <li>
+              <strong>Unrated and provisional players are anchored at 1500</strong>, and
+              a commander&rsquo;s own thug rating is shown but not scored &mdash; their
+              commanding record (VTSR-C) is what counts.
+            </li>
+            <li>
+              <strong>Uneven lobbies use a house rule.</strong> The formula compares
+              average thug ratings, so on its own a 4v3 reads as fair. Here the empty
+              seat on the short side is scored as a thug at the rating floor (1000),
+              which is why Suggest loads the smaller team with stronger players. Only
+              8 rated games so far were uneven, so this rule is a stated assumption,
+              not a validated one.
+            </li>
+          </ul>
+        </div>
+        <div class="modal-footer border-top">
+          <a href="../elo/index.html?tab=how" target="_blank" rel="noopener"
+             class="me-auto small">
+             How the rating works
              <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
           </a>
           <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>

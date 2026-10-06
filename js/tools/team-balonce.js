@@ -26,18 +26,38 @@
  * Algorithm:
  *   1. Determine commander setup (0, 1, or 2 set manually). With 0 or 1
  *      set the meter uses thug ratings only. Nothing is auto-filled.
- *   2. Auto balance (header button) searches every ordered commander
- *      pair in the playing roster, then the best thug split under that
- *      pair. Ignored players are excluded; hidden and unsplit players
- *      stay in. Objective: minimize |P - 0.5| with both VTSR-C terms,
- *      tie-broken by |sum(team1) - sum(team2)|, then by fewer players
- *      moved off their current team. Each side stays between 1 and 5.
- *      More than 10 playing players cannot fit; the layout is left as-is.
+ *   2. Suggest (header button) searches every ordered commander pair in
+ *      the playing roster, then the best thug split under that pair.
+ *      Ignored players are excluded; hidden and unsplit players stay in.
+ *      Objective: minimize |P - 0.5| with both VTSR-C terms, tie-broken
+ *      by |sum(team1) - sum(team2)|, then by fewer players moved off
+ *      their current team. Each side stays between 1 and 5. More than
+ *      10 playing players cannot fit; the layout is left as-is.
  *   3. findBestPartition enumerates every 2^M thug subset for a fixed
- *      commander pair (odd lobbies included: 4v3, 5v4, 1v1). With both
- *      commanders set it minimizes |P - 0.5|; otherwise the legacy
- *      sum-delta objective.
- *   4. Render two team columns + Balonce Meter + scenario banner.
+ *      commander pair and keeps only EVEN-FIRST sizes: team sizes within
+ *      one of each other, so an even lobby can only split evenly
+ *      (6 -> 3v3, 10 -> 5v5) and an odd lobby differs by exactly one
+ *      (7 -> 4v3). Never 4v2. With both commanders set it minimizes
+ *      |P - 0.5|; otherwise the legacy sum-delta objective.
+ *   4. Render two team columns + Balonce Meter + scenario banner. After
+ *      a Suggest the card shows a "suggested, not a verdict" note with a
+ *      How-Suggest-works modal until the user edits the layout.
+ *
+ * The objective is a PLATEAU: on a real ten-player lobby about half of
+ * the 90 commander pairings had a split within half a point of even, so
+ * a few rating points (ratings move after every pushed match) can swap
+ * the pick for an unrelated, equally fair layout. The footer therefore
+ * stamps when the loaded ratings were computed.
+ *
+ * Empty-seat rule (Tools only, NOT the pipeline formula): the handicap
+ * compares thug MEANS, which reads a 4v3 as fair. When the columns differ
+ * in headcount, the short side's thug list is padded with phantom thugs
+ * at the VTSR-T rating floor (elo_current.rating_floor, 1000) before its
+ * mean is taken, in the live meter AND inside Suggest. Only 8 rated games
+ * so far were uneven, so this is a stated assumption, labeled as such on
+ * the card; the validator's accuracy figure covers even teams only. The
+ * dashboard Outcome card does not apply it (it reproduces the pipeline's
+ * stored `expected`).
  *
  * Drag-to-swap: HTML5 drag-and-drop. Cross-column moves recompute the
  * probability + Balonce Meter live. Manual swaps tracked in pageState so
@@ -81,6 +101,22 @@
   /** Anchor used for unrated players on either ladder. */
   const ANCHOR = 1500;
 
+  /**
+   * Suggest never proposes teams more than one player apart. Even lobbies
+   * split evenly; odd lobbies differ by exactly one. Manual drags are not
+   * bound by this.
+   */
+  const MAX_TEAM_SIZE_GAP = 1;
+
+  /**
+   * Empty-seat rule fallback. The live value is `elo_current.rating_floor`
+   * via the resolver's eloMeta; this is only reached in rating-blind mode.
+   */
+  const SEAT_EMPTY_RATING_FALLBACK = 1000;
+
+  /** Uneven rated games in the corpus when the seat rule shipped (chip copy). */
+  const SEAT_RULE_UNEVEN_GAMES_SEEN = 8;
+
   const VALIDATION_URL_CANDIDATES = [
     '../data/processed/validation_summary.json',
     'data/processed/validation_summary.json',
@@ -106,12 +142,32 @@
   let bestPartition = null;
 
   /**
+   * True while the columns still show the layout Suggest produced. Drives
+   * the "suggested, not a verdict" note. Cleared by any user edit to the
+   * layout and by a roster membership change (`suggestedKeys` is the
+   * sorted playing-key set the suggestion was computed for; an unchanged
+   * live poll keeps the note).
+   */
+  let suggestionActive = false;
+  /** @type {string|null} */
+  let suggestedKeys = null;
+
+  function playingKeysSignature() {
+    return playingRoster().map(playerKey).sort().join('|');
+  }
+
+  function invalidateSuggestion() {
+    suggestionActive = false;
+    suggestedKeys = null;
+  }
+
+  /**
    * Balonce mode:
    *   - 'live'   : commanderSetup is mirrored from the live lobby's
    *                isCommander flags. Roster updates resync commanders.
    *                Visible in the header as a green "Live" chip.
    *   - 'manual' : commanderSetup was explicitly set by the user (via
-   *                dropdown, Auto balance, commander context-menu
+   *                dropdown, Suggest, commander context-menu
    *                item, or a commander-row drag). Roster updates DON'T
    *                resync commanders. Visible as a muted "Manual" chip.
    *                Ignoring a player does not enter this mode.
@@ -203,6 +259,39 @@
     return (meta && Number.isFinite(meta.anchor)) ? meta.anchor : ANCHOR;
   }
 
+  /**
+   * Rating a phantom thug on the short side is worth under the empty-seat
+   * rule: the VTSR-T floor from elo_current.json, never a tuned number.
+   */
+  function emptySeatRating() {
+    const meta = window.VTToolsResolver && window.VTToolsResolver.getEloMeta
+      ? window.VTToolsResolver.getEloMeta()
+      : null;
+    return (meta && Number.isFinite(meta.rating_floor)) ? meta.rating_floor : SEAT_EMPTY_RATING_FALLBACK;
+  }
+
+  /**
+   * Empty-seat rule. `n1` / `n2` are BODIES per side (commander included),
+   * `vals1` / `vals2` the thug VTSR-T lists. The side with fewer bodies gets
+   * one phantom floor-rated thug per missing seat, so a 4v3 no longer reads
+   * as fair just because its averages match. Returns the padded lists plus
+   * a descriptor for the UI; `active` is false when headcounts are equal.
+   */
+  function padShortSide(vals1, vals2, n1, n2) {
+    const extra = Math.abs(n1 - n2);
+    if (extra === 0 || n1 === 0 || n2 === 0) {
+      return { vals1, vals2, seatRule: { active: false, extra: 0, shortSide: null, rating: null } };
+    }
+    const rating = emptySeatRating();
+    const shortSide = n1 < n2 ? 1 : 2;
+    const pad = (vals) => vals.concat(new Array(extra).fill(rating));
+    return {
+      vals1: shortSide === 1 ? pad(vals1) : vals1,
+      vals2: shortSide === 2 ? pad(vals2) : vals2,
+      seatRule: { active: true, extra, shortSide, rating },
+    };
+  }
+
   /** Model dials, read from the emitted JSON — never hardcoded here. */
   function modelConstants() {
     const meta = window.VTToolsResolver && window.VTToolsResolver.getCmdrEloMeta
@@ -241,14 +330,16 @@
     const bothCmdrs = !!(cmdrs[1] && cmdrs[2]);
 
     const sums = { 1: 0, 2: 0 };
-    const thugMeans = { 1: null, 2: null };
+    const thugVals = { 1: [], 2: [] };
     for (const side of [1, 2]) {
       sums[side] = teams[side].reduce((s, p) => s + p.vtsr, 0);
-      const thugVals = teams[side]
+      thugVals[side] = teams[side]
         .filter((p) => playerKey(p) !== cmdrKeys[side])
         .map((p) => p.vtsr);
-      thugMeans[side] = mean(thugVals);
     }
+    // Empty-seat rule: uneven columns pad the short side before the means.
+    const padded = padShortSide(thugVals[1], thugVals[2], teams[1].length, teams[2].length);
+    const thugMeans = { 1: mean(padded.vals1), 2: mean(padded.vals2) };
 
     const consts = modelConstants();
     // With fewer than two commanders set, the commander term is dropped
@@ -282,6 +373,8 @@
         ? thugMeans[1] - thugMeans[2]
         : null,
       lambda: consts.lambda,
+      /** {active, extra, shortSide, rating} — empty-seat rule descriptor. */
+      seatRule: padded.seatRule,
       probT1,
       fav,
       /** 1 | 2 | null — the side the model puts at a real disadvantage. */
@@ -295,7 +388,11 @@
 
   /**
    * Exhaustively enumerate all 2^M non-trivial subsets of the thug pool
-   * (skip empty + full). Enforce |team| <= 5 incl. cmdr.
+   * (skip empty + full). Enforce |team| <= 5 incl. cmdr AND team sizes
+   * within MAX_TEAM_SIZE_GAP of each other (even lobbies split evenly,
+   * odd lobbies differ by exactly one). In an odd lobby the short side's
+   * mean is taken under the empty-seat rule, so the search compensates
+   * the missing body with stronger thugs instead of balancing bare means.
    *
    * OBJECTIVE (two modes):
    *   - Both commanders set: minimize |P - 0.5| under the validated
@@ -368,10 +465,18 @@
       // Enforce slot cap (cmdr + thugs <= TEAM_SLOT_CAP per team)
       if (team1Size > TEAM_SLOT_CAP) continue;
       if (team2Size > TEAM_SLOT_CAP) continue;
+      // Even-first: never propose teams more than one player apart.
+      if (Math.abs(team1Size - team2Size) > MAX_TEAM_SIZE_GAP) continue;
 
       const delta = Math.abs(team1Sum - team2Sum);
-      const t1Mean = mean(team1Thugs.map((p) => p.vtsr));
-      const t2Mean = mean(team2Thugs.map((p) => p.vtsr));
+      const padded = padShortSide(
+        team1Thugs.map((p) => p.vtsr),
+        team2Thugs.map((p) => p.vtsr),
+        team1Size,
+        team2Size,
+      );
+      const t1Mean = mean(padded.vals1);
+      const t2Mean = mean(padded.vals2);
       const prob = probFor(t1Mean, t2Mean);
       const primary = bothCmdrs ? Math.abs(prob - 0.5) : delta;
       const tiebreak = delta;
@@ -468,7 +573,7 @@
     //   LIVE   — the panel is a passive mirror of the lobby. Every
     //            player is placed by `p.liveTeam`. No best-balance
     //            search happens here — findBestBalance is reserved
-    //            for the Auto balance button.
+    //            for the Suggest button.
     //
     //   MANUAL — the panel is a sandbox. `assignmentOverride` is the
     //            authoritative layout. We preserve user assignments
@@ -621,6 +726,7 @@
 
     const banner = renderBanner(setCount);
     const manualBanner = renderManualBanner();
+    const suggestNote = renderSuggestNote();
     const cmdrConfig = renderCmdrConfig();
     const teamColumns = renderTeamColumns();
     const playedMeter = renderPlayedMeter();
@@ -629,6 +735,7 @@
       ${renderRatingBasis()}
       ${banner}
       ${manualBanner}
+      ${suggestNote}
       ${cmdrConfig}
       <div class="vt-tools-balonce-columns">
         ${teamColumns}
@@ -687,7 +794,7 @@
 
   /**
    * Gates the header buttons:
-   *   - auto balance : 2 through 10 playing players (two teams of 5)
+   *   - suggest      : 2 through 10 playing players (two teams of 5)
    *   - swap-cmdrs   : only when both commander slots are set
    *   - reset        : only when live data backs the roster
    *                    (otherwise "snap back to live" has no destination)
@@ -701,9 +808,9 @@
       if (tooBig) {
         autoSuggestBtn.title = 'More than 10 players still counted. Two teams of 5 cannot hold everyone — ignore someone first.';
       } else if (tooSmall) {
-        autoSuggestBtn.title = 'Add at least 2 players to auto balance';
+        autoSuggestBtn.title = 'Add at least 2 players to suggest a balance';
       } else {
-        autoSuggestBtn.title = 'Pick both commanders and the thug split closest to even (switches to Manual)';
+        autoSuggestBtn.title = 'Suggest both commanders and an even thug split closest to 50% (switches to Manual)';
       }
     }
     const setCount = (playingCommanderKey(1) ? 1 : 0) + (playingCommanderKey(2) ? 1 : 0);
@@ -755,6 +862,29 @@
     `;
   }
 
+  /**
+   * Info note shown only while the columns still hold Suggest's layout.
+   * The button opens the static "How Suggest works" modal in
+   * tools/index.html via Bootstrap data attributes (no JS wiring).
+   */
+  function renderSuggestNote() {
+    if (!suggestionActive) return '';
+    return `
+      <div class="vt-tools-balonce-suggest-note" role="note">
+        <i class="bi bi-info-circle vt-tools-balonce-suggest-note-icon" aria-hidden="true"></i>
+        <span class="vt-tools-balonce-suggest-note-text">
+          <strong>Suggested balance, not a verdict.</strong>
+          Suggest picked the layout closest to a 50% win chance on the ratings loaded right now; other layouts are nearly as even.
+        </span>
+        <button type="button" class="vt-tools-balonce-suggest-note-action"
+                data-bs-toggle="modal" data-bs-target="#vt-tools-balonce-suggest-modal"
+                title="How the suggestion is computed, and what it cannot tell you">
+          <i class="bi bi-question-circle me-1" aria-hidden="true"></i>How Suggest works
+        </button>
+      </div>
+    `;
+  }
+
   function wireManualBannerControls() {
     const btn = bodyEl.querySelector('[data-vt-balonce-snap-to-live]');
     if (btn) btn.addEventListener('click', snapToLive);
@@ -774,7 +904,7 @@
     if (mode === 'live') {
       chip.classList.add('vt-tools-balonce-mode--live');
       chip.innerHTML = '<i class="bi bi-broadcast" aria-hidden="true"></i>Live';
-      chip.title = 'Team columns mirror the live lobby. Drag, swap, Auto balance, or setting a commander switches to Manual. Ignoring a player does not.';
+      chip.title = 'Team columns mirror the live lobby. Drag, swap, Suggest, or setting a commander switches to Manual. Ignoring a player does not.';
     } else {
       chip.classList.add('vt-tools-balonce-mode--manual');
       chip.innerHTML = '<i class="bi bi-pencil-fill" aria-hidden="true"></i>Manual';
@@ -794,7 +924,7 @@
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--orange">
           <i class="bi bi-info-circle me-1"></i>
           <strong>0 commanders set.</strong>
-          The prediction is using thug ratings only. Auto balance picks both commanders and the thug split.
+          The prediction is using thug ratings only. Suggest picks both commanders and the thug split.
           ${provisionalNote}
           ${fitNote}
         </div>
@@ -805,7 +935,7 @@
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--yellow">
           <i class="bi bi-info-circle me-1"></i>
           <strong>1 of 2 commanders set.</strong>
-          VTSR-C stays out of the prediction until both commanders are set. Auto balance fills both slots and splits the thugs.
+          VTSR-C stays out of the prediction until both commanders are set. Suggest fills both slots and splits the thugs.
           ${provisionalNote}
           ${fitNote}
         </div>
@@ -845,7 +975,7 @@
   function renderFitNote() {
     const n = playingRoster().length;
     if (n <= TEAM_SLOT_CAP * 2) return '';
-    return `<div class="vt-tools-balonce-banner-note small mt-1">${n} players still counted. Two teams of 5 cannot hold everyone — ignore someone, then Auto balance can run.</div>`;
+    return `<div class="vt-tools-balonce-banner-note small mt-1">${n} players still counted. Two teams of 5 cannot hold everyone — ignore someone, then Suggest can run.</div>`;
   }
 
   function renderCmdrConfig() {
@@ -1026,7 +1156,10 @@
       parts.push(`<span class="vt-balonce-part" title="Commander rating gap (VTSR-C), Team 1 minus Team 2. The strongest single term in the prediction.">Cmdr gap <span class="vt-mono">${signed(state.cmdrGap)}</span></span>`);
     }
     if (Number.isFinite(state.thugGap)) {
-      parts.push(`<span class="vt-balonce-part" title="Thug-team strength gap (mean VTSR-T, commanders excluded), weighted at lambda = ${state.lambda}.">Thug gap <span class="vt-mono">${signed(state.thugGap)}</span></span>`);
+      const seatNote = state.seatRule && state.seatRule.active
+        ? ` Seat-adjusted: Team ${state.seatRule.shortSide} is ${state.seatRule.extra} player${state.seatRule.extra === 1 ? '' : 's'} short, and each empty seat counts as a ${Math.round(state.seatRule.rating)}-rated thug.`
+        : '';
+      parts.push(`<span class="vt-balonce-part" title="Thug-team strength gap (mean VTSR-T, commanders excluded), weighted at lambda = ${state.lambda}.${escapeHtml(seatNote)}">Thug gap <span class="vt-mono">${signed(state.thugGap)}</span></span>`);
     }
     parts.push(`<span class="vt-balonce-part" title="Total roster VTSR-T difference. Material weight, not the prediction \u2014 shown because it is the number the lobby has always eyeballed.">\u0394\u03a3VTSR <span class="vt-mono">${signed(sumDelta)}</span></span>`);
 
@@ -1094,29 +1227,69 @@
     bits.push(`<span class="vt-balonce-confidence vt-balonce-confidence--${level}" title="${escapeHtml(confTip)}">
       <i class="bi bi-shield-check" aria-hidden="true"></i>${level === 'high' ? 'High' : level === 'medium' ? 'Medium' : 'Low'} confidence</span>`);
 
-    // --- uneven teams: the handicap term uses MEANS, so headcount does
-    // not enter the probability. Say so rather than quietly misleading.
+    // --- uneven teams: the validated handicap compares MEANS, which reads
+    // a 4v3 as fair. Tools applies the empty-seat rule (short side padded
+    // with floor-rated phantom thugs) and says so — the rule is a stated
+    // assumption, not something the validator has scored.
     const n1 = state.teams[1].length;
     const n2 = state.teams[2].length;
+    const seatActive = !!(state.seatRule && state.seatRule.active);
     if (n1 !== n2 && n1 > 0 && n2 > 0) {
+      const floor = seatActive ? Math.round(state.seatRule.rating) : null;
+      const tip = seatActive
+        ? `Teams are ${n1}v${n2}. The validated formula compares AVERAGE thug rating and would call this fair; here each empty seat on the short side is scored as a ${floor}-rated thug (the VTSR-T floor). Only ${SEAT_RULE_UNEVEN_GAMES_SEEN} rated games so far were uneven, so this is a house rule, not a validated term — the accuracy figure below is for even teams.`
+        : `Teams are ${n1}v${n2}. The prediction compares AVERAGE thug rating, so the extra body on the larger side is not reflected in the percentage.`;
+      const label = seatActive
+        ? `${n1}v${n2} \u2014 empty seat scored as a ${floor}-rated thug`
+        : `${n1}v${n2} \u2014 material edge not in the %`;
       bits.push(`<span class="vt-balonce-confidence vt-balonce-confidence--medium"
-        title="${escapeHtml(`Teams are ${n1}v${n2}. The prediction compares AVERAGE thug rating, so the extra body on the larger side is not reflected in the percentage.`)}">
-        <i class="bi bi-people" aria-hidden="true"></i>${n1}v${n2} \u2014 material edge not in the %</span>`);
+        title="${escapeHtml(tip)}">
+        <i class="bi bi-people" aria-hidden="true"></i>${label}</span>`);
     }
 
     const rec = validationRecord();
-    const claim = rec
-      ? `Model: VTSR-C duel formula \u00b7 ${Math.round(rec.accuracy * 100)}% over ${rec.n} games`
-      : 'Model: VTSR-C duel formula';
+    let claim;
+    if (seatActive) {
+      claim = rec
+        ? `Model: VTSR-C duel formula + empty-seat rule (even-team accuracy ${Math.round(rec.accuracy * 100)}% over ${rec.n} games)`
+        : 'Model: VTSR-C duel formula + empty-seat rule';
+    } else {
+      claim = rec
+        ? `Model: VTSR-C duel formula \u00b7 ${Math.round(rec.accuracy * 100)}% over ${rec.n} games`
+        : 'Model: VTSR-C duel formula';
+    }
+
+    // --- ratings freshness: ratings change after every pushed match, and
+    // two screens loaded minutes apart can disagree. Stamp the computed_at
+    // so a mismatch is visible instead of mysterious.
+    const asOf = ratingsAsOfHtml();
 
     return `
       <div class="vt-balonce-footer">
         <span class="vt-tools-balonce-footer-chips">${bits.join(' ')}</span>
-        <span>${escapeHtml(claim)} \u00b7
+        <span>${escapeHtml(claim)}${asOf} \u00b7
           <a href="../elo/index.html?tab=how" target="_blank" rel="noopener">How it works</a>
         </span>
       </div>
     `;
+  }
+
+  /**
+   * ` · Ratings as of <local date time>` from elo_current.computed_at, or
+   * '' while the resolver is still loading / in rating-blind mode.
+   */
+  function ratingsAsOfHtml() {
+    const meta = window.VTToolsResolver && window.VTToolsResolver.getEloMeta
+      ? window.VTToolsResolver.getEloMeta()
+      : null;
+    if (!meta || !meta.computed_at) return '';
+    const d = new Date(meta.computed_at);
+    if (Number.isNaN(d.getTime())) return '';
+    const local = d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+    const tip = `The ratings behind this prediction were computed ${d.toUTCString()}. They change after every pushed match, so two screens loaded minutes apart can disagree — if yours differs from a friend's, compare this stamp first.`;
+    return ` \u00b7 <span class="vt-tools-balonce-footer-asof" title="${escapeHtml(tip)}">Ratings as of ${escapeHtml(local)}</span>`;
   }
 
   // ---------------------------------------------------------------- Validator record
@@ -1215,9 +1388,10 @@
     const oldTeam = assignmentOverride.get(key);
     if (newTeam === oldTeam) return;
 
-    // No slot-cap check on drag. The 5-per-team rule is an algorithm
-    // constraint inside findBestPartition (Auto balance only) — manual
-    // experiments are free to stack any split (2v8, 1v9, etc).
+    // No slot-cap or even-teams check on drag. Those are algorithm
+    // constraints inside findBestPartition (Suggest only) — manual
+    // experiments are free to stack any split (2v8, 1v9, etc); the
+    // empty-seat rule then prices the headcount gap in the meter.
 
     // Is the dragged player a commander? Two sub-cases:
     //   - Dropping their own team's CMDR onto the other team: swap the
@@ -1234,6 +1408,7 @@
       commanderSetup[`team${newTeam}`] = key;
       manualSwaps.clear();
       flipToManual('cmdr-drag');
+      invalidateSuggestion();
       assignmentOverride.set(key, newTeam);
       render();
       updateMainState();
@@ -1245,6 +1420,7 @@
     assignmentOverride.set(key, newTeam);
     manualSwaps.add(`${key}|${newTeam}`);
     flipToManual('thug-drag');
+    invalidateSuggestion();
     render();
     updateMainState();
   }
@@ -1399,6 +1575,7 @@
   function ignorePlayer(key) {
     if (!key || ignoredKeys.has(key)) return;
     ignoredKeys.add(key);
+    invalidateSuggestion();
     if (commanderSetup.team1 === key) commanderSetup.team1 = null;
     if (commanderSetup.team2 === key) commanderSetup.team2 = null;
     assignmentOverride.delete(key);
@@ -1419,6 +1596,7 @@
   function restorePlayer(key) {
     if (!key || !ignoredKeys.has(key)) return;
     ignoredKeys.delete(key);
+    invalidateSuggestion();
     if (mode === 'live') {
       const live = deriveLiveCommanderSetup();
       commanderSetup = live
@@ -1453,6 +1631,7 @@
     }
     manualSwaps.clear();
     flipToManual('context-cmdr');
+    invalidateSuggestion();
     compute();
     render();
     updateMainState();
@@ -1483,6 +1662,7 @@
         // Explicit user edit -> flip to Manual; reset swaps.
         flipToManual('dropdown-change');
         manualSwaps.clear();
+        invalidateSuggestion();
         compute();
         render();
       });
@@ -1507,6 +1687,8 @@
     assignmentOverride = new Map();
     for (const key of best.partition.team1) assignmentOverride.set(key, 1);
     for (const key of best.partition.team2) assignmentOverride.set(key, 2);
+    suggestionActive = true;
+    suggestedKeys = playingKeysSignature();
     updateMainState();
     render();
   }
@@ -1528,6 +1710,7 @@
     if (assignmentOverride.has(team2)) assignmentOverride.set(team2, 1);
     manualSwaps.clear();
     flipToManual('swap-cmdrs');
+    invalidateSuggestion();
     compute();
     render();
   }
@@ -1540,6 +1723,7 @@
     if (!matchSeed) return;
     ignoredKeys.clear();
     manualSwaps.clear();
+    invalidateSuggestion();
     assignmentOverride = new Map();
     const keys = Object.keys(matchSeed.assignments);
     for (let i = 0; i < keys.length; i++) {
@@ -1605,6 +1789,7 @@
   function snapToLive() {
     ignoredKeys.clear();
     manualSwaps.clear();
+    invalidateSuggestion();
     assignmentOverride = new Map();
     const live = deriveLiveCommanderSetup();
     commanderSetup = live
@@ -1661,6 +1846,12 @@
     lastPageMode = pageMode;
     if (pageMode === 'auto') matchSeed = null;
 
+    // A joiner or leaver changes the layout Suggest produced; a poll that
+    // returns the same people keeps the note.
+    if (suggestionActive && suggestedKeys !== playingKeysSignature()) {
+      invalidateSuggestion();
+    }
+
     // Page roster mode transitions:
     //   - Manual page mode -> Balonce should also be Manual (no live
     //     data to sync to). Don't auto-pull live cmdrs.
@@ -1688,6 +1879,7 @@
     commanderSetup = { team1: null, team2: null };
     manualSwaps.clear();
     bestPartition = null;
+    invalidateSuggestion();
     assignmentOverride = new Map();
     mode = 'live';
     compute();
