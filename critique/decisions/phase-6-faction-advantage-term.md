@@ -9,9 +9,9 @@ data exists, not by whoever looks at the numbers last.
 
 Companion sections: `scripts/validate_elo.py` §19 (`metric_faction_effect`,
 validator v1.7) computes every number this memo reads and prints the
-promote verdict on each run. Critique v4 (`critique/elo-analysis-v4.md`
-Part V) carries the design discussion — faction-based ratings, pro and
-con — that motivates the candidate.
+promote verdict on each run. The design discussion — faction-based
+ratings, pro and con — that motivates the candidate lives in
+`elo/analysis/index.html` §7 Faction-based ELO (+ §5.6).
 
 ## TL;DR
 
@@ -247,5 +247,5 @@ Hadean share of team-sides by month: 35% (2025-01), 8–16% through late
 - `js/balonce-meter.js::computeWinProb` (its mirror; unchanged)
 - `data/external/f9_ledger.json` (`duels[].factions`), `data/processed/matches.json`
   (`team_factions`) — the faction sources
-- `critique/elo-analysis-v4.md` Part V — design discussion
+- `elo/analysis/index.html` §7 Faction-based ELO (+ §5.6) — design discussion
 - This memo

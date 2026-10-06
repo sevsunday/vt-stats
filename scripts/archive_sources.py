@@ -5,7 +5,7 @@ Standalone operator tool — NOT invoked by scripts/process_stats.py and not par
 of the pipeline cache key (same posture as scripts/import_f9_ledger.py).
 
 Input:  critique/publications/sources.json   (hand-authored; one entry per
-        citation in critique/elo-analysis-v4.md Part IX)
+        citation in elo/analysis/index.html §15)
 Output: critique/publications/NN[key]-<slug>.<ext>   one local copy per item
         critique/publications/manifest.json           what was fetched, from
                                                       where, when, sha256, bytes
