@@ -858,6 +858,14 @@ body::before {
 .vt-banner-vod .bi-youtube {
     color: var(--vt-youtube);
 }
+/* .card clips overflow so corners stay rounded. The Watch VOD menu opens
+   downward out of this banner; without this it is cut off and the tab
+   strip covers the channel list. z-index stays under the navbar/modals. */
+#match-info.card {
+    overflow: visible;
+    position: relative;
+    z-index: 3;
+}
 
 /* ============================================================================
    TOPNAV URL-SYNC BUTTONS
