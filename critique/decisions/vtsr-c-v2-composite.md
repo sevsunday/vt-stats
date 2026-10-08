@@ -265,5 +265,5 @@ confirmation sample.
 
 - `scripts/elo_commander.py` (v2 module)
 - `_investigation/golden_vtsrc_v2.py` (golden gate, regenerable)
-- `.cursor/plans/commander_stats_overhaul_18e691bf.plan.md` (Stage D spec)
+- `.cursor/plans/elo/commander_stats_overhaul_18e691bf.plan.md` (Stage D spec)
 - This memo

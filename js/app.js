@@ -2512,8 +2512,7 @@
   }
 
   // --- Replay Tab (3D viewer iframe) ---
-  // Replaces the legacy js/timeline-player.js (Chart.js damage timeline +
-  // companion panels). The standalone _map-analysis/render/replay.html owns
+  // The standalone _map-analysis/render/replay.html owns
   // the entire interactive surface: trail playback, ship tracking, kill
   // flashes, scrap-pool overlay, four camera modes, roster, transport,
   // results overlay. We embed it in an iframe pointed at
@@ -3277,7 +3276,7 @@
     // `player/<slug>/` URLs from the first paint. Same graceful-404
     // pattern as elo: a missing file leaves the cache as `null`, the
     // helpers fall back to `?p=<steam64>`.
-    // validation_summary.json (improvement #6 / fable analysis): tiny
+    // validation_summary.json (improvement #6 / June 2026 fable review (git history)): tiny
     // committed headline-metrics file written by scripts/validate_elo.py on
     // every pipeline run. Supplies the bootstrap resampling noise floor
     // (±σ ELO) that the VTSR-T leaderboard surfaces as tooltips + a

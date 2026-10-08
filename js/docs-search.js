@@ -2,7 +2,7 @@
  *
  * Client-side fuzzy section search modeled after Bootstrap's Algolia palette.
  * One-page corpus (docs/DATA_DICTIONARY.md), runtime indexed, sessionStorage-
- * cached, no pipeline coupling, no vendor deps. Loaded by docs.html after
+ * cached, no pipeline coupling, no vendor deps. Loaded by docs/index.html after
  * marked.js, initialized inside the existing IIFE after buildToc().
  *
  * Architecture:
@@ -93,7 +93,7 @@
     for (let i = 0; i < headings.length; i++) {
       const h = headings[i];
       const level = parseInt(h.tagName.slice(1), 10); // 2/3/4
-      // Use textContent without anchor-link suffix injected by docs.html
+      // Use textContent without anchor-link suffix injected by docs/index.html
       const headingText = (h.firstChild && h.firstChild.nodeType === Node.TEXT_NODE)
         ? h.firstChild.nodeValue.trim()
         : h.textContent.replace(/\s*$/, '').trim();
@@ -382,7 +382,7 @@
       const y = target.getBoundingClientRect().top + window.scrollY - offset;
       window.scrollTo({ top: y, behavior: 'smooth' });
       history.replaceState(null, '', '#' + id);
-      // Expand the parent TOC section if docs.html exposes the helper.
+      // Expand the parent TOC section if docs/index.html exposes the helper.
       if (typeof global.expandSectionForId === 'function') {
         try { global.expandSectionForId(id); } catch (e) { /* noop */ }
       }
@@ -472,7 +472,7 @@
 
   function onGlobalKeydown(e) {
     // Cmd+K / Ctrl+K opens regardless of focus context (intentional override
-    // of browser address-bar shortcut for docs.html only).
+    // of browser address-bar shortcut for docs/index.html only).
     if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
       openModal();
@@ -493,7 +493,7 @@
 
   function init({ content, slug, raw } = {}) {
     if (!content) return;
-    if (!ensureRefs()) return; // markup not present (older docs.html)
+    if (!ensureRefs()) return; // markup not present (older docs/index.html)
 
     state.index = loadOrBuildIndex(slug || 'dictionary', raw || '', content);
 

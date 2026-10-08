@@ -226,7 +226,7 @@ const STATE = {
   rafId: null,
 };
 
-// Speed pills mirror js/positioning-player.js:20.
+// Playback speed pills.
 const SPEEDS = [0.5, 1, 2, 5, 10, 20];
 
 window.addEventListener('message', (ev) => {

@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: phase-verify
     content: "Verification: DevTools Performance on 130k-event expand (<50ms target); memory snapshot; deep-link restoration with bulk path; collapse cleanup"
-    status: pending
+    status: completed
 isProject: false
 ---
 

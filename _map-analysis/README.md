@@ -8,10 +8,9 @@ downstream tooling.
 The single output we care about per map is a tiny
 `calibration/configs/<stem>.config.json` carrying a world-bounds rectangle
 (plus optional per-object pixel overrides) that maps the BZN game
-objects 1:1 onto the in-game minimap PNG. Once enough maps are
-calibrated, the cleaned `calibration/staging/<stem>.png` overlays are ready
-to bake into the main `vt-stats` project for production use
-(Positioning heatmaps, Replay-tab trails, Map Browser overlays).
+objects 1:1 onto the in-game minimap PNG. `render_overlays.py` also writes
+a cleaned `calibration/staging/<stem>.png` per map. That folder is
+regenerated output and is gitignored; it is not part of the committed tree.
 
 Nothing here touches the rest of the repo. Output never leaves the
 `_map-analysis/` folder until a deliberate manual "bake" step (out of
@@ -45,8 +44,7 @@ open `calibrate.html?map=<stem>` and start dragging markers.
 # 2. Regenerate overlays + index from the latest configs.
 python _map-analysis/scripts/reprocess.py
 
-# 3. (Eventually) bake calibration/staging/<stem>.png into the production
-#    asset set. Out of scope for this workspace.
+# 3. staging/ is rewritten in place by step 2 and stays untracked.
 ```
 
 Each "ingest -> calibrate -> reprocess" loop is fully idempotent.
@@ -89,7 +87,7 @@ _map-analysis/
     borderline/<stem>_overlay.png    RMSE 2-5px (eye-check)
     failed/<stem>_overlay.png        Bbox fallback (needs work)
     no_png/                          (would be here if any map lacked a PNG)
-    staging/<stem>.png               CLEAN production-bound overlays
+    staging/<stem>.png               gitignored; rewritten by render_overlays.py
 
   vsrmaplist/<MapName>/              SOURCE MAP FILES (per ingest)
     <stem>.bzn / .ter / .trn / .inf / .sky / .wat / .des / .dds / .png
@@ -97,9 +95,8 @@ _map-analysis/
 
   ppm/                               King's PPM render set (legacy reference)
 
-  archive/                           DEPRECATED - pre-restructure stuff
-    proof/, proof-render/, renders/, scripts/, BZNTools-master/,
-    vsrmaplist_legacy_calibrate_html/, index_legacy.html
+  render/                            live 3D viewer (replay, map, explorer)
+  reference-repos/                   vendored BZN / terrain format sources
 ```
 
 ### The sacred contract
@@ -221,7 +218,7 @@ clears the localStorage draft.
 python _map-analysis/scripts/reprocess.py
 ```
 
-Regenerates every overlay PNG (tier folders + `staging/`) and rebuilds
+Regenerates every overlay PNG (tier folders + gitignored `staging/`) and rebuilds
 `calibration/index.html`. Reload the browser to see the updated tier counts.
 
 ### Optional steps
@@ -469,8 +466,8 @@ wired vs what's deferred. Use as a roadmap when extending the toolset.
 ### Composite / derived data
 **Status: opportunities, not implemented**
 
-* Top-down minimap render (already prototyped via the archived
-  `archive/scripts/render_map.py`)
+* Top-down minimap render (the early prototype left with the removed
+  archive folder; the live viewer is `render/`)
 * 3D wireframe / textured terrain render (see roadmap below)
 * Object distribution heatmaps (pool symmetry, scrap clustering)
 * Faction balance metrics (asymmetric pool/spawn placement scores)
@@ -548,10 +545,10 @@ Front-end (`render3d.html` in `_map-analysis/`):
 
 ## Backlog (prioritized)
 
-1. **Bake staging PNGs into production** — once enough maps are in
-   `proven` + `hand_cal`, the `calibration/staging/<stem>.png` overlays can
-   be vendored straight into the main `vt-stats` project (e.g. as a
-   companion to `data/maps/<stem>.png`) and consumed by the
+1. **Bake staging PNGs into production** — `calibration/staging/<stem>.png`
+   is local regenerated output (gitignored). Once enough maps are in
+   `proven` + `hand_cal`, those overlays can be vendored into the main
+   project (for example beside `data/maps/<stem>.png`) and consumed by the
    Positioning tab + Map Browser.
 2. **Bake `world_rect` into production** — once you're confident in a
    batch of calibrations, inject the `affine.world_rect` from each
@@ -598,6 +595,6 @@ Front-end (`render3d.html` in `_map-analysis/`):
 * **Production minimap calibration consumers**:
   `../js/positioning-charts.js::_drawMapImageLayer()` and
   `../js/app.js::getMapMeta()`.
-* **BZN format reference**: `archive/BZNTools-master/` (vendored).
+* **BZN format reference**: `reference-repos/BZNTools-master/` (vendored).
 * **Production ODF DB**: `../data/odf.min.json` (consumed by
   `scripts/analyze_map.py` for object classification).

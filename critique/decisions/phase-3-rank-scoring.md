@@ -13,7 +13,7 @@ the pre-registered rule fired.
 
 ---
 
-## 1. Hypothesis (fable analysis, finding 5)
+## 1. Hypothesis (June 2026 fable review (https://github.com/sevsunday/vt-stats/tree/9c17d270b2e4b7fe008cb685c0d2f966b1a9c1b4/fable), finding 5)
 
 A population z-score over a 6-10 player lobby is noise-dominated: sigma
 estimated from n=8 carries ~25% relative error, a single outlier row owns the
@@ -80,7 +80,7 @@ trigger below.
 
 ### 4.3 Synthetic-winner agreement dropping to 87.5% is not obviously bad
 
-Canonical's 100% agreement (32/32) is argued in the fable analysis (finding 2)
+Canonical's 100% agreement (32/32) is argued in the June 2026 fable review (https://github.com/sevsunday/vt-stats/tree/9c17d270b2e4b7fe008cb685c0d2f966b1a9c1b4/fable) (finding 2)
 to be circularity -- P_i and the kill-feed-inferred clean_win are two functions
 of the same base-razing events. Rank P_i compresses blowout magnitudes, so it
 agrees *less* perfectly with the destruction-derived winner label while

@@ -927,7 +927,7 @@ def _build_snipes_block(
 # --- Match Highlights ---------------------------------------------------------
 # Per-match award catalog. Always emitted in this order; cards whose data
 # gates fail are simply omitted (the UI grid reflows around the missing tiles).
-# See `.cursor/plans/match-highlights-section_*.plan.md` for the design rationale.
+# See `.cursor/plans/matches/match-highlights-section_ddd8b4f3.plan.md` for the design rationale.
 HIGHLIGHTS_RENDER_ORDER = [
     "the_bully",
     "the_grim_reaper",
@@ -10868,7 +10868,7 @@ def main():
     except Exception as e:
         print(f"WARN: failed to extract proto docs ({e}); skipping.")
 
-    # ----- VTSR-T validator (every run; improvement #2 of the fable analysis) -----
+    # ----- VTSR-T validator (every run; improvement #2 of the June 2026 fable review (git history)) -----
     # Scores the just-written canonical elo pair against the nine winner-free
     # metrics, refreshes the committed data/processed/validation_summary.json
     # (headline metrics + per-run history; powers the dashboard's noise-floor

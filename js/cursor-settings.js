@@ -208,14 +208,16 @@
 
   function resolveDocsHref() {
     if (SCRIPT_URL) {
-      try { return new URL('../docs.html', SCRIPT_URL).href; } catch (_) { /* fall through */ }
+      try { return new URL('../docs/', SCRIPT_URL).href; } catch (_) { /* fall through */ }
     }
-    return 'docs.html';
+    return 'docs/';
   }
 
   function isDocsPage() {
-    const last = (location.pathname.replace(/\/+$/, '').split('/').pop() || '');
-    return last === 'docs.html';
+    const parts = location.pathname.replace(/\/+$/, '').split('/');
+    const last = parts.pop() || '';
+    const parent = parts.pop() || '';
+    return (last === 'docs') || (parent === 'docs' && last === 'index.html');
   }
 
   function hideDropdown(btn) {

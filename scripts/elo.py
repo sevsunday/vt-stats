@@ -182,7 +182,7 @@ COMMANDER_AXIS_PRIOR = {
     # invert the sign so this becomes a +0.05 reward shift on commander
     # rows: hitting enemy assets is the work commanders SHOULD do.
     #
-    # HONESTY NOTE (2026-06 fable analysis): the live empirical commander
+    # HONESTY NOTE (June 2026 fable review (git history)): the live empirical commander
     # mean on this axis is +0.049 (n=214) -- commanders ALREADY out-PvE
     # the lobby without help. The lock therefore no longer "protects a
     # reward from drift"; it grants a bonus ON TOP of an axis commanders
@@ -261,7 +261,7 @@ K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 # (eligibility 0 for mid/high). Commanders are excluded (they build their own
 # ships). All four constants are tunable without a schema bump.
 #
-# SCOPE NOTE (2026-06 fable analysis): at the current rating distribution
+# SCOPE NOTE (June 2026 fable review (git history)): at the current rating distribution
 # the 1460/60 gate captures 10 of 35 rated players (~29% of the league) --
 # in practice a BELOW-MEDIAN assistance band, not a bottom-tier safety net.
 # That is broader than the original "established low-tier" intent but kept
@@ -282,7 +282,7 @@ LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-sh
 #
 #     score_i = 2 * (avg_rank_i - 0.5) / n - 1        (ties -> mean rank)
 #
-# Motivation (fable analysis, finding 5): a population z-score over a 6-10
+# Motivation (June 2026 fable review (git history), finding 5): a population z-score over a 6-10
 # player lobby is extremely noisy -- sigma estimated from n=8 carries ~25%
 # relative error, one outlier row owns the denominator, and the +-2-sigma
 # clip then triggers on estimation noise as often as on true outliers.

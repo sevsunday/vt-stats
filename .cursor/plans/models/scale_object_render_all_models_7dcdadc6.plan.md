@@ -4,25 +4,25 @@ overview: Scale the object-render POC to all ~709 renderable BZCC models (ODF ge
 todos:
   - id: lfs-setup
     content: Set up git LFS for data/models binary assets (.glb/.dds/.png) via .gitattributes so clones get everything.
-    status: pending
+    status: completed
   - id: dds-mip
     content: Add mip-level decode (max_dim) to scripts/dds_decode.py for fast 512px performance textures + thumbnails (HQ path copies native .dds, no decode).
-    status: pending
+    status: completed
   - id: thumbnails
     content: "Add scripts/msh_thumbnail.py: per-pixel numpy rasterizer (perspective-correct barycentric UV + bilinear HQ-texture sampling + smooth vertex-normal shading + z-buffer + 2x supersample AA). Per model emit a hero thumbnail (thumbnails/<stem>.png ~256px) AND a high-quality 7-angle gallery (shots/<stem>/{hero,front,back,left,right,top,bottom}.png ~512px). Add numpy as a dev-only dep. Build/test standalone against the existing 4 GLBs first."
-    status: pending
+    status: completed
   - id: convert-all
     content: Rewrite scripts/convert_msh.py to index .msh across ALL roots (base + workshop packs, with a precedence rule), enumerate geometryName + shotGeometry, dedup to ~709 meshes (lowercased stems); per model emit ONE geometry GLB (materials named EXACTLY by lowercased diffuse stem, solid [solid]-color baseColorFactor for textureless materials, no embedded texture) + perf PNG @512 + native .dds copy (both deduped by stem+content-hash) + thumbnail/gallery; richer index.json; per-mesh try/except + caching + --force/--limit; optional multiprocessing. Decode each diffuse once @1024 -> derive 512 perf + reuse for gallery. SMOKE-RUN with --limit 20 before the full run.
-    status: pending
+    status: completed
   - id: viewer-textures
     content: Rework _object-render/js/viewer.js to assign diffuse textures at runtime by material name from the chosen set (TextureLoader for perf PNG, vendored DDSLoader for HQ .dds); per-object Performance/HQ toggle + global always-HQ pref (localStorage) + an on-demand HQ multi-angle Capture button (toDataURL downloads). Verify orientation/sRGB in-browser.
-    status: pending
+    status: completed
   - id: browser
     content: "Rebuild _object-render/ directory: toolbar (search + category + faction chips + sort) + lazy static-thumbnail grid scaling to ~709 models + global quality toggle, click-through to the detail viewer."
-    status: pending
+    status: completed
   - id: run-validate
     content: Run the full conversion (~709 models), validate GLBs + both texture sets + thumbnails, exercise browser filters + quality toggles + a few detail views (scout symmetric rest pose); update README + commit via LFS.
-    status: pending
+    status: completed
 isProject: false
 ---
 

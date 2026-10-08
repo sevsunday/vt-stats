@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: phase-5-team-balonce
     content: "Phase 5 — Team Balonce (intentional misspell, community in-joke): implement `js/tools/team-balonce.js` with commander configurator (3-scenario banner driven by 0/1/2 commanders set), candidacy score `vtsr_z + 1.5 * cmdr_experience_z`, exhaustive thug partition over ALL non-trivial splits (handles odd lobbies — 4v3, 5v4, etc.), drag-to-swap with live ΔVTSR badge, **Played Meter** imbalance gauge with disadvantaged-team indicator, Reset to best balance button, provisional-anchor handling for unrated/custom entries"
-    status: pending
+    status: completed
   - id: phase-6-polish-docs
     content: "Phase 6 — Polish + docs: `prefers-reduced-motion` audit across wheel/coin/slot; **viewport-fit 2-col grid layout** above 1280px so all sections fit in a single desktop viewport (below threshold → single-col scrollable); error states (lobby fetch failure, empty roster, empty filter); update `AGENTS.md`, `.cursor/rules/project-overview.mdc`, `DEVELOPER_GUIDE.md` with `/tools` as the project's seventh standalone page and the Reading C topnav scope change"
     status: completed

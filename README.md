@@ -89,5 +89,5 @@ All dependencies are vendored locally — no CDN usage, fully offline-capable.
 
 ## Documentation
 
-- [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) — single canonical reference: protobuf schema, pipeline stages, source-to-display mappings, output JSON shapes, datapoint glossary, sentinel damage filter (§7), and the four-way `UnitDestroyed` classification (§8). Browse rendered with search at `docs.html`.
+- [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) — single canonical reference: protobuf schema, pipeline stages, source-to-display mappings, output JSON shapes, datapoint glossary, sentinel damage filter (§7), and the four-way `UnitDestroyed` classification (§8). Browse rendered with search at `docs/`.
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — full technical specification including chart architecture, styling standards, schema-evolution playbook, and edge-case tables for URL-sharing and the Raw Data Browser.

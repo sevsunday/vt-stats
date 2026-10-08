@@ -4,37 +4,37 @@ overview: An 11-phase build (10 core + optional Phase 11) that flips All Matches
 todos:
   - id: phase1_landing
     content: "Phase 1 - Default landing flip: reorder modal radios in index.html (All matches first, checked), update showLandingModal() default branch in js/app.js, swap the auto-fill hint pattern to the All matches option, leave LANDING_PREF_VERSION untouched. Commit feat(landing): make All Matches the default landing view."
-    status: in_progress
+    status: completed
   - id: phase2_contribution_shape
     content: "Phase 2 - Contribution shape extension: add team_leaders, team_factions, winner, snipes_by_player, powerup_destructions_by_player to _extract_contribution() and per-leaderboard slot/team/is_commander; bump PIPELINE_VERSION 6->7; widen newCareerBucket() in js/all-matches-aggregator.js to track new fields without emitting yet; add team_factions and winner_decided_by to manifest entries. Commit feat(pipeline): extend match_contributions shape (PIPELINE_VERSION 6 -> 7)."
-    status: pending
+    status: completed
   - id: phase3_aggregator_blocks
     content: "Phase 3 - Aggregator blocks: extend js/all-matches-aggregator.js build() to emit commander_stats {rows, head_to_head, most_commanded_against}, faction_stats {by_team_slot, win_counts}, meta_charts {maps, duration_bands, player_counts, submitters, matches_over_time}. Cascade keptNames through commander_stats. No UI yet. Commit feat(aggregator): emit commander_stats, faction_stats, meta_charts blocks."
-    status: pending
+    status: completed
   - id: phase4_pipeline_elo
     content: "Phase 4 - Pipeline-side ELO: create scripts/elo.py with locked constants (anchor 1500, K_base 40, K_floor 12, prior 10, threshold 10, min_player_count 6, min_duration 300, RATING_SCALE 2.5, K_LOSS_AVERSION 0.85, RATING_FLOOR 1000, FLOOR_TAPER_WINDOW 150) and locked combat weights seven axes sum 1.0: net_damage_share 0.25, kill_rate 0.20, accuracy 0.15, pvp_share 0.20, mobility 0.10, snipe_bonus 0.05, asset_multiplier 0.05 (pickup_economy intentionally omitted from rating; still on contributions for Pod Goblin highlights). Implement per-axis lobby z-score clip composite, weight redistribution, asymmetric K-decay update with loss aversion + linear floor taper. Stub Wins ELO at 1500 (alpha=0.0). Wire into main() to emit data/processed/elo_current.json (with all hope-mechanic constants surfaced) and data/processed/elo_history.json. Update load_cache_index() skip set. Commit feat(elo): pipeline-side VTSR with combat ELO core, hope mechanics, and alpha-stubbed wins ELO blend."
-    status: pending
+    status: completed
   - id: phase5_vtsr_ui
     content: "Phase 5 - VTSR UI + KaTeX: vendor KaTeX to vendor/katex/; index.html KaTeX CSS+JS; #section-vtsr card; tierBadgeHtml(); renderVtsrLeaderboard(); Tier 5 band 1000–1349; Provisional <10 matches; KaTeX pre-render for info tooltip (seven axes, F=1000/W=150); career table Tier+VTSR columns; .vt-katex-tooltip CSS. Commit feat(all-matches): VTSR leaderboard + KaTeX + career Tier/VTSR columns."
-    status: pending
+    status: completed
   - id: phase6_career_highlights
     content: "Phase 6 - Career Highlights grid: refactor renderHighlights() in js/app.js with mode='match'|'career' param; add CAREER_HIGHLIGHT_COPY/LABELS/UNITS sibling tables (3 buckets x 3 lines per category); add buildCareerHighlights() to js/all-matches-aggregator.js producing 12 Flavor A career-rolled cards (with floors and Bayesian K/D shrinkage on Hustler) plus 12 Flavor B cross-match-only cards (Champion, Veteran, Workhorse, Carry, Anchor, ISDF/Hadean/Scion Loyalist, Diplomat, Map Master, Streak King, Polymath); insert #section-career-highlights between VTSR card and Career Leaderboard. Commit feat(all-matches): career highlights grid with 24 cards."
-    status: pending
+    status: completed
   - id: phase7_commanders_tab
     content: "Phase 7 - Commanders tab: add #all-tab-commanders-btn pill and pane in index.html; three cards (commander leaderboard with role-split combat stats, head-to-head top-10, faction picks horizontal stacked bar chart via new renderCommanderFactionPicks() in js/charts.js); win% columns degrade to em dash with explanatory tooltip when determined_as_commander < 5; faction badge color tokens (--kb-faction-i/e/f) added to css/vtstats-theme.css if missing. Commit feat(all-matches): Commanders tab."
-    status: pending
+    status: completed
   - id: phase8_meta_tab
     content: "Phase 8 - Meta tab: add #all-tab-meta-btn pill and pane; six charts (maps stacked bar by win attribution, faction by team slot dual donut, faction win rate bar, duration histogram, player count bar, matches over time line); single registerTabRenderer call drives all six. Commit feat(all-matches): Meta tab."
-    status: pending
+    status: completed
   - id: phase9_docs
     content: "Phase 9 - Docs: DEVELOPER_GUIDE methodology (seven axes, F=1000/W=150, cadence drift disclosure); DATA_DICTIONARY elo schemas + aggregator keys; docs.html #vtsr-methodology with KaTeX + auto-render.min.js + renderMathInElement boot. Commit docs: VTSR methodology + KaTeX on docs."
-    status: pending
+    status: completed
   - id: phase10_rules
     content: "Phase 10 - Rules and agent docs: update .cursor/rules/project-overview.mdc with new file locations, Commanders/Meta tabs, vendor/katex/; .cursor/rules/data-schema.mdc with contribution and ELO schemas; .cursor/rules/filter-contract.mdc with VTSR-is-corpus-wide section; AGENTS.md key conventions for VTSR pipeline ownership and alpha-stub design. Commit docs: register VTSR/ELO, KaTeX, and new tabs in project rules and agent docs."
-    status: pending
+    status: completed
   - id: phase11_radar_retrofit
     content: "Phase 11 (optional): KaTeX-rendered formulas in js/charts-radar.js buildRadarInfoTooltipHtml(); reuse .vt-katex-tooltip. Commit feat(career-radar): KaTeX in radar info tooltip."
-    status: pending
+    status: completed
 isProject: false
 ---
 

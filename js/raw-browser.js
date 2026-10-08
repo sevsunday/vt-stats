@@ -49,7 +49,7 @@
   // virtualizer synthesizes projected rows on demand via getVirtualRow()
   // during render, so expanding a 130k-element eventStream is O(1) instead
   // of allocating ~26 MB of row objects and freezing the main thread.
-  // See .cursor/plans/lazy-projected_rows_bulk_baaa7bef.plan.md.
+  // See .cursor/plans/raw/lazy-projected_rows_bulk_baaa7bef.plan.md.
   const BULK_THRESHOLD = 2000;
   // Page lives at /raw/; all repo-root assets and sibling pages are one
   // directory up. Matcher URLs inside /raw/ stay query-only (`?match=`).
@@ -2839,9 +2839,8 @@
     if (!row) return;
     const tick = row.dataset.tick;
     if (!tick) return;
-    // Cross-link to the Replay tab on index.html. Lands on the enclosing
-    // 10s bucket; VTReplay.jumpToTick handles the granularity (see
-    // timeline-player.js and the DEVELOPER_GUIDE raw-browser section).
+    // Cross-link to the 3D Replay tab. index.html converts this tick to
+    // seconds and boots the replay iframe at ?t=<sec>.
     const params = new URLSearchParams();
     params.set('match', state.matchId);
     params.set('tab', 'replay');
@@ -2981,7 +2980,7 @@
     el.innerHTML = `
       <i class="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
       <span>${pairsLabel} filtered (total dropped: ${fmt.format(Math.round(totalAmount))})</span>
-      <a class="ms-2" href="${ROOT}docs.html?doc=sentinel" target="_blank" rel="noopener">why?</a>
+      <a class="ms-2" href="${ROOT}docs/?doc=sentinel" target="_blank" rel="noopener">why?</a>
     `;
     el.title = `Engine DAMAGE_TYPE_UNKNOWN force-kill sentinels (amount > 1e6). ` +
       `Filtered out of Reconcile sums to match processed JSON; the raw events table below still shows them verbatim.`;

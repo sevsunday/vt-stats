@@ -4,40 +4,40 @@ overview: Make VTSR-T role-fair by per-axis shifting commander match-rows agains
 todos:
   - id: elo-py-constants
     content: "scripts/elo.py: add COMMANDER_AXIS_PRIOR + COMMANDER_BASELINE_SHRINKAGE constants; bump ELO_SCHEMA_VERSION 4→5; update module docstring"
-    status: pending
+    status: completed
   - id: elo-py-perf-index
     content: "scripts/elo.py: extend compute_performance_index() to accept commander_baseline state, apply per-axis shift on commander rows before clip, return per_player_axis_meta as 4th tuple element"
-    status: pending
+    status: completed
   - id: elo-py-compute-elo
     content: "scripts/elo.py: add commander_axis_running_sum/count state in compute_elo(), pass shrunk baselines into perf-index call, accumulate raw cmdr z post-match, track matches_as_commander counter"
-    status: pending
+    status: completed
   - id: elo-py-json-fields
     content: "scripts/elo.py: emit commander_axis_prior + commander_baseline_shrinkage + commander_baseline_observed on elo_current.json; emit axis_contributions_meta on commander deltas in elo_history.json; add matches_as_commander/matches_as_thug per ratings[] row"
-    status: pending
+    status: completed
   - id: process-stats-version
     content: "scripts/process_stats.py: bump PIPELINE_VERSION 14→15 to force corpus re-rate"
-    status: pending
+    status: completed
   - id: app-js-modal-text
     content: "js/app.js: extend the VTSR-T methodology modal caveat block (line 5409) with the v2.4 role-adjustment paragraph + updated peak_vtsr incomparable warning"
-    status: pending
+    status: completed
   - id: docs-developer-guide
     content: "DEVELOPER_GUIDE.md §13: append v2.4 subsection covering shift math, shrinkage formula, asymmetric design rationale (4 audit-derived priors, 2 hand-tuned, 2 role-blind), path-dependence note"
-    status: pending
+    status: completed
   - id: docs-data-dictionary
     content: "docs/DATA_DICTIONARY.md §11: document the 3 new elo_current.json blocks, the 2 new per-row fields, the optional axis_contributions_meta on history, and the peak_vtsr migration warning"
-    status: pending
+    status: completed
   - id: rules-project-overview
     content: ".cursor/rules/project-overview.mdc: replace v2.3 VTSR-T paragraph with v2.4 block (one paragraph; mirrors AGENTS.md)"
-    status: pending
+    status: completed
   - id: rules-agents-md
     content: "AGENTS.md: update Key Conventions VTSR-T entry with the v2.4 one-paragraph summary"
-    status: pending
+    status: completed
   - id: validation-rerun
     content: Run python scripts/process_stats.py --force end to end, then re-run _investigation/audit_commander_bias.py and confirm cmdr mean P_i ≈ 0, within-player gap ≈ 0, per-axis cmdr means ≈ 0 on the 4 fully-shifted axes (mobility, thug_kill_rate, net_damage_share, thug_efficiency); target_lock_pct keeps residual ~-0.37 by design; pve_share lifted to ~+0.16 by design (commander reward boost); thug_accuracy + snipe_bonus unchanged at current empirical means (role-blind by design); spot-check dual-role players gained ~50-150 ELO
-    status: pending
+    status: completed
   - id: validation-cache-roundtrip
     content: Run pipeline twice in a row (no flags) — second run should be a clean cache hit, confirming PIPELINE_VERSION bump invalidated correctly on the first run
-    status: pending
+    status: completed
 isProject: false
 ---
 

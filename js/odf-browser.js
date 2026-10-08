@@ -1,8 +1,7 @@
 /* ==========================================================================
  * ODF Browser
  *
- * Single-class implementation ported from odf-browser-seed/js/odf.js with the
- * following differences vs the seed:
+ * Single-class implementation. Differences from the original port:
  *
  * - VSR Build Tree lives on its own page (build/index.html, js/build-tree.js),
  *   not in this browser. Faction roots are FACTION_ROOTS in that file.

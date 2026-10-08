@@ -10,8 +10,7 @@
  *     (proxied via the existing loader.js so we share the int16 base64 decoder)
  *   - Calibration tier sniffing from `calibration/configs/<stem>.config.json`
  *     (drives the auto floor-mode default per the plan's Layer-1 contract)
- *   - Segment-aware XYZ interpolation extended for `y` (mirror of
- *     js/positioning-player.js:405-437, with `y` joining the lerp logic)
+ *   - Segment-aware XYZ interpolation (x/z plus y)
  *   - Kill-feed indexing (pre-sorted by `t_sec` for O(log n) lookup at
  *     playback time)
  *   - Tick <-> seconds conversion (per-match `tick_rate`; Power Struggle is
@@ -553,8 +552,7 @@ export function firstUsableTrailIdx(trail) {
 
 /**
  * Segment-aware binary search on `trail.t[]` returning {x, y, z, idx} at
- * `tSec`. Mirror of js/positioning-player.js:405-437 extended to interpolate
- * `y` alongside `x` and `z`.
+ * `tSec`. Interpolates `x`, `y`, and `z`.
  *
  * Segments come from `trail.segments[][i] -> [start_idx, end_idx]`. If the
  * lookup straddles a segment boundary (i.e. between a respawn / teleport),

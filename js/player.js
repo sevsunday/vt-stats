@@ -1445,7 +1445,7 @@
   }
 
   // Inline plugin: translucent ±σ uncertainty band hugging the rating
-  // line (improvement #6, fable analysis). Drawn before datasets so the
+  // line (improvement #6, June 2026 fable review (git history)). Drawn before datasets so the
   // line + points stay on top; sigma sourced from validation_summary.json
   // (no-op when absent). Same hand-rolled approach as the tier bands --
   // no annotation plugin dependency.
@@ -4736,7 +4736,7 @@
         fetchJson(`${state.dataPrefix}data/processed/elo_current.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/processed/player_slugs.json`).catch(() => null),
         // Bootstrap noise band for the Rating chart (improvement #6,
-        // fable analysis). Graceful 404: null hides the band.
+        // June 2026 fable review (git history)). Graceful 404: null hides the band.
         fetchJson(`${state.dataPrefix}data/processed/validation_summary.json`).catch(() => null),
         ensureMatchVideosLoaded(),
       ]);

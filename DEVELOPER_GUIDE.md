@@ -713,45 +713,20 @@ Coalesced player-vs-player `DamageDealt` intervals for the 3D replay's attack-li
 
 Consecutive same-`(shooter, victim)` hits within `window_sec` merge into one interval; intervals under `min_damage` are dropped. `s`/`v` are canonical nicks (join the leaderboard / kill feed / replay actors); `pairs` is sorted by `t0`. Pre-v27 matches omit the block, and `buildEngagementIndex()` in `_map-analysis/render/js/replay-data.js` falls back to synthesizing kill-feed lead-in intervals so the overlay works everywhere.
 
-The same `timeline` structure drives two UIs:
+The same `timeline` structure drives the **Combat tab** static stacked-area chart (`renderTimeline` in `js/charts.js`).
 
-1. The **Combat tab** static stacked-area chart (`renderTimeline` in `js/charts.js`).
-2. The **Replay tab** animated playback (`js/timeline-player.js`, exposed as `window.VTReplay`).
-
-The Replay Player adds transport controls (play/pause, step, reset, scrub, speeds: 0.5x, 1x, 2x default, 5x, 10x, 20x), a Players/Teams mode toggle, and four live companion panels computed from cumulative prefixes of the timeline arrays:
-
-- **Running leaderboard** — cumulative `by_player[name]` up to the current bucket, sorted descending and visually reordered via CSS flex order with transitions.
-- **Faction tug-of-war** — cumulative `by_faction["1"]` vs `by_faction["2"]` as a two-segment bar.
-- **Bucket spotlight** — argmax of `by_player[*][currentIndex]` highlighting the biggest contributor in the current bucket.
-- **Momentum chip** — rolling 3-bucket sum per faction; whichever faction leads by >10% drives the arrow direction.
-
-When `kills.feed` is non-empty, a custom Chart.js plugin (registered per-chart, not globally) draws small markers at kill bucket indices computed from `(tick - tick_range[0]) / tick_rate / bucket_seconds`. The plugin only draws markers up to `currentIndex`, so kills "appear" during playback in the correct temporal order.
-
-**Lifecycle:** `VTReplay.init(container, data, match)` is idempotent — it calls `destroy()` first. Both `loadMatch()`/`loadAllMatches()`/`showMatchNotFound()` and `renderMatchData()` (the filter re-render path) call `VTReplay.destroy()` before `destroyAllCharts()` to stop the playback interval before the Chart.js instance is torn down. The tab is registered via `registerTabRenderer('#tab-replay', ...)` and follows the same lazy-render pattern as every other match tab.
-
-**Filter integration:** The Replay tab honors the existing global filter bar via the `data` argument. `getFilteredData()` already reduces `timeline.by_player` to the selected player set and passes `by_faction` through — the player consumes the result directly. Filter changes fire `renderMatchData(filtered)` which re-registers the `#tab-replay` renderer; if Replay is the active tab, `renderTabIfNeeded` re-invokes `VTReplay.init()` automatically.
+The **Replay tab** is a separate surface: `renderReplayTab()` in `js/app.js` embeds `_map-analysis/render/replay.html` in an iframe (`?match=<id>`, plus `?t=<sec>` when a tick deep link is present). The iframe owns playback, cameras, and the HUD. A match switch rebuilds it. The player filter does not narrow the 3D world.
 
 ### Positioning Tab
 
-The `positioning` JSON block drives a dedicated tab that visualizes where players spent the match. Two UIs share the same data source, mirroring the Combat/Replay pairing for damage:
-
-1. **Static renderers** in `js/positioning-charts.js`:
+The `positioning` JSON block drives a dedicated tab that visualizes where players spent the match. The renderers live in `js/positioning-charts.js`:
    - **Movement Leaderboard** (`renderMovementLeaderboard`) — per-player activity score bar, band pill, mean / max / path / time-in-base columns; sortable; row-hover tooltip reveals Area Covered, First Leave, Returns, P95.
    - **Distance-from-Spawn Timeline** (`renderDistanceTimeline`) — Chart.js line chart, one series per player, `x = match time (seconds)`, `y = horizontal distance from personal spawn`. Gaps between segments so teleports don't draw straight flyovers.
    - **Combined Top-down Heatmap** (`renderCombinedHeatmap`) — imperative 2D canvas showing summed `heatmap_grid_xz` across all players over the shared world-space viewport, with spawn markers, faction-tint halves (gated by `base_separation / map_diagonal > 0.3`), and compass rose.
    - **Per-player Small-multiples Heatmap Grid** (`renderHeatmapGrid`) — one card per player using **shared viewport** (all cards use the same world-space extent fitted to everyone's p95 positions) and **shared p95 intensity scale** (one cell's brightness means the same thing on every card). A compact legend strip above the grid explains the visual language: diamond = spawn, color-intensity gradient = visit density, compass + per-match `~u per cell` scale.
    - **Ring Histogram** (`renderRingHistogram`) — stacked horizontal bar per player: time spent in Inner Base / Outer Base / Front Line / Deep Push bands, where band thresholds derive from `base_separation`.
 
-2. **Animated Positioning Timeline Player** (`js/positioning-player.js`, exposed as `window.VTPositionPlayer`):
-   - Transport controls (play / pause / step back / step forward / scrub / speeds 0.5x, 1x, 2x, 5x, 10x, 20x; default 4x).
-   - **Animated top-down map** — plain 2D canvas; each player's trail polyline grows with `progressSec`, current position rendered as a pulsing dot colored by faction. Teleport segments render as gaps (no flyovers).
-   - **Animated distance chart** — Chart.js line chart synchronized to `progressSec`, drawing each player's distance-from-spawn up to the current time with a linearly-interpolated leading edge.
-   - **Live ticker** — per-player "in base / ## u out" chips updated each frame.
-   - **Sub-second interpolation** — binary-search on sparse `trail.t[]` per frame so trails are smooth at every playback speed (1 Hz sample density is sparser than rAF).
-   - Respects `prefers-reduced-motion` by falling back to per-second stepping with `setInterval`; skips sub-second interpolation.
-   - **Keyboard shortcuts** (space/arrows/0-9) are bound on tab activation and unbound on tab leave so they don't conflict with the Replay tab.
-
-**Lifecycle:** `VTPositionPlayer.init(container, data, match)` is idempotent — it calls `destroy()` first. Every teardown path in `js/app.js` that calls `VTReplay.destroy()` also calls `VTPositionPlayer.destroy()` (match switch, filter change, theme swap, load error) so playback state never leaks. The tab is registered via `registerTabRenderer('#tab-positioning', ...)` and follows the same lazy-render pattern as every other match tab.
+Animated trail playback lives in the 3D Replay iframe, not on this tab.
 
 **Filter integration:** `renderPositioningTab` narrows `positioning.players` to the filtered leaderboard for the Movement Leaderboard + small-multiples highlighting, but always passes the full `positioning` block so the combined heatmap backdrop, team centroids, and opposing-team spawn markers still render for spatial context.
 
@@ -1333,14 +1308,14 @@ The Share button (Settings gear, `bi-link-45deg`) copies a URL representing the 
 | `team` | `1` \| `2` | Only valid when `filter=team` |
 | `players` | comma-separated canonical names or Steam64 IDs | Only valid when `filter=player`; tokens are resolved case-insensitively |
 | `tab` | see slug tables below | Omitted when on the default Overview tab |
-| `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once by `VTReplay.jumpToTick` on initial load and cleared — subsequent renders ignore it. |
+| `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once on initial load: `js/app.js` converts the tick to seconds and boots the 3D replay iframe at `?t=<sec>`. |
 
 **Valid tab slugs (per-match):** `overview`, `economy`, `elo`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `storyline`, `replay`
 **Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`, `commanders`, `meta`
 
 Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
 
-The Replay Player's transport state (play position, speed) and the Positioning Timeline Player's transport state are **not** URL-synced. Keeping URLs small means sharing a match + filter + tab slug is enough context; detailed playback scrubbing is an in-session interaction.
+The 3D replay's transport state (play position, speed, camera) is **not** URL-synced, except the one-shot `?t=` seek. Keeping URLs small means sharing a match + filter + tab slug is enough context; detailed playback scrubbing is an in-session interaction.
 
 #### Player Identifier Resolution
 
@@ -1416,8 +1391,6 @@ Two specific paths bypass the `liveSyncEnabled` gate and write to the URL uncond
 <script src="js/vtstats-fx.js"></script>         <!-- Effects engine (registers Chart.js plugin) -->
 <script src="js/charts.js"></script>             <!-- Chart renderers -->
 <script src="js/positioning-charts.js"></script> <!-- Positioning tab renderers (heatmaps, movement leaderboard) -->
-<script src="js/timeline-player.js"></script>    <!-- Replay tab engine (exposes window.VTReplay) -->
-<script src="js/positioning-player.js"></script> <!-- Positioning animated trail player (exposes window.VTPositionPlayer) -->
 <script src="js/app.js"></script>                <!-- Main application -->
 ```
 
@@ -1430,12 +1403,12 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 1. **Theme-aware colors**: Read `--kb-primary`, `--kb-accent`, etc. via `getComputedStyle()` at render time.
 2. **Destroy on switch**: Call `destroyAllCharts()` before rendering new match data.
 3. **Player palette**: A fixed 15-color palette for consistent player coloring within a match.
-4. **Chart types used**: Line (stacked area for Combat Timeline and Replay Player, the latter with a custom kill-marker plugin), Bar (horizontal for weapon meta, stacked for player weapons, horizontal for vehicle kills), Doughnut (rivalry cards, player profile dealt/received), Bar (horizontal for weapon accuracy).
+4. **Chart types used**: Line (stacked area for the Combat Timeline), Bar (horizontal for weapon meta, stacked for player weapons, horizontal for vehicle kills), Doughnut (rivalry cards, player profile dealt/received), Bar (horizontal for weapon accuracy). The Replay tab is the 3D iframe, not a Chart.js chart.
 5. **Partial data handling**: Chart renderers handle filtered/partial data gracefully. When a single player is selected, the timeline renders as a non-stacked line with point markers. Empty `weapon_meta` after filtering shows a placeholder message. Heatmaps accept the full player names array for axes while the matrix may contain only one row (single-player mode).
 6. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
 6. **Glass tooltips**: Custom external tooltip renderer replaces Chart.js defaults with translucent, blur-backed tooltip panels that respect the active theme.
 7. **Animation**: Default duration 1000ms with `easeOutQuart` easing.
-8. **Imperative canvas for spatial layouts**: The combined top-down heatmap, per-player small-multiples heatmaps, and the animated positioning map (Positioning Timeline Player) are drawn directly on a 2D canvas rather than through Chart.js — Chart.js doesn't cleanly express arbitrary XY trail polylines over a fitted world-space viewport with shared cross-card viewport and intensity normalization. These renderers live in `js/positioning-charts.js` and `js/positioning-player.js` and read the same `--kb-*` CSS variables at draw time so theme swaps still apply on re-render.
+8. **Imperative canvas for spatial layouts**: The combined top-down heatmap and the per-player small-multiples heatmaps are drawn directly on a 2D canvas rather than through Chart.js — Chart.js doesn't cleanly express a fitted world-space viewport with shared cross-card intensity. These renderers live in `js/positioning-charts.js` and read the same `--kb-*` CSS variables at draw time so theme swaps still apply on re-render.
 
 ---
 
@@ -1499,7 +1472,7 @@ py = (imageBounds.max.z - worldZ) / (imageBounds.max.z - imageBounds.min.z) * ca
 
 Axis convention: +X East, +Z North, image top = north. `py` is inverted so world +Z renders up on screen.
 
-Single source of truth: `getMapMeta(match)` in `js/app.js` computes `imageBounds` once per match and exposes it plus the image `HTMLImageElement` (cached by `mapFile` key) via `window.VTMapRegistry`. Positioning-charts and positioning-player both read through this helper.
+Single source of truth: `getMapMeta(match)` in `js/app.js` computes `imageBounds` once per match and exposes it plus the image `HTMLImageElement` (cached by `mapFile` key) via `window.VTMapRegistry`. `js/positioning-charts.js` reads through this helper.
 
 ### Calibration workflow
 
@@ -1538,7 +1511,6 @@ No iondriver re-fetches are required during tuning; calibration is purely a loca
 | Match picker card | `js/app.js` `buildMatchPickerCardHtml()` | 96×96 `<img>` per card; placeholder icon when map not in registry |
 | Combined heatmap | `js/positioning-charts.js` `renderCombinedHeatmap()` | `_drawMapImageLayer()` at `globalAlpha: 0.45` between the solid backdrop and heatmap cells |
 | Per-player heatmap grid | `js/positioning-charts.js` `renderPlayerHeatmap()` | Same pattern; image re-used via `VTMapRegistry.getMapImage()` cache |
-| Replay trail canvas | `js/positioning-player.js` `render()` | Same pattern; drawn under faction-tint gradient and trails |
 
 All renderers gracefully no-op when `imagePath` is absent (map not in registry, registry fetch failed, pre-schema match) — the pre-overlay rendering is preserved.
 
@@ -1558,7 +1530,7 @@ First-render spawn centroids on the 4 new-schema maps currently show a consisten
 
 ## 11. Raw Data Browser (`raw/index.html`)
 
-The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives at `/raw/` with its own CSS + JS and has no shared state with `index.html`. `raw.html` is a query-preserving redirect to `raw/` so old bookmarks keep working.
+The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives at `/raw/` with its own CSS + JS and has no shared state with `index.html`.
 
 ### Three tiers
 
@@ -1600,7 +1572,6 @@ raw/?match=<id>
 - On `view` change, `path` and `q` reset (paths don't translate across tiers).
 - `path` uses RFC 6901 JSON Pointer format (e.g. `/eventStream/5/damageDealt/amount`).
 - `types` accepts any subset of the schema's event arms. Omit the param for every arm. `types=none` shows zero rows.
-- `raw.html?match=<id>…` redirects to `raw/?match=<id>…` (query + hash preserved).
 
 ### Domain-aware resolvers
 
@@ -1622,8 +1593,8 @@ Haystacks include raw strings **and** resolved nicknames / ODF pretty names (`re
 ### Entry surfaces
 
 - **Main dashboard**: "View raw" button on the match-info banner (`#info-raw-link` in `index.html`), href updated per-match by `renderBanner()` in `js/app.js` (`raw/?match=<id>`).
-- **Docs page**: docs.html mentions the Raw Data Browser; open it from the dashboard match-info **View Raw Data** button (`raw/?match=<id>`).
-- **Direct URL**: `raw/?match=<id>` works without going through either. `raw.html?match=<id>` redirects there.
+- **Docs page**: docs/index.html mentions the Raw Data Browser; open it from the dashboard match-info **View Raw Data** button (`raw/?match=<id>`).
+- **Direct URL**: `raw/?match=<id>` works without going through either.
 
 ### Schema-migration verify tool
 
@@ -1649,7 +1620,7 @@ Actor ODF is the acting ship's stem (`shooterOdf`, else `killerOdf`, else `picke
 
 **Schema-aware Reconcile** — `computePersonalReceived(s64)` reads from `damageReceived` rows on v1 and from `damageDealt` rows (with `r.victim == s64`) on v2. `computePersonalPvpDealt(s64)` reads paired-DR victim on v1 and direct `r.victim` on v2. `computeSentinelSummary()` is schema-agnostic — one logical record per matching `damageDealt` row regardless of schema.
 
-**Cross-link to Replay** — clicking a row navigates to `../index.html?match=<id>&tab=replay&t=<tick>`. The Replay tab honors `?t=<tick>` via `VTReplay.jumpToTick(tick)` — see below. The jump is consumed exactly once on initial page load and does not persist across subsequent renders (so the user can freely scrub after).
+**Cross-link to Replay** — clicking a row navigates to `../index.html?match=<id>&tab=replay&t=<tick>`. On load, `js/app.js` converts that tick to seconds and boots the 3D replay iframe at `?t=<sec>`. The jump is consumed once; later scrubs stay inside the iframe.
 
 ### Search + JSONPath subset (tree mode)
 
@@ -1707,19 +1678,15 @@ Documented fields render with a dotted underline in the Decoded tree (`.vt-raw-t
 
 Field-to-type resolution is a static map in `js/raw-browser.js` (`PROTO_TYPE_MAP`) because protobufjs's runtime reflection would need significantly more plumbing to navigate nested oneofs correctly. If a new message is added to the schema, the map needs an entry — this is listed as a step in `.cursor/rules/schema-migration.mdc`.
 
-### `VTReplay.jumpToTick(tick)` contract
+### Replay deep link
 
-Exposed by `js/timeline-player.js` (added alongside `init` / `destroy` / `renderFullscreenSnapshot` / `hasInstance`). Seeks the internal playhead (`state.progressBuckets`) to the bucket containing the given tick, pauses playback, and re-anchors timing so a subsequent play resumes from there.
-
-Granularity: `progressBuckets` is floating-point, but companion panels (leaderboard, spotlight, momentum) snap per whole `TIMELINE_BUCKET_SECONDS = 10`-second bucket — so the visible jump lands on the bucket that contains the event. Sub-bucket seek is intentionally out of scope; events inside a bucket are distinguishable in the Raw Data Browser but not in the Replay view.
-
-Returns `true` if the seek was accepted, `false` if there's no active replay state or `match.tick_range` / `match.tick_rate` are missing. Callers should not assume success if the Replay tab hasn't been rendered yet — `app.js` gates this by only calling `jumpToTick` inside the registered `#tab-replay` renderer, and by forcing `tab=replay` when `?t=<tick>` is provided without an explicit `tab`.
+`?t=<tick>` is a raw tick. `renderReplayTab()` divides it by `match.tick_rate` and appends `&t=<sec>` to the iframe URL (`_map-analysis/render/replay.html`). When `?t=` is present and `?tab=` is not, the dashboard opens the Replay tab so the seek is visible. The value is cleared after that first boot.
 
 ---
 
 ## 12. ODF Browser (`odf/index.html`)
 
-The ODF Browser is the project's fourth standalone page, sibling to `index.html` / `docs.html` / `raw/index.html`. It's a read-only reference for browsing the BZ2 Object Definition File (ODF) database — the same `data/odf.min.json` the dashboard uses for weapon-name resolution, but presented as an interactive browser rather than a lookup table.
+The ODF Browser is the project's fourth standalone page, sibling to `index.html` / `docs/index.html` / `raw/index.html`. It's a read-only reference for browsing the BZ2 Object Definition File (ODF) database — the same `data/odf.min.json` the dashboard uses for weapon-name resolution, but presented as an interactive browser rather than a lookup table.
 
 ### Files
 
@@ -2452,7 +2419,7 @@ The running mean is still tracked for locked axes (visibility only — surfaced 
 1. **4 audit-derived priors with shrinkage** — `mobility (-0.488)`, `thug_kill_rate (-0.164)`, `net_damage_share (-0.131)`, `thug_efficiency (-0.106)`. These are real structural shortfalls of the commander role (tied to base / building / not in dedicated combat ships). The seed values are the audit's empirical means; the rolling shrinkage lets live data take over the prior smoothly as the corpus grows.
 2. **2 hand-tuned priors LOCKED** — `target_lock_pct (-0.10)` and `pve_share (-0.05)`.
    - `target_lock_pct`: audit said $-0.466$ (n=116), but T-key is universally available and commanders are often common targets. We pin a small cushion that deliberately under-encodes the empirical penalty — design intent is "commanders should be locking nearly as much as thugs". Locked so this intent doesn't drift toward the empirical $-0.466$ over time.
-   - `pve_share`: audit said $+0.111$ (commanders naturally do more PvE because of where they spend time). We **invert the sign** to a $-0.05$ baseline so the shift becomes $+0.05$ on commander rows — hitting enemy assets is the work commanders SHOULD be doing, so we actively reward it instead of dampening it. Locked so the boost intent doesn't fade — and worse, silently flip into a dampener — as the running mean drifts. **Honesty note (2026-06 fable analysis):** the live empirical commander mean on this axis is now $+0.049$ ($n = 214$) — commanders already out-PvE the lobby unaided, so the lock's practical effect is a *deliberate double-reward* on an axis commanders already lead, not drift protection. Kept: the Phase 2B priors ablation measured the total cost of both locks at $\le 3.9$ ELO per player against a ~30 ELO bootstrap noise floor, and the normative intent stands. Revisit if the commander-cohort delta from the locks ever exceeds the noise floor.
+   - `pve_share`: audit said $+0.111$ (commanders naturally do more PvE because of where they spend time). We **invert the sign** to a $-0.05$ baseline so the shift becomes $+0.05$ on commander rows — hitting enemy assets is the work commanders SHOULD be doing, so we actively reward it instead of dampening it. Locked so the boost intent doesn't fade — and worse, silently flip into a dampener — as the running mean drifts. **Honesty note (June 2026 fable review (git history)):** the live empirical commander mean on this axis is now $+0.049$ ($n = 214$) — commanders already out-PvE the lobby unaided, so the lock's practical effect is a *deliberate double-reward* on an axis commanders already lead, not drift protection. Kept: the Phase 2B priors ablation measured the total cost of both locks at $\le 3.9$ ELO per player against a ~30 ELO bootstrap noise floor, and the normative intent stands. Revisit if the commander-cohort delta from the locks ever exceeds the noise floor.
 3. **2 axes role-blind (omitted from the prior dict)** — `thug_accuracy` and `snipe_bonus`. `thug_accuracy`'s empirical commander mean is $+0.069$, below the noise floor at current corpus size (std $0.46$, SE ~0.04). `snipe_bonus`'s $+0.28$ is unreliable on $n = 22$ commander rows. Treat both as role-blind until the data clearly warrants an adjustment.
 
 **Worked example — typical-commander mobility.** Take a commander posting empirical-mean mobility (raw z = $-0.976$):
@@ -2578,7 +2545,7 @@ Keying on the *canonical* rating (not the lifted one) is the load-bearing stabil
 
 **Empirical effect.** On the validated corpus: ~10 eligible bottom players gain meaningfully (Monkey / judgeguns ≈ +15–19 ELO), every mid/high player moves ≤ ~1.3 ELO, leaderboard order is preserved (rank corr ≈ 0.999), and predictive quality dips mildly and acceptably (validator Spearman ρ 0.469 → ~0.452, synthetic-winner agreement unchanged at 90.3%). The lift is *productivity-bounded*: a player who pilots a lot but does little with the ship he gets (e.g. Darkvale ≈ +7) gains less than a more lethal peer (Monkey), because the lift only de-dilutes a rate that still has to be earned. **Pre-v8 `peak_vtsr` is no longer comparable** — the corpus is re-rated.
 
-**Scope note (2026-06 fable analysis).** At the current rating distribution the 1460/60 gate captures **10 of 35 rated players (~29% of the league)** — in practice a *below-median assistance band* rather than a bottom-tier safety net. Broader than the original "established low-tier" framing, but kept as-is: the lift is small, self-closing, and feedback-proof via the two-pass canonical gate. Revisit triggers: re-examine `LOWTIER_LIFT_CUTOFF` when the eligible share exceeds ~1/3 of rated players or falls below ~1/10 (either direction means the band has drifted from the population it was tuned against).
+**Scope note (June 2026 fable review (git history)).** At the current rating distribution the 1460/60 gate captures **10 of 35 rated players (~29% of the league)** — in practice a *below-median assistance band* rather than a bottom-tier safety net. Broader than the original "established low-tier" framing, but kept as-is: the lift is small, self-closing, and feedback-proof via the two-pass canonical gate. Revisit triggers: re-examine `LOWTIER_LIFT_CUTOFF` when the eligible share exceeds ~1/3 of rated players or falls below ~1/10 (either direction means the band has drifted from the population it was tuned against).
 
 ### 13.7.4 v2.9 — pilot-victim kill/death exclusion
 
@@ -2842,7 +2809,7 @@ The per-commander stakes block ("What was on the line") and the "Does it work?" 
 
 ## 14. Player Profile Pages (`player/`)
 
-The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:
+The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:
 
 1. **Pre-generated stubs** at `player/<slug>/index.html` — one HTML file per player with `matches_played >= 5`, rendered by `scripts/generate_player_pages.py` from `scripts/player_template.html`. Each stub carries per-player Open Graph meta tags in `<head>` for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtPlayerBoot` script block that hints the client-side renderer at the player's identity before fetch.
 2. **Runtime fallback** at `player/index.html` — same client-side JS (`js/player.js`) renders unstubbed players (`?p=<steam64>` / `?slug=<slug>`), the **Directory** landing (no params), and the **Compare view** (`?compare=<csv-of-slugs>`, capped at 4 players).
@@ -2981,7 +2948,7 @@ Player profile pages are **picker-unaware** — they ignore the dashboard's matc
 
 ## 15. Map Browser Pages (`map/`)
 
-The Map Browser is the project's **sixth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html` / `player/index.html`. Mirrors the player-pages architecture with deliberate simplifications: maps already have URL-safe slugs (the lowercased `map_file` stem from `build_map_registry.map_key()`) so there's no allocator and no stickiness layer. The page system is **dual-runtime**:
+The Map Browser is the project's **sixth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html` / `player/index.html`. Mirrors the player-pages architecture with deliberate simplifications: maps already have URL-safe slugs (the lowercased `map_file` stem from `build_map_registry.map_key()`) so there's no allocator and no stickiness layer. The page system is **dual-runtime**:
 
 1. **Pre-generated stubs** at `map/<mapfile>/index.html` — one HTML file per map in `data/map-registry.json` (~143 once Phase 1's universe-extension lands in production), rendered by `scripts/generate_map_pages.py` from `scripts/map_template.html`. Each stub carries per-map Open Graph meta tags pointing at the map's actual top-down screenshot for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtMapBoot` script block that hints the client-side renderer at the map identity before fetch.
 2. **Runtime fallback** at `map/index.html` — same client-side JS (`js/maps.js`) renders the **Directory** landing (no params), single maps via `?file=<slug>` for the rare uncovered map, and degrades gracefully when `map_stats.json` is missing.
@@ -3038,7 +3005,7 @@ Map browser pages are **picker-unaware** (mirrors VTSR-T leaderboard). The picke
 
 | Site | Wiring |
 |---|---|
-| Topnav `Maps` link | Added on `index.html`, `docs.html`, `raw/index.html`, `odf/index.html`, and the player template (which forces `PLAYER_TEMPLATE_VERSION` 5 → 6 to re-render every player stub with the new nav). |
+| Topnav `Maps` link | Added on `index.html`, `docs/index.html`, `raw/index.html`, `odf/index.html`, and the player template (which forces `PLAYER_TEMPLATE_VERSION` 5 → 6 to re-render every player stub with the new nav). |
 | Map Info Modal title | `#map-info-modal-title-link` wraps the title text; clicks open `/map/<slug>/` in a new tab (`target="_blank" rel="noopener"`) so the modal stays open. Wired in `renderMapInfoModal()` in `js/app.js`. |
 | Map Info Modal footer | New `#map-info-modal-page-link` `View full map page` button next to Close. Same `target="_blank"` semantics. Toggled `d-none` together with the title link when `meta.key` is empty. |
 | Match-info banner | New `#info-map-link` button next to `#info-raw-link`, wired in `renderMapBannerFields()`. Hidden via `d-none` when the match's map isn't in the registry (parallel to the `#info-map-thumb-btn` toggle). |
@@ -3245,7 +3212,7 @@ The Lobby Tools page is **picker-unaware** (mirrors VTSR-T leaderboard and the p
 
 ## 17. Models Browser (`models/`)
 
-The project's **eighth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.
+The project's **eighth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.
 
 ### 17.1 Files
 

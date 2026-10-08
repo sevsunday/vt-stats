@@ -5254,7 +5254,7 @@ def write_validation_summary(results: dict, processed_dir: Path) -> Path:
     ``data/processed/`` and IS committed: it powers the dashboard's
     noise-floor UI (bootstrap sigma) and gives every future re-rate
     decision a per-run metric time-series to diff against (improvement #2
-    of the fable analysis). Default elo-mode only -- alt modes never touch
+    of the June 2026 fable review (git history)). Default elo-mode only -- alt modes never touch
     this file.
 
     History contract: one entry per distinct corpus/algorithm state
