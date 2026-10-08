@@ -2111,6 +2111,36 @@ body::before {
     padding: 1.15rem;
 }
 
+/* Two team panels share one grid. At md+ each panel is a subgrid of the
+   same tracks (heading, roster, combat cards, optional scrap cards) so a
+   wrapping roster cannot push one side's scorecards down. Below md the
+   panels stack and do not share rows. row-gap stays 0 at md+ because the
+   existing heading/roster margins already separate those tracks; a parent
+   gap would add to them. */
+#faction-content {
+    display: grid;
+    gap: 1rem;
+}
+
+@media (min-width: 768px) {
+    #faction-content {
+        grid-template-columns: 1fr 1fr;
+        row-gap: 0;
+        column-gap: 1rem;
+        align-items: stretch;
+    }
+
+    #faction-content > .vt-faction-panel {
+        display: grid;
+        grid-template-rows: subgrid;
+        grid-row: span 3;
+    }
+
+    #faction-content.vt-faction-has-econ > .vt-faction-panel {
+        grid-row: span 4;
+    }
+}
+
 #outcome-read:empty,
 #outcome-after:empty {
     display: none;
@@ -2238,6 +2268,7 @@ body::before {
 .vt-faction-heading {
     display: flex;
     align-items: center;
+    align-content: flex-start;
     flex-wrap: wrap;
     gap: 0.45rem;
     margin-bottom: 0.65rem;
@@ -2260,6 +2291,7 @@ body::before {
 .vt-faction-roster {
     display: flex;
     flex-wrap: wrap;
+    align-content: flex-start;
     gap: 0.4rem;
     margin-bottom: 0.7rem;
 }
@@ -2332,6 +2364,7 @@ body::before {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.65rem;
+    height: 100%;
 }
 
 .vt-faction-stats + .vt-faction-stats {

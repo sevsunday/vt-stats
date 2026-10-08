@@ -6295,13 +6295,16 @@
     };
 
     const rosterHtml = (teamList, leaderSlot, side) => {
+      // Always one roster node. A missing child would drop that side's
+      // scorecards into the shared roster row.
+      const wrap = (inner) => `<div class="vt-faction-roster">${inner}</div>`;
       if (!teamList || teamList.length === 0) {
-        return '<em class="vt-faction-roster-empty">No players</em>';
+        return wrap('<em class="vt-faction-roster-empty">No players</em>');
       }
       const visible = teamList.filter(p => !isHiddenRosterPlayer(p));
-      // Entire side was camera-pod or idle: skip the chip row rather than
-      // claiming "No players" (team totals still render below).
-      if (visible.length === 0) return '';
+      // Entire side was camera-pod or idle: keep the row, but do not
+      // claim "No players" (team totals still render below).
+      if (visible.length === 0) return wrap('');
       const sorted = [...visible].sort((a, b) => {
         const aCmdr = a.slot === leaderSlot ? 0 : 1;
         const bCmdr = b.slot === leaderSlot ? 0 : 1;
@@ -6322,7 +6325,7 @@
           : 'vt-faction-player-chip';
         return `<span class="${chipClass}">${pip}${vtPlayerLinkHtml(p.name, p.steam64)}${nick}${eloChipHtml(p, isCmdr, side)}</span>`;
       }).join('');
-      return `<div class="vt-faction-roster">${chips}</div>`;
+      return wrap(chips);
     };
 
     // Multi-player subset: "N selected" in the header. Commander name
@@ -6402,15 +6405,17 @@
     };
 
     const panelHtml = (side, totals, roster, leaderSlot, teamClass, muted, winnerClass, facBadge, trophy, subsetNote) => `
-      <div class="col-md-6">
-        <div class="vt-faction-panel ${teamClass}${muted ? ' vt-faction-panel--muted' : ''}${winnerClass}">
-          <h6 class="vt-faction-heading"><span>Team ${side}</span>${facBadge}${trophy}${subsetNote}${muted ? mutedNote : ''}${avgHtml(side)}</h6>
-          ${rosterHtml(roster, leaderSlot, side)}
-          ${combatStats(totals)}
-          ${econStats(side)}
-        </div>
+      <div class="vt-faction-panel ${teamClass}${muted ? ' vt-faction-panel--muted' : ''}${winnerClass}">
+        <h6 class="vt-faction-heading"><span>Team ${side}</span>${facBadge}${trophy}${subsetNote}${muted ? mutedNote : ''}${avgHtml(side)}</h6>
+        ${rosterHtml(roster, leaderSlot, side)}
+        ${combatStats(totals)}
+        ${econStats(side)}
       </div>`;
 
+    // Scrap row is match-global: both panels have it, or neither does.
+    // The class picks the shared subgrid span (3 vs 4).
+    const hasEcon = typeof matchHasResourceData === 'function' && matchHasResourceData();
+    container.classList.toggle('vt-faction-has-econ', hasEcon);
     container.innerHTML = `
       ${panelHtml('1', f1, teams['1'], 1, 'vt-faction-panel--t1', t1Muted, t1Winner, t1FacBadge, t1WinnerTrophy, t1SubsetNote)}
       ${panelHtml('2', f2, teams['2'], 6, 'vt-faction-panel--t2', t2Muted, t2Winner, t2FacBadge, t2WinnerTrophy, t2SubsetNote)}
