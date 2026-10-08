@@ -20,6 +20,7 @@ import {
   resolveAtmosphere, applyEngineLights, applyEngineFog, applyTerrainMaterial,
   updateSun, sunDirectionAt,
 } from '../../_map-analysis/render/js/atmosphere.js?v=atmo1';
+import { createSunShadows, sceneMapBounds } from '../../_map-analysis/render/js/shadows.js?v=shadows1';
 
 const RENDER_PAGE = new URL('../../_map-analysis/render/', import.meta.url);
 
@@ -129,7 +130,6 @@ export async function loadWorld(stem, renderer, opts) {
     vertexColors: true, roughness: 0.9, metalness: 0,
   }));
   mesh.name = 'terrain';
-  mesh.receiveShadow = true;
   worldGroup.add(mesh);
 
   const wantTiles = !opts || opts.tiles !== false;
@@ -150,11 +150,13 @@ export async function loadWorld(stem, renderer, opts) {
     catch (err) { console.warn('minimap', err); }
   }
 
-  mountLiquids(worldGroup, mapData);
+  const liquids = mountLiquids(worldGroup, mapData);
   const props = mapData.props || [];
+  let propsGroup = null;
   if (props.length) {
     try {
-      worldGroup.add(await buildPropsGroup(props, hm, renderer));
+      propsGroup = await buildPropsGroup(props, hm, renderer);
+      worldGroup.add(propsGroup);
     } catch (err) {
       console.warn('props', err);
     }
@@ -182,6 +184,24 @@ export async function loadWorld(stem, renderer, opts) {
   // distance fog and visibility clip (nothing drawn past `visibilityrange`).
   // `attachSky` already set the clear colour; the fog keeps its own colour.
   if (opts && opts.fog !== false) applyEngineFog(scene, camera, atmo);
+  // The explorer is in the world, so shadows run out to the visibility clip.
+  // `?shadows=0` leaves the plain directional sun in place.
+  let shadows = null;
+  if (!opts || opts.shadows !== false) {
+    shadows = createSunShadows({
+      scene,
+      camera,
+      renderer,
+      mapBounds: sceneMapBounds(wr, true),
+      followFar: true,
+    });
+    shadows.adoptSun(lights.sun);
+    shadows.prepare(mesh);
+    if (liquids.waterMesh) shadows.prepare(liquids.waterMesh, { cast: false });
+    if (liquids.lavaMesh) shadows.prepare(liquids.lavaMesh, { cast: false });
+    if (propsGroup) shadows.prepare(propsGroup);
+    shadows.setRange(camera.far, true);
+  }
   const startedAt = performance.now();
 
   const tunnelIndex = buildTunnelIndex(mapData.props);
@@ -225,15 +245,18 @@ export async function loadWorld(stem, renderer, opts) {
     spawns,
     probe,
     groundAt(x, z) { return probe(x, z).height; },
+    shadows,
     // Per frame: the sun advances along its arc in real time (`sun.period`
     // is in real-time hours), the sprite follows it, and the dome rig is
-    // re-fitted to the camera's far plane.
-    syncSky(camera) {
+    // re-fitted to the camera's far plane. `opts.moved` redraws the shadow
+    // maps (a still scene keeps the last ones).
+    syncSky(camera, frameOpts) {
       skyState.camera = camera;
       const elapsed = (performance.now() - startedAt) / 1000;
       const dir = updateSun(lights, atmo, elapsed, { mirrorZ: true }) || sunDir;
       skyState.sunDir = dir;
       if (skyState.skyRig) syncSky(skyState.skyRig, camera, dir);
+      if (shadows) shadows.sync(frameOpts);
     },
   };
 }

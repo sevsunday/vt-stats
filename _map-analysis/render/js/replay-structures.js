@@ -11,6 +11,13 @@ import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
 import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=lego1';
 
+let prepareShadow = null;
+
+/** Called when a structure mesh is built, once the replay's shadow rig exists. */
+export function setStructureShadowPrep(fn) {
+  prepareShadow = typeof fn === 'function' ? fn : null;
+}
+
 const TEAM_TINTS = {
   1: 0x5dadff,   // Team 1 blue
   2: 0xff5d5d,   // Team 2 red
@@ -68,8 +75,6 @@ function makeBox(size, color, name) {
   });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.name = name;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
   return mesh;
 }
 
@@ -98,15 +103,20 @@ function teamColor(team) {
 /** Catalog mesh when loaded, otherwise the sized box. Hull-bottom yOff is 0 for a mesh.
  *  `deployedPose` holds a building's deploy clip on its last frame. */
 function makeStructureVisual(odf, team, boxSize, boxName, deployedPose) {
+  let visual;
   if (odf && modelsEnabled() && modelReady(odf)) {
     const body = cloneModelBody(odf, teamColor(team), deployedPose ? { deployed: true } : null);
-    if (body) return { mesh: body, yOff: 0, isModel: true };
+    if (body) visual = { mesh: body, yOff: 0, isModel: true };
   }
-  return {
-    mesh: makeBox(boxSize, teamColor(team), boxName),
-    yOff: null,
-    isModel: false,
-  };
+  if (!visual) {
+    visual = {
+      mesh: makeBox(boxSize, teamColor(team), boxName),
+      yOff: null,
+      isModel: false,
+    };
+  }
+  if (prepareShadow) prepareShadow(visual.mesh);
+  return visual;
 }
 
 function centroidOf(matchData, side) {

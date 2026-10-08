@@ -26,6 +26,7 @@ import {
   updateSun,
   sunDirectionAt,
 } from './atmosphere.js?v=atmo1';
+import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
 import { buildPropsGroup } from './props.js?v=terrain1';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface, buildTunnelIndex, tunnelAt } from './terrain-owners.js?v=3';
@@ -58,6 +59,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
+  setActorShadowPrep,
 } from './replay-actors.js?v=terrain1';
 import {
   initModelsPref,
@@ -118,6 +120,7 @@ import {
   findStructureDeaths,
   recyclerPadXZ,
   enemyBaseOf,
+  setStructureShadowPrep,
 } from './replay-structures.js?v=terrain1';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
@@ -159,6 +162,7 @@ const STATE = {
   // (sky-dome.js) that the world group is reflected on Z.
   atmo: null,
   lights: null,
+  shadows: null,
   lightingMode: 'engine',
   chaseFog: true,
   sun: null,
@@ -620,6 +624,40 @@ function initLights(mapData) {
 }
 
 /**
+ * Cascaded sun shadows. Built here, not in initLights, because the CSM
+ * frustum needs the camera. The directional light stays (the sky sprite
+ * follows it) but is hidden; the four cascade lights are the sun.
+ */
+function attachShadows() {
+  if (STATE.shadows || !STATE.scene || !STATE.camera || !STATE.renderer) return;
+  if (!readSettings().shadows) return;
+  const wr = STATE.mapData && STATE.mapData.worldRect;
+  STATE.shadows = createSunShadows({
+    scene: STATE.scene,
+    camera: STATE.camera,
+    renderer: STATE.renderer,
+    mapBounds: sceneMapBounds(wr, true),
+    followFar: false,
+  });
+  if (STATE.lights && STATE.lights.sun) STATE.shadows.adoptSun(STATE.lights.sun);
+  const prep = (obj) => { if (STATE.shadows) STATE.shadows.prepare(obj); };
+  setActorShadowPrep(prep);
+  setStructureShadowPrep(prep);
+  if (STATE.terrainMesh) STATE.shadows.prepare(STATE.terrainMesh);
+  if (STATE.terrainRampMat) STATE.shadows.prepareMaterial(STATE.terrainRampMat);
+  if (STATE.terrainMinimapMat) STATE.shadows.prepareMaterial(STATE.terrainMinimapMat);
+  if (STATE.terrainTileMat) STATE.shadows.prepareMaterial(STATE.terrainTileMat);
+  if (STATE.waterMesh) STATE.shadows.prepare(STATE.waterMesh, { cast: false });
+  if (STATE.lavaMesh) STATE.shadows.prepare(STATE.lavaMesh, { cast: false });
+  if (STATE.propsGroup) STATE.shadows.prepare(STATE.propsGroup);
+  if (STATE.poolsGroup) STATE.shadows.prepare(STATE.poolsGroup, { cast: false });
+  if (STATE.actorsGroup) STATE.shadows.prepare(STATE.actorsGroup);
+  if (STATE.structuresGroup) STATE.shadows.prepare(STATE.structuresGroup);
+  if (STATE.recyclersGroup) STATE.shadows.prepare(STATE.recyclersGroup);
+  STATE.shadows.onCameraChange();
+}
+
+/**
  * Fog follows the camera: the chase camera is in the world, so it gets the
  * engine's linear fog and visibility clip (when the Fog setting is on);
  * free / cinema / top-down are out-of-world views and stay clear.
@@ -631,6 +669,7 @@ function applyCameraFog() {
   } else {
     clearFog(STATE.scene, STATE.camera);
   }
+  if (STATE.shadows) STATE.shadows.onCameraChange();
 }
 
 /**
@@ -915,6 +954,7 @@ function initCamera(mapData) {
   });
   STATE.camMode = 'free';
   applyCameraFog();
+  attachShadows();
   // Cinema needs read access to the kill index + current playback time.
   STATE.cameraCtl.setCinemaInputs({
     killIndex: STATE.killIndex,
@@ -1092,6 +1132,7 @@ function loadHqFloor() {
         if (!built) return null;
         STATE.terrainTileMat = built.material;
         STATE.terrainTileTextures = built.textures;
+        if (STATE.shadows) STATE.shadows.prepareMaterial(built.material);
         return built.material;
       });
   }
@@ -2513,6 +2554,13 @@ function renderFrame(dtSec = 0) {
   //    avoids spamming history.replaceState every frame.
   maybeThrottleUrlState();
 
+  // After the actors have moved, so the maps match this frame. A paused,
+  // still camera reuses the maps already drawn.
+  if (STATE.shadows) {
+    const moved = STATE.isPlaying || STATE.scrubbing || STATE.progressSec !== STATE._shadowT;
+    STATE._shadowT = STATE.progressSec;
+    STATE.shadows.sync({ moved });
+  }
   STATE.renderer.render(STATE.scene, STATE.camera);
 }
 
@@ -2988,6 +3036,7 @@ function onWindowResize() {
   STATE.camera.aspect = w / h;
   STATE.camera.updateProjectionMatrix();
   STATE.renderer.setSize(w, h, false);
+  if (STATE.shadows) STATE.shadows.onCameraChange();
 }
 
 function formatDuration(sec) {

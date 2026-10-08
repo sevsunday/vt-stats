@@ -591,6 +591,20 @@ shader would fog them at their 200 m shell; the skirt matches the frame).
 `dome.u` / `dome.v` static texture offsets (DOME chunk 0x04 / 0x08; Giza
 0.0475, Lunar 0.168, Aussault -0.25) are decoded but not applied.
 
+**Sun shadows (`*z*`, `BZ_WANT_SHADOW`).** The lit permutations
+(`dx11_default_psh_0pdlz`, `dx11_terrain_psh_8pdelz`, `dx11_water_psh_*z*`)
+bind four cascaded maps `t28`..`t31` and one `psshadow` cbuffer:
+`g_ShadowSplitPoints` plus a texel size per cascade. A fragment picks a
+cascade by view-space depth (hard cuts, no blend) and, past the last
+split, is unshadowed. Each cascade takes four hardware-PCF taps at ±0.5
+texel (`sample_c_lz`) and averages them. The factor multiplies **light 0
+only** (the sun); ambient and emissive are untouched, and the factor is
+reset to 1 before every later light. Sky layers are unlit (`0pd*`, no
+`z`) and do not receive shadows. Terrain as a *caster* is not visible in
+the pixel shader (the depth pass is separate); hills shading valleys is
+in-game observation. Split distances, map sizes (`ShadowOff` / `Low` /
+`Med` / `High`) and the depth bias are not in the shader.
+
 ### Lighting model (`js/atmosphere.js`)
 
 The engine's terrain shading is the classic `albedo * material *
@@ -637,6 +651,24 @@ The engine's terrain shading is the classic `albedo * material *
   direction, and the camera-locked rig is scaled to fit inside the camera
   far plane. Which layers exist at all is the "Sky layers" section above.
 
+### Sun shadows (`js/shadows.js`)
+
+`createSunShadows()` hides the plain directional light (the sky sprite
+still follows it) and replaces it with four cascaded lights from the
+vendored three.js r170 CSM addon (`vendor/three/addons/csm/`, `fade`
+off, `PCFSoftShadowMap`). Every lit material is `prepare`d so it is lit
+by one cascade instead of all four. Terrain, props, ships and buildings
+cast and receive; water receives only. The explorer shadows out to
+`camera.far` (on unless `?shadows=0`). The replay fits the cascades to
+what the camera can see of the map, clamped to `camera.far`, and skips
+the shadow pass while paused with a still camera. First person moves the
+hull to a shadow-only layer so it still shades the ground. The map
+viewer does not import this module, so `?topdown=1` thumbnails stay
+byte-stable. `SHADOW_CASCADES` and `SHADOW_FADE` are the verified
+counts; map size, split mode, bias and the light margin are calibration
+knobs at the top of `shadows.js`. `?shadowdebug=1` warns if a lit
+material was not prepared.
+
 ### Fog model and the camera policy
 
 Fog is a **linear** ramp (`sky.fogmode` 3, `sky.fogbreak` 0.5 on every map
@@ -649,21 +681,24 @@ the clip. Players can only shorten these ranges in-game
 (`GamePrefs.ini` `VisibilityMult`, `MaxVisibility`, `MinFogRange`,
 `MaxFogRange`), never extend them.
 
-| Surface | Lights | Fog |
-|---|---|---|
-| Game Explorer (`js/explorer/world.js`) | engine | exact engine fog + visibility clip, always (the camera is in the world) |
-| 3D replay, chase camera | engine (In-Game Lighting on) | engine fog + clip while the **Fog** setting is on |
-| 3D replay, free / cinema / top-down cameras | engine | none, far plane 8000 m |
-| 3D replay, In-Game Lighting off | studio stack | per camera as above |
-| Map viewer, orbit and embed | engine | none |
-| Map viewer, top-down capture (`?topdown=1`, batch) | studio stack | none (the committed `data/render/topdown/*.png` stay byte-stable) |
+| Surface | Lights | Fog | Shadows |
+|---|---|---|---|
+| Game Explorer (`js/explorer/world.js`) | engine | exact engine fog + visibility clip, always (the camera is in the world) | on, out to `camera.far`, unless `?shadows=0` |
+| 3D replay, chase camera | engine (In-Game Lighting on) | engine fog + clip while the **Fog** setting is on | when **Shadows** is on; range fits the view, capped at the fog far plane |
+| 3D replay, free / cinema / top-down cameras | engine | none, far plane 8000 m | when **Shadows** is on; cascades fit the visible map |
+| 3D replay, In-Game Lighting off | studio stack | per camera as above | the studio sun, same checkbox |
+| Map viewer, orbit and embed | engine | none | none |
+| Map viewer, top-down capture (`?topdown=1`, batch) | studio stack | none (the committed `data/render/topdown/*.png` stay byte-stable) | none |
 
-The replay's quality panel (`js/replay-quality.js`) carries both switches:
+The replay's quality panel (`js/replay-quality.js`) carries three switches:
 **In-Game Lighting** (default on; off restores the pre-atmosphere ambient 0.9
-+ hemisphere 0.85 + directional 2.0 stack via `applyStudioLights()`) and
-**Fog** (default on; chase camera only). Settings saved before these
-switches existed have no `lighting` key and take the new defaults once.
-Changing either reloads the replay, as every quality setting does.
++ hemisphere 0.85 + directional 2.0 stack via `applyStudioLights()`),
+**Fog** (default on; chase camera only) and **Shadows** (default on in the
+High preset, off in Low and Medium). Settings saved before these switches
+existed have no `lighting` key and take the new defaults once; settings
+with no `shadows` key take the matching preset's value (a custom mix takes
+High's, on). Changing any of them reloads the replay, as every quality
+setting does.
 
 ### Calibration against the game
 
@@ -713,7 +748,7 @@ so the sun sits at the authored angle):
 | Object primitives | cylinder / cone / box / sphere | real `.fbx` / `.xsi` meshes (need pak access) |
 | Sky | done: dome, clouds and sprites from the `.SKY` decode (`sky-dome.js`) | `sky.flags` cloud / star toggles, `STAR` starfields |
 | Water | flat plane at `water_y_raw`, hidden by default | per-map "has_visible_water" flag from corpus tagging |
-| Lighting | done: the engine's ambient + sun from `.SKY` (`atmosphere.js`, see below) | cast shadows (the engine runs 4 PCF cascades), local / ground fog volumes |
+| Lighting | done: the engine's ambient + sun from `.SKY` (`atmosphere.js`) and four-cascade sun shadows (`shadows.js`) | local / ground fog volumes |
 | Object labels | none | CSS2DRenderer for hover-tooltips |
 | Maps | just `vsreuronig` (shipped JSON) | directory page + parametric viewer |
 | Axis flips | not handled (Europa Night is flip-free) | honor `x_flipped` / `y_flipped` from `.config.json` |

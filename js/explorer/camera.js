@@ -254,6 +254,22 @@ export function createCameraRig(camera, canvas, world) {
     }
   }
 
+  /** First person hides the hull from the view camera. With shadows on, the
+   * hull stays in the shadow maps so the ship still shades the ground. */
+  let hullState = '';
+  function showHull(ship, firstPerson) {
+    if (!ship || !ship.body) return;
+    const key = ship.body.uuid + (firstPerson ? ':1' : ':0');
+    if (key === hullState) return;
+    hullState = key;
+    if (firstPerson && world.shadows) {
+      world.shadows.setCasterOnly(ship.body, true);
+      return;
+    }
+    if (world.shadows) world.shadows.setCasterOnly(ship.body, false);
+    ship.body.visible = !firstPerson;
+  }
+
   function update(dt, ship) {
     if (!ship) return;
     readViewKeys(dt);
@@ -265,7 +281,7 @@ export function createCameraRig(camera, canvas, world) {
       controls.enabled = true;
       controls.target.lerp(pos, 1 - Math.exp(-3 * dt));
       controls.update();
-      if (ship.body) ship.body.visible = true;
+      showHull(ship, false);
       return;
     }
     controls.enabled = false;
@@ -275,10 +291,12 @@ export function createCameraRig(camera, canvas, world) {
       look.y += Math.tan(pitchRad) * 12;
       camera.position.copy(eye);
       camera.lookAt(look);
-      if (ship.body) ship.body.visible = false;
+      // The hull leaves the view but keeps casting, the way the game draws
+      // your own shadow in first person. Without shadows it is just hidden.
+      showHull(ship, true);
       return;
     }
-    if (ship.body) ship.body.visible = true;
+    showHull(ship, false);
     const back = nose.clone().multiplyScalar(-Math.cos(orbitYaw) * dist)
       .addScaledVector(side, Math.sin(orbitYaw) * dist);
     const desired = pos.clone().add(back);
