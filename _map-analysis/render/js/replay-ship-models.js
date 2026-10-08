@@ -535,6 +535,8 @@ function cloneLegoBody(tpl) {
     const srcMats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const cloned = srcMats.map((mat) => mat.clone());
     obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
+    obj.castShadow = false;
+    obj.receiveShadow = false;
     obj.userData.sharedGeom = true;
   });
   return root;
@@ -894,6 +896,8 @@ export function cloneModelBody(odf, teamColor, opts) {
       return m;
     });
     obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
+    obj.castShadow = false;
+    obj.receiveShadow = false;
     obj.userData.sharedGeom = true;
   });
   if (opts && opts.deployed) poseDeployed(root, tpl.clips);

@@ -56,7 +56,6 @@ export function createUnits(world, catalog) {
     const terminal = chainTerminal(found);
     const ship = new ShipController();
     await ship.load(model, TEAM_HEX[opts.team] || TEAM_HEX[1]);
-    if (world.shadows) world.shadows.prepare(ship.rig);
     world.worldGroup.add(ship.rig);
     const g = world.probe(opts.x, opts.z, 0);
     const role = terminal === 'turret' ? 'turret'

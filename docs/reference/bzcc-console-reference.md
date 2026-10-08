@@ -1240,7 +1240,7 @@ Player preferences as saved to the options file. Names and types only; values ar
 | `options.graphics.mirrors` | variable | int |  | Water reflections on or off. Shell config: bound to a control in escape/bzescape_graphic.cfg. | community knowledge, unverified |
 | `options.graphics.occlusion` | variable | int |  | `occlusion` setting of `options.graphics` (an integer). | inferred from name, unverified |
 | `options.graphics.mirrorparticles` | variable | int |  | Shell config: bound to a control in escape/bzescape_graphic.cfg. | usage context |
-| `options.graphics.shadows` | variable | int |  | Shadow quality (`ShadowOff` / `ShadowLow` / `ShadowMed` / `ShadowHigh`). The lit DX11 shaders (flag `z`, `BZ_WANT_SHADOW`) sample four cascaded maps (t28-t31), pick one by view depth with no blend, and multiply that factor into the sun only. Shell config: bound to a control in escape/bzescape_graphic.cfg. | community knowledge, unverified |
+| `options.graphics.shadows` | variable | int |  | Shadow quality (`ShadowOff` / `Med` / `High`); the DX11 renderer uses four cascaded shadow maps. Shell config: bound to a control in escape/bzescape_graphic.cfg. | community knowledge, unverified |
 | `options.graphics.particles` | variable | int |  | Shell config: bound to a control in escape/bzescape_graphic.cfg. | usage context |
 | `options.graphics.props` | variable | int |  | Shell config: bound to a control in escape/bzescape_graphic.cfg. | usage context |
 | `options.graphics.colors` | variable | int |  | `colors` setting of `options.graphics` (an integer). | inferred from name, unverified |

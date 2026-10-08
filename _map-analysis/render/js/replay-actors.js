@@ -133,13 +133,6 @@ function disposeBody(obj) {
  * Mount a catalog mesh for the actor's current ODF, or the category
  * primitive when the toggle is off or the catalog has no loaded template.
  */
-let prepareShadow = null;
-
-/** Called when a hull is mounted, once the replay's shadow rig exists. */
-export function setActorShadowPrep(fn) {
-  prepareShadow = typeof fn === 'function' ? fn : null;
-}
-
 function mountBody(actor, catKey) {
   const tint = getTeamTint(actor.team);
   const style = SHIP_GLYPH[catKey] || SHIP_GLYPH.generic;
@@ -169,7 +162,6 @@ function mountBody(actor, catKey) {
   actor.glyphCategory = catKey;
   actor.yOffset = yOffset;
   actor._baseEmissiveIntensity = isModel ? 1 : 0.45;
-  if (prepareShadow && next) prepareShadow(next);
 }
 
 /**

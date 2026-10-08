@@ -7,22 +7,22 @@ todos:
     status: completed
   - id: shadows-module
     content: "Write _map-analysis/render/js/shadows.js: createSunShadows, adoptSun virtual-sun sync, chained prepare/prepareMaterial, fitRange/updateFrustums, idle skip, tunables, ?shadowdebug sweep"
-    status: completed
+    status: in_progress
   - id: explorer-wiring
     content: "Explorer: enable shadow map unless ?shadows=0 (main.js), build + sync shadows and prepare terrain/props/liquids (world.js), prepare spawned units (units.js), first-person shadow-only layer (camera.js)"
-    status: completed
+    status: pending
   - id: replay-quality
     content: "replay-quality.js: shadows key, preset defaults (High on), matchPreset, migration, Shadows checkbox + hint, readDraft/applyToForm"
-    status: completed
+    status: pending
   - id: replay-wiring
     content: "replay.js: renderer flag, adopt sun in initLights, prepare floor/tiles/liquids/props/pools, per-frame fitRange+sync, updateFrustums on fog/resize; replay-actors + replay-structures + replay-ship-models body prep and drop castShadow=false"
-    status: completed
+    status: pending
   - id: verify
     content: Browser verification on dev server (on/off luminance parity, shadows present, no acne, first-person self-shadow, debug sweep clean), quality panel preset/migration checks, explorer gate still passes
-    status: completed
+    status: pending
   - id: docs
     content: Update render README (shader findings + model + table), DEVELOPER_GUIDE §12.1/§12.2, project-overview.mdc, AGENTS.md; optional console-reference note
-    status: completed
+    status: pending
 isProject: false
 ---
 

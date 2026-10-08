@@ -12,9 +12,9 @@ export const CACHE_NAME = 'vt-replay-assets-v1';
 export const SLOW_LOAD_HINT_SEC = 15;
 
 export const PRESETS = {
-  low: { models: 'off', ground: 'minimap', motion: 'coarse', shadows: false },
-  medium: { models: 'reduced', ground: 'minimap', motion: 'smooth', shadows: false },
-  high: { models: 'full', ground: 'tiles', motion: 'smooth', shadows: true },
+  low: { models: 'off', ground: 'minimap', motion: 'coarse' },
+  medium: { models: 'reduced', ground: 'minimap', motion: 'smooth' },
+  high: { models: 'full', ground: 'tiles', motion: 'smooth' },
 };
 
 /** One choice applies both faction packs. ISDF Redux stays separate. */
@@ -87,8 +87,6 @@ function blank() {
     // the chase camera. 'studio' is the brighter pre-atmosphere light stack.
     lighting: 'engine',
     fog: true,
-    // Four cascaded sun-shadow maps. High only; the GPU-heavy setting.
-    shadows: true,
     cache: true,
   };
 }
@@ -103,19 +101,10 @@ function storageSet(key, value) {
   catch { /* private mode */ }
 }
 
-function legacyPreset(s) {
-  for (const name of ['low', 'medium', 'high']) {
-    const p = PRESETS[name];
-    if (s.models === p.models && s.ground === p.ground && s.motion === p.motion) return name;
-  }
-  return null;
-}
-
 export function matchPreset(s) {
   for (const name of ['low', 'medium', 'high']) {
     const p = PRESETS[name];
-    if (s.models === p.models && s.ground === p.ground && s.motion === p.motion
-      && !!s.shadows === !!p.shadows) return name;
+    if (s.models === p.models && s.ground === p.ground && s.motion === p.motion) return name;
   }
   return 'custom';
 }
@@ -141,17 +130,6 @@ function normalize(raw) {
   // carry the old `fog: false` default (whole-scene haze); they take the
   // new defaults once. Fog now means the chase camera's engine fog.
   const preAtmosphere = !raw || (raw.lighting !== 'engine' && raw.lighting !== 'studio');
-  // Settings saved before the Shadows checkbox have no key. They take the
-  // matching preset's value (High on, Low and Medium off); a custom mix
-  // takes the High default.
-  const preShadows = !raw || !Object.prototype.hasOwnProperty.call(raw, 'shadows');
-  let shadows = base.shadows;
-  if (preShadows) {
-    const legacy = legacyPreset({ models, ground, motion });
-    shadows = legacy ? PRESETS[legacy].shadows : base.shadows;
-  } else {
-    shadows = raw.shadows !== false;
-  }
   const next = {
     chosen: !!(raw && raw.chosen),
     models,
@@ -160,7 +138,6 @@ function normalize(raw) {
     motion,
     lighting: raw && raw.lighting === 'studio' ? 'studio' : base.lighting,
     fog: preAtmosphere ? base.fog : raw.fog !== false,
-    shadows,
     cache: raw && raw.cache === false ? false : true,
   };
   next.preset = matchPreset(next);
@@ -201,7 +178,6 @@ export function writeSettings(partial) {
     motion: partial && partial.motion != null ? partial.motion : cur.motion,
     lighting: partial && partial.lighting != null ? partial.lighting : cur.lighting,
     fog: partial && partial.fog != null ? !!partial.fog : cur.fog,
-    shadows: partial && partial.shadows != null ? !!partial.shadows : cur.shadows,
     cache: partial && partial.cache != null ? partial.cache : cur.cache,
   });
   storageSet(QUALITY_STORAGE_KEY, JSON.stringify(next));
@@ -373,19 +349,6 @@ export function mountPanel(host) {
     'vt-rq-hint',
     'The map\u2019s distance fog and visibility limit in the chase camera, matching the game. Free, cinema and top-down views always see the whole field.',
   ));
-
-  const shadowLabel = el('label', 'vt-rq-check');
-  const shadowBox = document.createElement('input');
-  shadowBox.type = 'checkbox';
-  shadowBox.dataset.rq = 'shadows';
-  shadowLabel.appendChild(shadowBox);
-  shadowLabel.appendChild(document.createTextNode('Shadows'));
-  root.appendChild(shadowLabel);
-  root.appendChild(el(
-    'p',
-    'vt-rq-hint',
-    'Sun shadows from hills, buildings and units through four cascaded shadow maps, as the game draws them. The most GPU-heavy setting.',
-  ));
   root.appendChild(el(
     'p',
     'vt-rq-hint',
@@ -479,7 +442,6 @@ export function mountPanel(host) {
       models: models.select.value,
       ground: ground.select.value,
       motion: motion.select.value,
-      shadows: shadowBox.checked,
     });
     presetPicker.sync();
     syncTextureDisabled();
@@ -491,7 +453,6 @@ export function mountPanel(host) {
     models.select.value = p.models;
     ground.select.value = p.ground;
     motion.select.value = p.motion;
-    shadowBox.checked = p.shadows === true;
     models.picker.sync();
     ground.picker.sync();
     motion.picker.sync();
@@ -500,7 +461,6 @@ export function mountPanel(host) {
   models.select.addEventListener('change', syncPresetFromRows);
   ground.select.addEventListener('change', syncPresetFromRows);
   motion.select.addEventListener('change', syncPresetFromRows);
-  shadowBox.addEventListener('change', syncPresetFromRows);
 
   cacheBox.addEventListener('change', () => {
     purge.hidden = cacheBox.checked;
@@ -525,7 +485,6 @@ export function mountPanel(host) {
     motion.picker.sync();
     lightBox.checked = settings.lighting !== 'studio';
     fogBox.checked = settings.fog === true;
-    shadowBox.checked = settings.shadows === true;
     cacheBox.checked = settings.cache !== false;
     purge.hidden = true;
     const id = TEXTURE_PACKS.some((p) => p.id === textureId) ? textureId : '';
@@ -552,7 +511,6 @@ export function mountPanel(host) {
       motion: motion.select.value,
       lighting: lightBox.checked ? 'engine' : 'studio',
       fog: fogBox.checked,
-      shadows: shadowBox.checked,
       cache: cacheBox.checked,
       textureSet: texture ? texture.value : '',
     };
