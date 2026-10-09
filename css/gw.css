@@ -404,17 +404,42 @@ html.gw-embed .navbar {
 
 .gw-card-msg {
   grid-area: msg;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
   font-size: 0.74rem;
   color: var(--kb-text-secondary);
+  min-width: 0;
+}
+
+.gw-card-msg-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .gw-card-msg--empty {
   color: var(--kb-text-muted);
   font-style: italic;
+}
+
+.gw-msg-more {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--kb-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.gw-msg-more:hover,
+.gw-msg-more:focus-visible {
+  text-decoration: underline;
 }
 
 /* ---------------------------------------------------------- Band 3: players */
@@ -646,6 +671,22 @@ a.gw-mod:hover i {
   background: color-mix(in oklab, var(--kb-primary) 20%, transparent);
 }
 
+.gw-foot-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.gw-cone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--kb-warning);
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .gw-details {
   flex: 0 0 auto;
   display: inline-flex;
@@ -726,6 +767,14 @@ a.gw-pop-mod:hover {
 .gw-pop-stat-val {
   color: var(--kb-text-primary);
   font-weight: 600;
+}
+
+.gw-pop-msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 16rem;
+  overflow-y: auto;
+  font-size: 0.78rem;
 }
 
 /* ----------------------------------------------------------------- Empty state */

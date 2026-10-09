@@ -10,7 +10,7 @@
  *   1. STATUS BAR  - count pill + state + VSR/mode tags | Join + host Steam
  *   2. INFO        - 72x72 thumbnail + aligned Map/Host/Time/Mode dl + message
  *   3. PLAYERS     - Team1 | Team2 (or flat list), full names, K/D/S in-game
- *   4. FOOTER      - version - primary mod (+N popover) - details popover
+ *   4. FOOTER      - version - primary mod (+N popover) - Full Cone mark - details popover
  *
  * Replaces the modal-derived body the first draft reused, so the shared
  * VTLiveSessionCard modal renderer (index.html + /tools) is left untouched.
@@ -150,6 +150,19 @@
     ];
   }
 
+  // Same normalize as BZ2API.parseNATType: uppercase, underscores -> spaces.
+  // Only Full Cone is marked on the footer; every other NAT type stays blank.
+  function isFullCone(session) {
+    const nat = session && session.nat;
+    if (!nat) return false;
+    const raw = String(nat.id || nat.name || '');
+    return raw.toUpperCase().replace(/_/g, ' ').trim() === 'FULL CONE';
+  }
+
+  function sessionMotd(session) {
+    return session && session.motd ? String(session.motd).trim() : '';
+  }
+
   // ---------------------------------------------------------------- Sub-render: thumbnail
 
   function thumbInnerHtml(session) {
@@ -233,8 +246,24 @@
     return escapeHtml(name);
   }
 
+  function msgMoreBtnHtml(motd) {
+    const content = `<div class="gw-pop-msg">${escapeHtml(motd)}</div>`;
+    return `<button type="button" class="gw-msg-more" hidden data-gw-pop="msg"
+      data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true"
+      data-bs-custom-class="vt-gw-popover" data-bs-title="Game message"
+      data-bs-content="${escapeHtml(content)}">Read more</button>`;
+  }
+
+  function msgInnerHtml(session) {
+    const motd = sessionMotd(session);
+    if (!motd) {
+      return `<span class="gw-card-msg-text">No game message</span>`;
+    }
+    return `<span class="gw-card-msg-text">${escapeHtml(motd)}</span>${msgMoreBtnHtml(motd)}`;
+  }
+
   function infoHtml(session) {
-    const motd = session.motd ? String(session.motd).trim() : '';
+    const motd = sessionMotd(session);
     return `
       <div class="gw-thumb" data-gw-field="thumb">${thumbInnerHtml(session)}</div>
       <dl class="gw-dl">
@@ -243,7 +272,7 @@
         <div class="gw-dl-row"><dt>Time</dt><dd data-gw-field="time">${escapeHtml(formatTimeLine(session))}</dd></div>
         <div class="gw-dl-row"><dt>Mode</dt><dd data-gw-field="mode">${escapeHtml(formatModeLine(session))}</dd></div>
       </dl>
-      <div class="gw-card-msg ${motd ? '' : 'gw-card-msg--empty'}" data-gw-field="msg">${motd ? escapeHtml(motd) : 'No game message'}</div>
+      <div class="gw-card-msg ${motd ? '' : 'gw-card-msg--empty'}" data-gw-field="msg">${msgInnerHtml(session)}</div>
     `;
   }
 
@@ -384,7 +413,10 @@
       `<div class="gw-pop-stat"><span class="gw-pop-stat-label">${escapeHtml(label)}</span><span class="gw-pop-stat-val vt-mono">${escapeHtml(String(val))}</span></div>`
     ).join('');
     const content = `<div class="gw-pop-stats">${rows}</div>`;
-    return `<button type="button" class="gw-details" data-gw-pop="details" aria-label="Session details"
+    const cone = isFullCone(session)
+      ? '<span class="gw-cone" role="img" aria-label="Full Cone" title="Full Cone"><i class="bi bi-cone-striped" aria-hidden="true"></i></span>'
+      : '';
+    return `${cone}<button type="button" class="gw-details" data-gw-pop="details" aria-label="Session details"
       data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true"
       data-bs-custom-class="vt-gw-popover" data-bs-title="Session details"
       data-bs-content="${escapeHtml(content)}"><i class="bi bi-sliders" aria-hidden="true"></i></button>`;
@@ -401,26 +433,90 @@
 
   // ---------------------------------------------------------------- Popover lifecycle
 
+  function disposeTrigger(el) {
+    const B = bs();
+    if (!B || !B.Popover || !el) return;
+    const inst = B.Popover.getInstance(el);
+    if (inst) inst.dispose();
+  }
+
   function initPopovers(scopeEl) {
     const B = bs();
     if (!B || !B.Popover) return;
     const triggers = scopeEl.querySelectorAll('[data-gw-pop]');
     triggers.forEach((el) => {
-      const existing = B.Popover.getInstance(el);
-      if (existing) existing.dispose();
+      disposeTrigger(el);
       // container:'body' escapes the card's overflow:hidden so the popover
       // isn't clipped; sanitize:false because we build + escape the content.
       B.Popover.getOrCreateInstance(el, { sanitize: false, container: 'body' });
     });
   }
 
+  // Hide the Read more control, measure the message at full width, then show
+  // the button only when the line actually overflows. A short message never
+  // gets a control; a resize that makes a long one fit hides it again.
+  function syncMsgOverflow(card) {
+    const msgEl = card && card.querySelector('[data-gw-field="msg"]');
+    if (!msgEl) return;
+    const text = msgEl.querySelector('.gw-card-msg-text');
+    const btn = msgEl.querySelector('[data-gw-pop="msg"]');
+    if (!text || !btn) return;
+    btn.hidden = true;
+    btn.hidden = text.scrollWidth <= text.clientWidth;
+  }
+
+  const msgObservers = new WeakMap();
+
+  function attachMsgObserver(card) {
+    if (!card || msgObservers.has(card) || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => syncMsgOverflow(card));
+    msgObservers.set(card, ro);
+    ro.observe(card);
+    const msgEl = card.querySelector('[data-gw-field="msg"]');
+    if (msgEl) ro.observe(msgEl);
+  }
+
+  function detachMsgObserver(card) {
+    const ro = card && msgObservers.get(card);
+    if (!ro) return;
+    ro.disconnect();
+    msgObservers.delete(card);
+  }
+
+  function applyMsg(msgEl, session) {
+    if (!msgEl) return;
+    const motd = sessionMotd(session);
+    const textEl = msgEl.querySelector('.gw-card-msg-text');
+    const prev = textEl ? textEl.textContent : '';
+    const wantText = motd || 'No game message';
+    const changed = prev !== wantText;
+
+    if (textEl && changed) setText(textEl, wantText);
+    msgEl.classList.toggle('gw-card-msg--empty', !motd);
+
+    let btn = msgEl.querySelector('[data-gw-pop="msg"]');
+    if (!motd) {
+      if (btn) {
+        disposeTrigger(btn);
+        btn.remove();
+      }
+      return;
+    }
+    if (!btn) {
+      msgEl.insertAdjacentHTML('beforeend', msgMoreBtnHtml(motd));
+      initPopovers(msgEl);
+    } else if (changed) {
+      disposeTrigger(btn);
+      const content = `<div class="gw-pop-msg">${escapeHtml(motd)}</div>`;
+      btn.setAttribute('data-bs-content', escapeHtml(content));
+      initPopovers(msgEl);
+    }
+  }
+
   function dispose(cardEl) {
-    const B = bs();
-    if (!B || !B.Popover || !cardEl) return;
-    cardEl.querySelectorAll('[data-gw-pop]').forEach((el) => {
-      const inst = B.Popover.getInstance(el);
-      if (inst) inst.dispose();
-    });
+    detachMsgObserver(cardEl);
+    if (!cardEl) return;
+    cardEl.querySelectorAll('[data-gw-pop]').forEach((el) => disposeTrigger(el));
   }
 
   // ---------------------------------------------------------------- Signatures
@@ -455,6 +551,7 @@
       modSig(session),
       session.motd || '',
       session.tps, session.maxPing,
+      (session.nat && (session.nat.id || session.nat.name)) || '',
       (session.teamNames && session.teamNames.team1) || '',
       (session.teamNames && session.teamNames.team2) || '',
       rosterSig(session),
@@ -492,6 +589,8 @@
 
     stamp(card, session, ofInterest);
     initPopovers(card);
+    attachMsgObserver(card);
+    syncMsgOverflow(card);
     return card;
   }
 
@@ -520,7 +619,10 @@
     if (interestChanged) {
       card.classList.toggle('gw-card--interest', ofInterest);
       const right = card.querySelector('[data-gw-field="bar-right"]');
-      if (right) { dispose(card); right.innerHTML = barRightHtml(session, ofInterest); }
+      if (right) {
+        right.querySelectorAll('[data-gw-pop]').forEach((el) => disposeTrigger(el));
+        right.innerHTML = barRightHtml(session, ofInterest);
+      }
     } else if (joinableChanged) {
       const wrap = card.querySelector('[data-gw-field="join"]');
       if (wrap) {
@@ -555,9 +657,8 @@
     setText(card.querySelector('[data-gw-field="mode"]'), formatModeLine(session));
     const msgEl = card.querySelector('[data-gw-field="msg"]');
     if (msgEl) {
-      const motd = session.motd ? String(session.motd).trim() : '';
-      setText(msgEl, motd || 'No game message');
-      msgEl.classList.toggle('gw-card-msg--empty', !motd);
+      applyMsg(msgEl, session);
+      syncMsgOverflow(card);
     }
 
     // -- Players
