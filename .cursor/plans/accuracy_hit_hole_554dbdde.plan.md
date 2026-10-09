@@ -1,6 +1,6 @@
 ---
 name: Accuracy hit hole
-overview: BulletHit has never recorded shots into non-humans, on every proto version. Voiding the 64 v1 matches would not fix accuracy, and the missing hits cannot be rebuilt from damage.
+overview: BulletHit has never recorded shots into non-humans, on every proto version. VTSR-T's accuracy axis therefore scores extractor hits as misses. Voiding v1 would not fix it, and the missing hits cannot be rebuilt from damage.
 todos: []
 isProject: false
 ---
@@ -52,3 +52,18 @@ The hits were never written. `DamageDealt` cannot stand in for them:
 - Explosions, splash, and self-damage share ordnance names with real rounds.
 
 Reconstructing `shots_hit` from damage would invent a round count. The honest description of the existing column is a **human hit rate**: hits on players divided by every round fired, including rounds that landed on economy units.
+
+## Why the rating is flawed by the same hole
+
+`thug_accuracy` in [scripts/elo.py](scripts/elo.py) is about **16.5%** of the performance index (`0.15 / 0.91`, renormalized over the axes the match actually has). For each gun the player fired:
+
+```
+rate  = (human hits + 0.5 * other recorded hits) / rounds fired on that gun
+score = rate / the lobby's rate on that same gun
+```
+
+Those scores are averaged by how many rounds went to each gun, then z-scored against the lobby and clipped to [-1, +1]. "Other recorded hits" was meant to be non-human hits at half credit (`ALPHA_PVE = 0.5`). In 241 of 244 matches that term is only self-hits. A round into an extractor adds 1 to the denominator and 0 to the numerator, so it is scored as a miss. The damage from that same round is scored again on `pve_share` (~12% of the index): an accuracy penalty and an economy credit for one stretch of fire.
+
+What the axis ranks is who put a larger share of each gun's rounds onto humans, not who hit what they aimed at. A player melting extractors looks less accurate than a player with the same aim who only shoots ships. Weapon normalization only cancels the bias when two players on the same gun split their fire the same way. It does not cancel a difference in target mix.
+
+The clip keeps it from deciding the rating. The axis contribution is multiplied by ~0.165, so a player two standard deviations worse than the lobby on this axis loses about 0.165 from a performance index that otherwise lives near ±0.3. Amino: F9's 16.3% Particle Gun rate was slightly above the lobby's 15.3% (axis +0.14). Certified Bad Guy's 0.6% stream rate beat a lobby stream rate of 0.3% because he had all 14 human stream hits, so his accuracy axis was +0.88 while the table showed 6.5%. Both numbers are human hit rates. Neither knows how many of the other rounds hit an extractor.
