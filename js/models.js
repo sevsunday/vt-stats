@@ -579,6 +579,16 @@ function applyFilters() {
 
 function cmp(a, b) { return String(a || '').localeCompare(String(b || '')); }
 
+/* Stats-line clause for a mesh that enumerate_targets folded several ODFs
+ * onto. Absent when the card is a single ODF. The title lists every name so
+ * a shared hull (the camera pod's four faction files) is visible on hover. */
+function odfStatsClause(m) {
+  const odfs = (m && m.odfs) || [];
+  if (odfs.length < 2) return '';
+  const title = odfs.map((o) => escapeHtml(o)).join('&#10;');
+  return ` &middot; <span title="${title}">${odfs.length} ODFs</span>`;
+}
+
 function renderDirectory() {
   const rows = applyFilters();
   els.count.textContent = `Showing ${rows.length.toLocaleString()} of ${manifest.length.toLocaleString()} models`;
@@ -611,7 +621,7 @@ function renderDirectory() {
         ${hasTeamColorMask(m) ? '<span class="chip chip-colors" title="Supports multiplayer team colors">Team color</span>' : ''}
         ${modTextureSets(m).length ? `<span class="chip chip-skins" title="Has community re-texture mod skins">${modTextureSets(m).length} ${modTextureSets(m).length === 1 ? 'skin' : 'skins'}</span>` : ''}
       </div>
-      <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex</div>
+      <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex${odfStatsClause(m)}</div>
       <div class="card-odf">${escapeHtml(m.primaryOdf || '')}</div>`;
 
     card.appendChild(img);
