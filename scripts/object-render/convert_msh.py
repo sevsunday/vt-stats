@@ -60,7 +60,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "_map-analysis" / "scripts"))
 
 import msh_thumbnail  # noqa: E402
 from msh_parser import hidden_terrain_tris, parse_msh, parse_msh_full  # noqa: E402
-from glb_writer import GlbBuilder, build_animated_glb  # noqa: E402
+from glb_writer import GlbBuilder, build_animated_glb, rest_pose_groups  # noqa: E402
 from dds_decode import decode_dds, UnsupportedDDS  # noqa: E402
 from PIL import Image, ImageChops  # noqa: E402
 
@@ -644,6 +644,56 @@ def _extract_odf_lights(blocks: dict, effect_db: dict) -> list | None:
     return out or None
 
 
+# Engine class labels whose idle pose is the END of the `deploy` clip.
+# DeployOnBuild defaults to -1 ("leave the class default"), and neither Gun
+# Spire nor the Matriarch set it, so the class is what separates them from a
+# Warrior or Sentry (those have a deploy clip too, and start folded).
+# Dropships (i76building) and recycler VEHICLES (recyclervehicle) are absent
+# on purpose: their deploy clip is a bay / kneel, not an unpack-on-create.
+SPAWN_DEPLOY_CLASSES = frozenset({
+    "turret",       # TurretCraft — gun towers behave like buildings
+    "recycler", "factory", "extractor", "supplydepot",
+    "apc",          # guide: starts immobile, already deployed
+})
+
+
+def _spawn_deploy_class(blocks) -> bool:
+    """True when this ODF idles at the end of `deploy`, if that clip exists.
+
+    `DeployOnBuild` 0 forces the folded pose. 1, or `InitAnimation = deploy`,
+    forces the deployed pose. Otherwise the engine class default applies.
+    The mesh still has to carry a clip named deploy; this only reads the ODF.
+    """
+    if not isinstance(blocks, dict):
+        return False
+    go = blocks.get("GameObjectClass") or {}
+    gol = {str(k).lower(): v for k, v in go.items()}
+    dob = str(gol.get("deployonbuild", "")).strip().lower()
+    if dob in ("0", "0.0", "false"):
+        return False
+    if dob in ("1", "1.0", "true"):
+        return True
+    init = str(gol.get("initanimation", "")).strip().lower()
+    if init == "deploy":
+        return True
+    chain = [str(c).strip().lower() for c in (blocks.get("inheritanceChain") or [])]
+    return any(c in SPAWN_DEPLOY_CLASSES for c in chain)
+
+
+def _clip_names(clips) -> list:
+    names = []
+    for c in clips or []:
+        if isinstance(c, str):
+            names.append(c)
+        elif isinstance(c, dict) and c.get("name"):
+            names.append(str(c["name"]))
+    return names
+
+
+def _has_deploy_clip(clips) -> bool:
+    return any(n.lower() == "deploy" for n in _clip_names(clips))
+
+
 def _odf_is_pilot(blocks, category) -> bool:
     """True when a linked ODF is a person-class pilot.
 
@@ -848,6 +898,9 @@ def enumerate_targets(odf_filter=None, prior_primary=None):
             "lights": lights,
             "snipe": snipe,
             "collisionRadiiByOdf": collision or None,
+            # ODF says the idle is the deploy end. The mesh clip check happens
+            # at convert time; the cache uses this plus the prior clip list.
+            "spawnDeployClass": _spawn_deploy_class(primary["blocks"]),
         }
     return out
 
@@ -1609,6 +1662,38 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             normal_keys, specular_keys, aux_names, unresolved)
 
 
+def _pose_thumbnail_prims(groups, msh_dir: Path):
+    """Bind decoded diffuses onto rest-pose triangle groups for the rasterizer.
+    Same material rule as the welded path: a resolved texture forces a white
+    base color, otherwise the .material diffuse RGBA."""
+    prims = []
+    tex_cache: dict = {}
+    for g in groups:
+        rgba, mat_diffuse, *_rest = parse_material(msh_dir, g.get("mat"))
+        diffuse = g.get("tex") or mat_diffuse
+        tex_arr = None
+        tex_key = None
+        if diffuse:
+            res = resolve_diffuse(msh_dir, diffuse, tex_cache)
+            if res:
+                tex_key, tex_arr = res
+        base = (1.0, 1.0, 1.0) if tex_key else tuple(rgba[:3])
+        prims.append({
+            "positions": g["positions"],
+            "normals": g["normals"],
+            "uvs": g["uvs"],
+            "indices": g["indices"],
+            "color": np.asarray(base[:3], np.float32),
+            "tex": tex_arr,
+        })
+    return prims
+
+
+def _rest_deployed_for(job, clip_names) -> bool:
+    """ODF class/override AND a clip actually named deploy."""
+    return bool(job.get("spawnDeployClass")) and _has_deploy_clip(clip_names)
+
+
 def process_model(job: dict) -> dict:
     """Worker entrypoint: parse + convert + texture + render one model. Returns
     a manifest entry (with an 'error' key on failure)."""
@@ -1644,22 +1729,27 @@ def process_model(job: dict) -> dict:
         animated = False
         parts = None
         glb_bytes = b""
+        rest_deployed = False
         if glb_fresh:
             animated = job.get("prior_animated", False)
             clips = job.get("prior_clips", []) or []
             parts = job.get("prior_parts")
             shots = job.get("prior_shots") or []
+            rest_deployed = _rest_deployed_for(job, clips)
         else:
             glb_bytes = gb.to_bytes(node_name=mesh.name or stem)
 
             # Animated models: replace the welded GLB with a node-hierarchy /
             # SkinnedMesh GLB carrying the baked clips. Materials are named by the same
             # texture stems so the viewer's runtime texture assignment is unchanged.
-            # Thumbnails + stats below still come from the welded `prims` (rest pose).
+            # Thumbnails of a spawn-deployed model are redrawn from the baked
+            # node pose below. Everything else still uses the welded `prims`.
             try:
                 full = parse_msh_full(msh_path)
             except Exception:  # noqa: BLE001
                 full = None
+            rest_deployed = bool(full) and _rest_deployed_for(
+                job, [c.get("name") for c in (full.get("clips") or [])])
             # Emit a node-hierarchy GLB (preserving named moveable parts: turret_y /
             # turret_x / recoil* nodes + the tread material) whenever the mesh has
             # baked clips OR is a rigid multi-part model. Welding is kept only for
@@ -1677,7 +1767,8 @@ def process_model(job: dict) -> dict:
                             diffuse = None
                     return _stem(diffuse) if diffuse else None
                 try:
-                    anim_bytes, clips = build_animated_glb(full, _resolve_tex_key)
+                    anim_bytes, clips = build_animated_glb(
+                        full, _resolve_tex_key, rest_deployed=rest_deployed)
                     glb_bytes = anim_bytes
                     animated = bool(clips)
                 except Exception:  # noqa: BLE001 - fall back to the welded GLB
@@ -1685,7 +1776,15 @@ def process_model(job: dict) -> dict:
                         print(f"    [{stem}] node-hierarchy GLB failed; using welded:\n"
                               f"{traceback.format_exc(limit=2)}")
                     clips = []
+                    rest_deployed = False
                 parts = _classify_parts(full, clips, job.get("odf_art"))
+                if rest_deployed:
+                    pose = rest_pose_groups(full, True)
+                    pose_prims = _pose_thumbnail_prims(pose, msh_path.parent) if pose else []
+                    if pose_prims:
+                        prims = pose_prims
+                    else:
+                        rest_deployed = False
 
             _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
 
@@ -1730,6 +1829,7 @@ def process_model(job: dict) -> dict:
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
             "animated": animated,
             "clips": clips,
+            "restDeployed": rest_deployed,
             "parts": parts,
             "drive": job.get("drive"),
             "motion": job.get("motion"),
@@ -1815,6 +1915,8 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
     }
     if p.get("cockpit"):
         out["cockpit"] = p["cockpit"]
+    if "restDeployed" in p:
+        out["restDeployed"] = bool(p["restDeployed"])
     return out
 
 
@@ -2121,8 +2223,19 @@ def main():
     jobs = []
     manifest = []
     cached = 0
+    stale_rest = []
     for stem, meta, mp in resolved:
         fresh = stem in prior and _outputs_fresh(stem, mp, want_gallery)
+        # restDeployed is stamped only after a convert. A class that idles
+        # deployed, whose prior clips include `deploy`, and whose entry lacks
+        # the stamp (or disagrees) is the only cache miss this adds. Missing
+        # counts as false, so a folded Warrior stays cached.
+        if fresh:
+            prev = prior[stem]
+            wants = bool(meta.get("spawnDeployClass")) and _has_deploy_clip(prev.get("clips"))
+            if wants != bool(prev.get("restDeployed")):
+                fresh = False
+                stale_rest.append(stem)
         if not force and fresh and not tex_version_changed:
             manifest.append(_cached_entry(stem, meta, prior))
             cached += 1
@@ -2137,6 +2250,8 @@ def main():
                      "prior_parts": p.get("parts"),
                      **meta})
 
+    if stale_rest:
+        print(f"rest-deploy refresh ({len(stale_rest)}): {', '.join(stale_rest)}")
     print(f"{cached} cached, {len(jobs)} to process "
           f"(jobs={args.jobs}, render={cfg['render']}, gallery={cfg['gallery']})")
 

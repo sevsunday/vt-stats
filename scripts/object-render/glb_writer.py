@@ -344,16 +344,19 @@ def _safe_quat(q):
 
 
 def _bake_deploy_default(clips, default_trs, si_to_node):
-    """Buildings carry a one-shot `deploy` clip (folded -> deployed) plus a `loop`
-    that animates only the moving parts while assuming the structure is already
-    deployed. The loop does NOT reposition the structural joints, so they'd fall
-    back to the folded rest pose. To match in-game (deploy once, then loop while
-    deployed), bake the deploy clip's END pose as the node default for deploy+loop
-    models -- so the rest view + loop both sit at the deployed position, and the
-    deploy clip still plays folded->deployed and clamps back onto the default."""
+    """Write the `deploy` clip's last frame over the node defaults.
+
+    Spawn-unpack units (gun towers, recycler / factory / extractor buildings,
+    the APC) are created already deployed: the clip plays once and the idle
+    pose is its end. A following `loop` only moves the parts that keep
+    animating, so those joints must already be at the deployed pose or the
+    loop snaps the structure shut. The deploy clip itself stays in the file,
+    so playback still runs folded -> deployed and clamps back onto this
+    default. Caller decides whether this model is one of those units; a
+    deploy clip alone (Warrior, Sentry, a dropship) is not enough."""
     names = {c["name"].lower(): c for c in clips}
     deploy = names.get("deploy")
-    if not deploy or "loop" not in names:
+    if not deploy:
         return
     ef = deploy.get("end_frame")
     mf = deploy.get("max_frame")
@@ -612,10 +615,263 @@ def _build_prims_skinned(glb, block, joint_pos, msh_dir, resolve_tex_key, handed
     return prims
 
 
-def build_animated_glb(parsed, resolve_tex_key, fps=30.0):
+def _baked_default_trs(parsed, rest_deployed):
+    """Bind-pose local TRS, with the deploy end baked in when `rest_deployed`."""
+    nodes = parsed["nodes"]
+    default_trs = _node_default_trs(nodes, parsed["block"]["state_mats"])
+    si_to_node = {nd["state_index"]: i for i, nd in enumerate(nodes)}
+    if rest_deployed:
+        _bake_deploy_default(parsed["clips"], default_trs, si_to_node)
+    return default_trs, si_to_node
+
+
+def _trs_to_mat4(t, q, s):
+    """glTF column-vector T * R * S from translation, xyzw quaternion, scale."""
+    x, y, z, w = q
+    n = (x * x + y * y + z * z + w * w) ** 0.5
+    if n < 1e-8:
+        x, y, z, w = 0.0, 0.0, 0.0, 1.0
+    else:
+        x, y, z, w = x / n, y / n, z / n, w / n
+    r = np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ], dtype=np.float64)
+    m = np.eye(4, dtype=np.float64)
+    m[:3, :3] = r * np.asarray(s, dtype=np.float64)
+    m[0, 3], m[1, 3], m[2, 3] = t
+    return m
+
+
+def _normal_matrix(world):
+    a = world[:3, :3]
+    try:
+        return np.linalg.inv(a).T
+    except np.linalg.LinAlgError:
+        return a
+
+
+def _rest_world_matrices(nodes, default_trs, scale, skinned):
+    """World matrix per node from the same TRS the GLB writes, including the
+    header scale on rigid roots (skinned meshes stay unscaled, matching the
+    GLB)."""
+    local = []
+    for i, (t, q, s) in enumerate(default_trs):
+        if scale != 1.0 and not skinned and nodes[i]["parent"] < 0:
+            s = [c * scale for c in s]
+        local.append(_trs_to_mat4(t, q, s))
+    world = [None] * len(nodes)
+
+    def rec(i):
+        if world[i] is None:
+            p = nodes[i]["parent"]
+            world[i] = local[i] if p < 0 else rec(p) @ local[i]
+        return world[i]
+
+    for i in range(len(nodes)):
+        rec(i)
+    return world
+
+
+def _colmajor_to_mat4(vals):
+    m = np.eye(4, dtype=np.float64)
+    for col in range(4):
+        for row in range(4):
+            m[row, col] = vals[col * 4 + row]
+    return m
+
+
+def rest_pose_groups(parsed, rest_deployed):
+    """Thumbnail triangles at the GLB rest pose.
+
+    Rigid nodes: local vertices transformed by the (possibly deploy-baked)
+    node world matrices. Skinned meshes: the block skin posed by those same
+    joint worlds. Returns a list of
+    {positions (N,3), normals (N,3), uvs (N,2), indices, mat, tex}.
+    Empty when the parse has no drawable geometry in this pose.
+    """
+    nodes = parsed["nodes"]
+    if not nodes:
+        return []
+    default_trs, si_to_node = _baked_default_trs(parsed, rest_deployed)
+    scale = parsed.get("scale") or 1.0
+    world = _rest_world_matrices(nodes, default_trs, scale, parsed.get("skinned"))
+    if parsed.get("skinned"):
+        return _skin_rest_groups(parsed, world, si_to_node)
+    groups = []
+    for i, nd in enumerate(nodes):
+        groups.extend(_rigid_rest_groups(nd, world[i]))
+    return groups
+
+
+def _rigid_rest_groups(nd, world):
+    RS_HIDDEN = 0x400
+    RS_COLLIDABLE = 0x100
+    if nd["flags"] & (RS_HIDDEN | RS_COLLIDABLE):
+        return []
+    verts = nd["verts"]
+    if not verts:
+        return []
+    raw_p = np.array([v[0] for v in verts], np.float64)
+    raw_n = np.array([v[1] for v in verts], np.float64)
+    raw_uv = np.array([v[2] for v in verts], np.float64)
+    if MIRROR_Z:
+        raw_p = raw_p.copy()
+        raw_n = raw_n.copy()
+        raw_p[:, 2] *= -1
+        raw_n[:, 2] *= -1
+    homo = np.concatenate([raw_p, np.ones((len(raw_p), 1))], axis=1)
+    wp = (world @ homo.T).T[:, :3]
+    wn = (_normal_matrix(world) @ raw_n.T).T
+    ln = np.linalg.norm(wn, axis=1, keepdims=True)
+    ln[ln == 0] = 1.0
+    wn = wn / ln
+
+    out = []
+    indices_all = nd["indices"]
+    vert_start = 0
+    index_start = 0
+    for vc, ic, mat_name, tex_name in nd["groups"]:
+        grp = indices_all[index_start:index_start + ic]
+        idx = []
+        used = []
+        remap = {}
+        for t in range(0, len(grp) - 2, 3):
+            tri = []
+            ok = True
+            for k in range(3):
+                vi = vert_start + grp[t + k]
+                if vi >= len(wp):
+                    ok = False
+                    break
+                tri.append(vi)
+            if not ok:
+                continue
+            if MIRROR_Z:
+                tri = (tri[0], tri[2], tri[1])
+            mapped = []
+            for vi in tri:
+                wi = remap.get(vi)
+                if wi is None:
+                    wi = len(used)
+                    remap[vi] = wi
+                    used.append(vi)
+                mapped.append(wi)
+            idx.extend(mapped)
+        if used and idx:
+            sel = np.asarray(used, np.int64)
+            out.append({
+                "positions": np.ascontiguousarray(wp[sel]),
+                "normals": np.ascontiguousarray(wn[sel]),
+                "uvs": np.ascontiguousarray(raw_uv[sel]),
+                "indices": idx,
+                "mat": mat_name,
+                "tex": tex_name,
+            })
+        vert_start += vc
+        index_start += ic
+    return out
+
+
+def _skin_rest_groups(parsed, world, si_to_node):
+    """Pose the block skin with the rest joint worlds. Weights come from
+    vert_to_state (state index), the same influences the GLB bakes."""
+    RS_HIDDEN = 0x400
+    RS_COLLIDABLE = 0x100
+    block = parsed["block"]
+    verts = block["verts"]
+    norms = block["norms"]
+    uvs = block["uvs"]
+    faces = block["faces"]
+    buckys = block["buckys"]
+    v2s = block["vert_to_state"]
+    state_mats = block["state_mats"]
+    if len(verts) == 0 or len(faces) == 0:
+        return []
+    skins = {}
+    nrm_mats = {}
+    for si, ni in si_to_node.items():
+        if not (0 <= si < len(state_mats)) or not (0 <= ni < len(world)):
+            continue
+        ibm = _colmajor_to_mat4(_matrix_to_gltf_colmajor(state_mats[si]))
+        skins[si] = world[ni] @ ibm
+        nrm_mats[si] = _normal_matrix(skins[si])
+
+    def _pose(vi, point, normal):
+        infl = v2s[vi] if vi < len(v2s) else []
+        infl = sorted(infl, key=lambda x: -x[0])[:4]
+        tw = sum(w for w, _si in infl) or 1.0
+        acc = np.zeros(3, np.float64)
+        accn = np.zeros(3, np.float64)
+        for w, si in infl:
+            sm = skins.get(si)
+            if sm is None:
+                continue
+            k = w / tw
+            acc += k * (sm @ point)[:3]
+            accn += k * (nrm_mats[si] @ normal)
+        return acc, accn
+
+    by_bucky = {}
+    for fo in faces:
+        by_bucky.setdefault(int(fo.buckyIndex), []).append(fo)
+    out = []
+    for bi, group_faces in sorted(by_bucky.items()):
+        flags = buckys[bi]["flags"] if bi < len(buckys) else 0
+        if flags & (RS_HIDDEN | RS_COLLIDABLE):
+            continue
+        positions, normals_o, uvs_o, idx = [], [], [], []
+        for fo in group_faces:
+            corners = []
+            for k in range(3):
+                vi = int(fo.verts[k])
+                ni = int(fo.norms[k])
+                ui = int(fo.uvs[k])
+                if vi >= len(verts):
+                    corners = None
+                    break
+                p = verts[vi]
+                n = norms[ni] if ni < len(norms) else p
+                uv = uvs[ui] if ui < len(uvs) else None
+                pv = np.array([p.x, p.y, -p.z if MIRROR_Z else p.z, 1.0])
+                nv = np.array([n.x, n.y, -n.z if MIRROR_Z else n.z])
+                sp, sn = _pose(vi, pv, nv)
+                ln = float(np.linalg.norm(sn))
+                if ln:
+                    sn = sn / ln
+                corners.append((sp, sn, (uv.u, uv.v) if uv is not None else (0.0, 0.0)))
+            if not corners:
+                continue
+            if MIRROR_Z:
+                corners = (corners[0], corners[2], corners[1])
+            base = len(positions)
+            for sp, sn, uv in corners:
+                positions.append(sp)
+                normals_o.append(sn)
+                uvs_o.append(uv)
+            idx.extend((base, base + 1, base + 2))
+        if not positions:
+            continue
+        bk = buckys[bi] if bi < len(buckys) else {}
+        out.append({
+            "positions": np.asarray(positions, np.float64),
+            "normals": np.asarray(normals_o, np.float64),
+            "uvs": np.asarray(uvs_o, np.float64),
+            "indices": idx,
+            "mat": bk.get("mat"),
+            "tex": bk.get("tex"),
+        })
+    return out
+
+
+def build_animated_glb(parsed, resolve_tex_key, fps=30.0, rest_deployed=False):
     """Build a node-hierarchy / SkinnedMesh GLB with one animation per clip from a
     parse_msh_full() result. `resolve_tex_key(msh_dir, mat_name, tex_name) -> stem
     | None` names materials by their diffuse stem. Returns (glb_bytes, clip_names).
+
+    `rest_deployed` bakes the deploy clip's last frame as the node default so
+    the unloaded view sits at the in-game idle. The clip is still exported.
 
     RS_HIDDEN = 0x400, RS_COLLIDABLE = 0x100 geometry is skipped (helper/collision).
     """
@@ -628,10 +884,7 @@ def build_animated_glb(parsed, resolve_tex_key, fps=30.0):
     gltf_nodes = []
     meshes = []
 
-    default_trs = _node_default_trs(nodes, parsed["block"]["state_mats"])
-    si_to_node = {nd["state_index"]: i for i, nd in enumerate(nodes)}
-    # Deploy+loop buildings: rest/default = deployed pose (see _bake_deploy_default).
-    _bake_deploy_default(parsed["clips"], default_trs, si_to_node)
+    default_trs, si_to_node = _baked_default_trs(parsed, rest_deployed)
     for i, nd in enumerate(nodes):
         t, q, s = default_trs[i]
         gltf_nodes.append({"name": nd["name"] or f"n{i}",
