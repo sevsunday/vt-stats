@@ -1,8 +1,20 @@
 # VT Stats
 
-A static-site dashboard for Battlezone: Combat Commander match statistics. Processes raw protobuf match data through a Python pipeline and displays interactive charts, leaderboards, and analysis in the browser.
+Static HTML/JS/CSS site hosted via Github pages. Originally built for the VSR Community to display data collected by VTrider's statsgate collector, it now encompasses much more than that: 
+
+- Match analyses, with in-depth stats and a 3D replay system 
+- An ODF browser containing 3100+ ODFs, with inheritance and expansion baked in
+- Game-model renders with tools to visualize textures, team colors, collision radius, snipe points, and more
+- Lego-model renders built by Darkvale
+- Map browser that allows you to see pool and loose placements, and even explore the 3D map environment
+- Weapons Lab that allows you to test weapons with real ships in a virtual firing range
+- A provisional ELO system built on the raw match data collected over time
+- GameWatch system, that shows you all live lobbies 
+- Live-lobby tools such as coin flipper, the infamous "shit wheel", and lobby balance predictor
 
 ## Quick Start
+
+I (Sev) currently handle all new-session uploads. However, should I ever be hit by the proverbial bus, anyone can new sessions. Simply clone the repo then do the steps below locally.
 
 ### 1. Install Python Dependencies
 
@@ -13,19 +25,21 @@ pip install -r requirements.txt
 
 ### 2. Process Match Data
 
-Place gzip-compressed protobuf session files in `data/sessions/<username>/`, organized by submitter:
+Place `.binpb` session files in `data/sessions/<username>/`, organized by submitter:
 
 ```
 data/sessions/
 ├── VTrider/
 │   ├── 2026-04-16-01-27-48.binpb.gz
 │   └── ...
-├── F9bomber/
+├── Nomad/
 │   └── ...
 └── <other submitters>/
 ```
 
-Filenames are timestamps (for uniqueness). Then run:
+Filenames are timestamps (for uniqueness). **DO NOT CHANGE THE NAMES OF THE FILES.**
+
+Then run:
 
 ```bash
 cd scripts
@@ -36,45 +50,6 @@ This reads every `.binpb.gz` file across all user folders, aggregates per-match 
 
 New (proto v3+) matches prompt once in the console for a human **outcome review** (confirm or correct the winner the host selected in-game; answers persist in `data/match_outcome_adjudications.json` and never re-prompt). Pass `--no-prompt` when running unattended — otherwise the pipeline waits on stdin whenever unreviewed matches exist.
 
-### 3. View the Dashboard
-
-From the **project root** (where `index.html` lives), serve locally:
-
-```bash
-python -m http.server 8080
-```
-
-Then visit `http://localhost:8080`.
-
-## Features
-
-- **Match Picker Modal** with per-match and cross-match ("All Matches") views, faceted filtering by duration band / player count / submitter / full roster (with Match-mode and Commander/Thug Role toggles), free-text search across map / submitter / roster / commander, and persisted filter state across the session.
-- **Faction Scoreboard** — Team 1 vs Team 2 with damage dealt/received, PvP/PvE split, accuracy, roster.
-- **Player Leaderboard** — sortable by dealt, received, net, ratio, accuracy, kills, deaths, asset damage, Movemint Profile, weapons.
-- **Player Performance Radar** — 8-axis spiderweb (Damage Dealt, Accuracy, Kills, Survivability composite, Mobility, Weapon Diversity, PvP Share, T-Key Usage) rendered in four modes: single (Overview), compare (Rivalries), team (Combat), career (All Matches with Bayesian shrinkage and a Totals/Per-match scale toggle).
-- **Combat Timeline** — stacked area chart (per-player or per-faction toggle) with click-drag pan and wheel-zoom.
-- **Weapon Meta** — ranked horizontal bar chart of weapon damage + accuracy.
-- **Rivalry Heatmap** — player-on-player damage matrix + Top Rivalries cards with doughnut charts + Kill Rivalry Heatmap.
-- **Hit Distribution by Target** — per-player breakdown of which targets each player hit most, with damage context.
-- **Powerup Economy** — four-way classification of `UnitDestroyed` events separates real vehicle kills from crate/pod pickups, denial destructions (powerups shot before pickup), and deployable mine destructions. Surfaces a Powerup/Crate Destruction Breakdown chart and a Snipe Feed on the Combat tab.
-- **Replay** — animated playback of the damage timeline with transport controls (play/pause/step/scrub + 0.5x-20x speeds), a live running leaderboard, faction tug-of-war, bucket spotlight, momentum indicator, and kill-marker plugin overlay.
-- **Positioning** — top-down movement heatmaps (combined + per-player small multiples with a shared viewport and shared p95 intensity scale + legend), distance-from-spawn line chart with three view modes (Team bands / All players / Focused) and a 5s smoothing toggle, ring histogram of time by distance band, and an animated trail player with sub-second interpolation. Top-down map images are fetched at pipeline time and overlaid as backgrounds.
-- **Movemint Profile** — 0-100 activity score per player, match-self-calibrated against the roster's p95 of `max_dist` and `path_length_per_sec`, with bands from Defensive to Aggressive. Surfaces in the main leaderboard, a dedicated Movemint Leaderboard, the Player Performance Radar, and career aggregates.
-- **T-Key Usage / Target Lock** — captured from `PlayerState.has_target` per tick (tap-to-toggle in BZCC: the boolean reflects whether target mode is active, not key-press state or aim placement), surfaced as the 8th Radar axis. Cross-match comparable (absolute 0-1 ratio).
-- **VTSR-C Commander Ladder (experimental)** — a separate win/loss ELO for commanders built from verified match outcomes, with a team-strength handicap so stacked thug teams don't inflate ratings. The ladder's history also includes ~500 hand-logged community duels from [F9bomber](https://f9bomber.com)'s match ledger (2025 onward; even 3v3/4v4/5v5 lobbies only, deduplicated against recorded matches — a recording always supersedes the ledger — and tagged `community` on every surface). Ladder (with expandable per-commander duel logs) + explainers on the ELO page, top-5 strip on the dashboard's Commanders tab, and a Commander Rivalries panel (top opponent, head-to-head records, nemesis/best-matchup, VTSR-C rating chart, career economy block) on player profiles. Since proto v4, every duel also records a five-axis **economy composite** (pool tempo, production, thug supply, efficiency, upgrades) — recorded but not scored until the validator proves the axes predict outcomes (pre-registered promote rule).
-- **Commander Economy telemetry (proto v4)** — matches recorded with the v4 collector carry per-tick team scrap banks and every producer order (queue / cancel / build). Surfaces: a per-match **Economy tab** (dual-axis scrap + pool chart, full build log with unit names + costs + scrap-status stamps, per-team production cards), four commander highlight cards (**Elon Musk** — scrap generated; **Loose Collector** — loose scrap collected; **Conveyor Belt** — combat-ship value fielded; **First Upgrade** — race to the first live upgraded pool), an Economy Leaders card on the All Matches Commanders tab, and career economy stats on commander profiles. Income is measured flow-complete from full-rate bank deltas and decomposed into pool regen / loose collected / refunds; the outflow ledger reconciles to ≈ 0 unaccounted as an engine-anomaly detector.
-- **Wins-ELO ladder (inert)** — a second per-player ELO updated only on verified match outcomes now runs beside the performance rating (team-mean expected score, symmetric K). The published VTSR-T still blends it at weight 0 — it starts counting only if a pre-registered validation rule ever passes; the real values are already visible in the ELO-page rating tooltips as transparency.
-- **Raw Data Browser** (`raw/`) — isolated standalone page that decodes `.binpb.gz` client-side (vendored protobufjs-light + native `DecompressionStream`) and renders three tiers per match: raw binpb metadata + download, faithful decoded JSON, and processed JSON. Includes virtualized event-stream table, word/regex search over resolved names, proto-schema field tooltips, sentinel damage badge, and a Reconcile view that checks dashboard totals against a recount of the raw events.
-- **3D Models Browser** (`models/`) — standalone three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles, decoded from the game's baked `.msh` + `.dds` by the `scripts/object-render/` pipeline). Searchable/filterable thumbnail directory routing to a single-object viewer: full 360 orbit, dual performance / native-HQ textures, a toggleable sun light with cast shadows + intensity/angle controls, a momentum-based **Free spin** mode, and an HQ multi-angle capture. three.js vendored locally.
-- **LEGO Models Browser** (`lego/`) — standalone three.js viewer for community modeler **Darkvale's** BrickLink Studio LEGO builds, rendered in-browser via `LDrawLoader`. A thumbnail directory (search + faction chips + sort) routes to a single-model viewer with three view modes: **Standard** (fast interactive), **HQ** (high-quality Ultra rendering + a multi-angle capture), and **Photos** (a gallery scaffold for Darkvale's studio renders). Assets are produced by the standalone, incremental `scripts/build_lego.py` from `.io` files; three.js + the LDraw parts library are vendored locally.
-- **Game Explorer** (`explorer/`) — drive a VSR ship on the real 3D map, fire its weapons, and place other ships and buildings. Mouse steers, wheel or right click cycles weapons, arrows orbit the camera, `-` / `=` / M set the volume. Hover craft use the engine's lift, thrust and drag values and show their thrust flames; tracked vehicles, walkers and pilots follow the terrain. Mortars fly where the crosshair points. Placed units take damage, and gun towers aim and shoot back. A build panel spends scrap at a recycler, factory, armory or constructor.
-- **Weapons Lab** (`weapons/`) — pick a weapon, the ship you fire it from and a target (ship, structure or pilot, with its shield and deploy state) and get per-hit damage, DPS, sustained DPS on ammo regen, time to kill, ammo per second, shots per tank and range, all computed in the browser from the ODF database. Combat vs assault variants resolve from the ship's hardpoints, including Scion morph deploys; every number carries its formula in a tooltip and every result a confidence badge. A Damage matrix tab ranks every weapon against all six armor and shield classes. Weapon reticles and hardpoint icons are the game's own HUD art, lifted from a local install by `scripts/build_hud_assets.py`.
-- **Sentinel Damage Filter** — engine-emitted force-kill events (`amount = 2^28`) are dropped at ingest with full per-match telemetry. See [docs/DATA_DICTIONARY.md §7](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
-- **Live Sync URL Sharing** — every state change (match, filter, tab, replay tick) is shareable via query parameters; an opt-in topnav toggle keeps the URL in sync with the current view, and a one-shot Share button copies the link regardless.
-- **Career Roster Minimum** — the All Matches view's career table only surfaces players with 5+ matches in the current scope (picker-filter aware).
-- **Fullscreen Expand** — view any chart, table, or section in a fullscreen modal.
-- **44 Themes** with light/dark mode support.
-
 ## Tech Stack
 
 - **Python** + `protobuf` for data processing
@@ -83,7 +58,7 @@ Then visit `http://localhost:8080`.
 - **Geist Sans + Geist Mono 1.8.0** for typography (vendored — variable woff2)
 - **protobufjs 7.4.0** light build for the Raw Data Browser's client-side decode (vendored)
 - **three.js r170** for the 3D Models Browser (vendored, with OrbitControls / GLTFLoader / DDSLoader addons)
-- **Custom theme system** with 44 themes, light/dark modes, and a glassmorphic effect layer
+- **Bootstrap/tweakcn hybrid theme system** with 44 themes, each with light/dark modes
 
 All dependencies are vendored locally — no CDN usage, fully offline-capable.
 
