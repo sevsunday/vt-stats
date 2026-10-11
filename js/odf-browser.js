@@ -189,6 +189,13 @@ class ODFBrowser {
         this.sidebar = document.getElementById('odfSidebarContent');
         this.content = document.getElementById('odfContentContent');
 
+        const vsrToggle = document.getElementById('vsrOnlyToggle');
+        if (vsrToggle) {
+            vsrToggle.addEventListener('change', () => {
+                this.setVsrOnly(vsrToggle.checked);
+            });
+        }
+
         // Compare modal — injected at runtime to preserve seed parity. The
         // body is rebuilt every displayODFData() call so the heading reflects
         // the current ODF.
@@ -470,6 +477,8 @@ class ODFBrowser {
 
             this.playset = buildVsrPlayset(this.data);
             this.vsrOnly = this.readVsrPref();
+            const vsrToggle = document.getElementById('vsrOnlyToggle');
+            if (vsrToggle) vsrToggle.checked = this.vsrOnly;
             this.renderNavTotal();
             this.initializeSidebar();
             return true;
@@ -482,7 +491,7 @@ class ODFBrowser {
 
     initializeSidebar() {
         const searchHTML = `
-            <div class="mb-2 d-flex gap-2">
+            <div class="mb-2 d-flex align-items-center gap-2">
                 <div class="position-relative flex-grow-1">
                     <input type="text" class="form-control" id="odfSearch"
                            placeholder="Type here to filter..." aria-label="Search ODFs">
@@ -490,18 +499,13 @@ class ODFBrowser {
                         <kbd class="text-secondary">Ctrl</kbd><kbd class="text-secondary">K</kbd>
                     </span>
                 </div>
-                <button class="btn btn-outline-secondary vt-odf-icon-btn" id="clearSearch" type="button"
+                <button class="vt-odf-icon-btn" id="clearSearch" type="button"
                         aria-label="Clear search" title="Clear search">
                     <i class="bi bi-x-lg" aria-hidden="true"></i>
                 </button>
-                <button class="btn btn-outline-secondary vt-odf-icon-btn" id="resetView" type="button"
+                <button class="vt-odf-icon-btn" id="resetView" type="button"
                         aria-label="Reset view" title="Reset view">
                     <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
-                </button>
-                <button class="btn btn-outline-secondary vt-odf-vsr-btn" id="vsrOnlyToggle" type="button"
-                        aria-pressed="${this.vsrOnly ? 'true' : 'false'}"
-                        title="Show ODFs a VSR match can build or mount">
-                    VSR
                 </button>
             </div>
         `;
@@ -555,10 +559,6 @@ class ODFBrowser {
 
         document.getElementById('resetView').addEventListener('click', () => {
             this.resetView();
-        });
-
-        document.getElementById('vsrOnlyToggle').addEventListener('click', () => {
-            this.setVsrOnly(!this.vsrOnly);
         });
 
         this.currentCategory = Object.keys(this.data)[0];
@@ -682,8 +682,8 @@ class ODFBrowser {
 
     setVsrOnly(on) {
         this.vsrOnly = !!on;
-        const button = document.getElementById('vsrOnlyToggle');
-        if (button) button.setAttribute('aria-pressed', this.vsrOnly ? 'true' : 'false');
+        const toggle = document.getElementById('vsrOnlyToggle');
+        if (toggle) toggle.checked = this.vsrOnly;
         try {
             localStorage.setItem('vt.odf.vsrOnly', this.vsrOnly ? '1' : '0');
         } catch (e) {

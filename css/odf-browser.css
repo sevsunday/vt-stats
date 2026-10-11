@@ -241,32 +241,35 @@
     display: none;
 }
 
-/* Search-row controls. Clear and Reset are icon-only so the VSR label fits
- * on the same row as the field. Height matches a default Bootstrap input. */
+/* Clear and Reset are glyphs only. The search row centers them on the field. */
 .vt-odf-icon-btn {
-    --vt-odf-ctrl: 2.375rem;
-    width: var(--vt-odf-ctrl);
-    height: var(--vt-odf-ctrl);
-    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--kb-text-secondary);
+    padding: 0.25rem;
+    line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
 }
 
-.vt-odf-vsr-btn {
-    height: 2.375rem;
-    flex: 0 0 auto;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+.vt-odf-icon-btn:hover,
+.vt-odf-icon-btn:focus,
+.vt-odf-icon-btn:focus-visible {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--kb-text-primary);
 }
 
-#vsrOnlyToggle[aria-pressed="true"],
-#vsrOnlyToggle[aria-pressed="true"]:hover,
-#vsrOnlyToggle[aria-pressed="true"]:focus {
-    background: var(--kb-primary);
-    border-color: var(--kb-primary);
-    color: var(--kb-primary-fg);
+/* "VSR only" switch, sitting to the right of the nav ODF count. */
+.vt-odf-vsr-switch .form-check-label {
+    color: var(--kb-text-secondary);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    white-space: nowrap;
+    user-select: none;
 }
 
 .vt-odf-playset-note {
