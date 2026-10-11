@@ -450,13 +450,23 @@ class ODFBrowser {
     renderNavTotal() {
         const el = document.getElementById('navOdfTotal');
         if (!el || !this.odfIndex) return;
-        const total = this.odfIndex.size;
-        const breakdown = Object.entries(this.data)
-            .map(([cat, items]) => `${cat}: ${Object.keys(items).length.toLocaleString()}`)
+        const rows = Object.entries(this.data).map(([cat, items]) => {
+            const count = this.vsrOnly
+                ? Object.keys(items).filter((filename) => this.playset.has(filename)).length
+                : Object.keys(items).length;
+            return { cat, count };
+        }).filter((row) => !this.vsrOnly || row.count > 0);
+        const total = this.vsrOnly ? this.playset.size : this.odfIndex.size;
+        const breakdown = rows
+            .map((row) => `${row.cat}: ${row.count.toLocaleString()}`)
             .join('<br>');
         el.textContent = `${total.toLocaleString()} ODFs`;
-        el.setAttribute('title', breakdown);
         el.removeAttribute('hidden');
+        if (window.bootstrap?.Tooltip) {
+            bootstrap.Tooltip.getInstance(el)?.dispose();
+            el.removeAttribute('data-bs-original-title');
+        }
+        el.setAttribute('title', breakdown);
         if (window.bootstrap?.Tooltip) {
             bootstrap.Tooltip.getOrCreateInstance(el, { customClass: 'vt-odf-popover' });
         }
@@ -690,6 +700,7 @@ class ODFBrowser {
             // Private mode can reject the write; the URL still carries the choice.
         }
         this.writeVsrUrl();
+        this.renderNavTotal();
         const search = document.getElementById('odfSearch');
         this.handleSearch(search ? search.value : '');
         this.syncPlaysetNote();
