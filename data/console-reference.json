@@ -22480,7 +22480,7 @@
      "blocks": [
       {
        "kind": "para",
-       "text": "Shadow quality (`ShadowOff` / `Med` / `High`); the DX11 renderer uses four cascaded shadow maps."
+       "text": "Shadow quality (`ShadowOff` / `ShadowLow` / `ShadowMed` / `ShadowHigh`). The lit DX11 shaders (flag `z`, `BZ_WANT_SHADOW`) sample four cascaded maps (t28-t31), pick one by view depth with no blend, and multiply that factor into the sun only."
       },
       {
        "kind": "para",
@@ -45050,7 +45050,7 @@
    ],
    "label": "options.graphics.shadows",
    "default": "int",
-   "text": "Shadow quality (`ShadowOff` / `Med` / `High`); the DX11 renderer uses four cascaded shadow maps. Shell config: bound to a control in escape/bzescape_graphic.cfg.",
+   "text": "Shadow quality (`ShadowOff` / `ShadowLow` / `ShadowMed` / `ShadowHigh`). The lit DX11 shaders (flag `z`, `BZ_WANT_SHADOW`) sample four cascaded maps (t28-t31), pick one by view depth with no blend, and multiply that factor into the sun only. Shell config: bound to a control in escape/bzescape_graphic.cfg.",
    "anchor": "console-options-graphics-shadows",
    "section": "console-options"
   },

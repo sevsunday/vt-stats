@@ -621,6 +621,8 @@ The engine's terrain shading is the classic `albedo * material *
   fades out over the last few degrees instead of lighting from
   underground. `SUN_ORBIT_AZIMUTH_DEG` rotates the arc (0 = engine-true);
   Z is negated for scenes whose world group is mirrored (`mirrorZ`).
+- **Sun shadows.** `_map-analysis/render/js/shadows.js` hides that directional light (the sky sprite still follows it) and drives four cascade lights from it, the way the lit DX11 shaders (`*z*` / `BZ_WANT_SHADOW`) do: hard view-depth splits, no blend, four-tap PCF, the factor on the sun only. The explorer shadows out to `camera.far` unless `?shadows=0`. The replay Shadows checkbox is on in High and off in Low and Medium. The map page's 3D view (embed and HUD) fits the cascades to the visible map and has a Shadows checkbox; `?topdown=1` never builds them.
+- **Tile sampler budget.** The floor shader holds five atlases plus one sampler per tile group plus the four cascade maps, and must stay at or under 16 units (`5 + groups + 4 <= 16`). Same-size DDS tiles share a compressed texture array (the bytes are the file's, not a resample). A lone tile stays a `sampler2D`. The corpus uses at most four groups.
 - **Terrain material.** The game-tile floor is multiplied by the `.TRN`
   diffuse (`178 / 255` by default, `240 / 255` on Europa Night). The
   minimap drape and the height ramp are already-shaded fallbacks and keep
@@ -713,7 +715,7 @@ so the sun sits at the authored angle):
 | Object primitives | cylinder / cone / box / sphere | real `.fbx` / `.xsi` meshes (need pak access) |
 | Sky | done: dome, clouds and sprites from the `.SKY` decode (`sky-dome.js`) | `sky.flags` cloud / star toggles, `STAR` starfields |
 | Water | flat plane at `water_y_raw`, hidden by default | per-map "has_visible_water" flag from corpus tagging |
-| Lighting | done: the engine's ambient + sun from `.SKY` (`atmosphere.js`, see below) | cast shadows (the engine runs 4 PCF cascades), local / ground fog volumes |
+| Lighting | done: the engine's ambient + sun from `.SKY` (`atmosphere.js`) and four cascaded sun shadows (`shadows.js`; off for the top-down capture) | local / ground fog volumes |
 | Object labels | none | CSS2DRenderer for hover-tooltips |
 | Maps | just `vsreuronig` (shipped JSON) | directory page + parametric viewer |
 | Axis flips | not handled (Europa Night is flip-free) | honor `x_flipped` / `y_flipped` from `.config.json` |

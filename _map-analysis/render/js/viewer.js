@@ -26,7 +26,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createCameraController } from './replay-cameras.js';
 import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=terrain1';
 import { buildObjectsGroup } from './objects.js?v=terrain1';
-import { buildTileFloorMaterial } from './tile-floor.js?v=terrain1';
+import { buildTileFloorMaterial } from './tile-floor.js?v=tiles2';
+import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-atmo3';
 import {
   resolveAtmosphere,
@@ -73,6 +74,7 @@ const STATE = {
   // the mount time the wall-clock sun arc counts from.
   atmo: null,
   lights: null,
+  shadows: null,
   sun: null,
   sunDir: null,
   mountedAt: 0,
@@ -286,6 +288,7 @@ async function mountMap(stem) {
   } else if (!STATE.embed) {
     setStatus(null);
   }
+  attachViewerShadows();
   if (STATE.topdown) {
     STATE.renderer.render(STATE.scene, STATE.camera);
     window.__vtTopdownReady = stem;
@@ -293,6 +296,10 @@ async function mountMap(stem) {
 }
 
 function disposeMounted() {
+  if (STATE.shadows) {
+    STATE.shadows.dispose();
+    STATE.shadows = null;
+  }
   const root = STATE.scene;
   if (!root) return;
   root.traverse(obj => {
@@ -645,6 +652,7 @@ async function buildTileMaterial(data) {
   if (!built) return null;
   STATE.terrainTileMat = built.material;
   STATE.terrainTileTextures = built.textures;
+  if (STATE.shadows) STATE.shadows.prepareMaterial(built.material);
   return built.material;
 }
 
@@ -727,6 +735,36 @@ function initTopdownCamera(data) {
   cam.updateProjectionMatrix();
   STATE.camera = cam;
   STATE.controls = { update() {} };
+}
+
+function shadowsOptOut() {
+  try { return new URL(location.href).searchParams.get('shadows') === '0'; }
+  catch { return false; }
+}
+
+function attachViewerShadows() {
+  if (!engineLit() || shadowsOptOut()) return;
+  if (!STATE.scene || !STATE.camera || !STATE.renderer || !STATE.lights) return;
+  if (!STATE.shadows) {
+    STATE.shadows = createSunShadows({
+      scene: STATE.scene,
+      camera: STATE.camera,
+      renderer: STATE.renderer,
+      mapBounds: sceneMapBounds(STATE.mapData && STATE.mapData.worldRect, !!STATE.mirrorZ),
+      followFar: false,
+    });
+    if (STATE.lights.sun) STATE.shadows.adoptSun(STATE.lights.sun);
+  }
+  const s = STATE.shadows;
+  if (STATE.terrainMesh) s.prepare(STATE.terrainMesh);
+  if (STATE.terrainRampMat) s.prepareMaterial(STATE.terrainRampMat);
+  if (STATE.terrainMinimapMat) s.prepareMaterial(STATE.terrainMinimapMat);
+  if (STATE.terrainTileMat) s.prepareMaterial(STATE.terrainTileMat);
+  if (STATE.waterMesh) s.prepare(STATE.waterMesh, { cast: false });
+  if (STATE.lavaMesh) s.prepare(STATE.lavaMesh, { cast: false });
+  if (STATE.objectsGroup) s.prepare(STATE.objectsGroup, { cast: false });
+  if (STATE.propsGroup) s.prepare(STATE.propsGroup);
+  s.onCameraChange();
 }
 
 function initCamera(data) {
@@ -869,6 +907,7 @@ function wireEmbedControls() {
     });
   }
   mirrorToggle('embed-objects', 'toggle-objects');
+  mirrorToggle('embed-shadows', 'toggle-shadows');
 
   const reset = document.getElementById('embed-reset');
   if (reset) {
@@ -998,6 +1037,16 @@ function wireHud(data) {
   $('toggle-objects').addEventListener('change', e => {
     if (STATE.objectsGroup) STATE.objectsGroup.visible = e.target.checked;
   });
+  const shadowBox = $('toggle-shadows');
+  if (shadowBox) {
+    if (!STATE.shadows) {
+      shadowBox.checked = false;
+      shadowBox.disabled = true;
+    }
+    shadowBox.addEventListener('change', () => {
+      if (STATE.shadows) STATE.shadows.setEnabled(shadowBox.checked);
+    });
+  }
 
   // Reset camera.
   $('reset-camera').addEventListener('click', () => {
@@ -1118,6 +1167,7 @@ function onWindowResize() {
   STATE.camera.aspect = window.innerWidth / window.innerHeight;
   STATE.camera.updateProjectionMatrix();
   STATE.renderer.setSize(window.innerWidth, window.innerHeight, false);
+  if (STATE.shadows) STATE.shadows.onCameraChange();
 }
 
 // ---------------- Render loop ----------------
@@ -1150,5 +1200,6 @@ function tick(timeMs) {
     if (dir) STATE.sunDir = dir;
   }
   syncSky(STATE.skyRig, STATE.camera, STATE.sunDir || null);
+  if (STATE.shadows) STATE.shadows.sync();
   STATE.renderer.render(STATE.scene, STATE.camera);
 }

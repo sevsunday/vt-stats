@@ -106,11 +106,12 @@ const status = document.getElementById('xp-status');
 
 function say(text) { if (status) status.textContent = text; }
 
-function resize(renderer, rig) {
+function resize(renderer, rig, world) {
   const w = stage.clientWidth || window.innerWidth;
   const h = stage.clientHeight || window.innerHeight;
   renderer.setSize(w, h, false);
   rig.resize(w, h);
+  if (world && world.shadows) world.shadows.onCameraChange();
 }
 
 function typing() {
@@ -206,15 +207,16 @@ async function boot() {
     location.assign(url.href);
   }
 
+  const shadowsOn = params.get('shadows') !== '0';
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = shadowsOn;
 
   say('Loading ' + mapStem + '\u2026');
   let world;
   try {
-    world = await loadWorld(mapStem, renderer, { tiles: true, fog: true });
+    world = await loadWorld(mapStem, renderer, { tiles: true, fog: true, shadows: shadowsOn });
   } catch (err) {
     if (mapChoice.source !== 'pref' || mapStem === SITE_MAP) throw err;
     writePref(PREF_MAP, '');
@@ -224,11 +226,11 @@ async function boot() {
     mapChoice = { value: SITE_MAP, source: 'site' };
     if (mapFinder) mapFinder.setCurrent(SITE_MAP);
     say('Loading ' + SITE_MAP + '\u2026');
-    world = await loadWorld(SITE_MAP, renderer, { tiles: true, fog: true });
+    world = await loadWorld(SITE_MAP, renderer, { tiles: true, fog: true, shadows: shadowsOn });
   }
   rig = createCameraRig(world.camera, canvas, world);
-  resize(renderer, rig);
-  window.addEventListener('resize', () => resize(renderer, rig));
+  resize(renderer, rig, world);
+  window.addEventListener('resize', () => resize(renderer, rig, world));
 
   units = createUnits(world, catalog);
   say('Loading weapons\u2026');
@@ -618,7 +620,18 @@ async function boot() {
 
     if (current) {
       rig.update(dt, current.ship);
-      world.syncSky(world.camera);
+      let moving = rig.locked;
+      if (!moving) {
+        const live = units.living();
+        for (let i = 0; i < live.length; i++) {
+          const body = live[i].body;
+          if ((body && body.speed > 0.04) || (live[i].role === 'turret' && live[i].aimReady)) {
+            moving = true;
+            break;
+          }
+        }
+      }
+      world.syncSky(world.camera, { moved: moving });
     }
     const ground = current ? world.probe(current.body.x, current.body.z, current.body.y).height : 0;
     const aimed = current ? combat.aimedUnit(current) : null;

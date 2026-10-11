@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import {
   ensureOdfs, cloneModelBody, templateClips,
-} from '../../_map-analysis/render/js/replay-ship-models.js?v=lego1';
+} from '../../_map-analysis/render/js/replay-ship-models.js?v=shadows1';
 
 const MODELS = new URL('../../data/models/', import.meta.url);
 const DEG = Math.PI / 180;

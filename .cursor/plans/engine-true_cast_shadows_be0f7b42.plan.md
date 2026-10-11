@@ -4,34 +4,34 @@ overview: Add sun-cast shadows (terrain self-shadowing, props, ships, buildings,
 todos:
   - id: tile-arrays
     content: "tile-floor.js: group DDS tiles by (size, format, mips) into CompressedArrayTexture groups (PNG/odd tiles stay single sampler2D), encode (group, layer) in the InfoMap bytes, sampleTile() via textureGrad, no slot truncation inside the 16-unit budget; verify pixel parity on a 1-group and a 2-group map and the restored tiles on Cracked"
-    status: pending
+    status: completed
   - id: vendor-csm
     content: Restore vendor/three/addons/csm/{CSM,CSMFrustum,CSMShader}.js from acdd4b07 (r170 verbatim + the labelled noon-sun _up fix in CSM.js)
-    status: pending
+    status: completed
   - id: shadows-module
     content: "_map-analysis/render/js/shadows.js from acdd4b07 with: colorWrite/depthWrite caster-only hull (drop SHADOW_ONLY_LAYER), setEnabled(on) runtime toggle, SHADOW_SUN_STEP_RAD idle threshold, prepare() for InstancedMesh/material swaps, ?shadowdebug=1 audit"
-    status: pending
+    status: completed
   - id: explorer-wiring
     content: "Explorer: main.js ?shadows=0 opt-out + resize + moved flag; world.js createSunShadows/adoptSun/prepare terrain+liquids+props and syncSky(camera, {moved}); units.js prepare(ship.rig) after ship.load; camera.js showHull via setCasterOnly"
-    status: pending
+    status: completed
   - id: replay-quality
     content: "js/replay-quality.js: shadows key, presets (High on), matchPreset, migration, Shadows checkbox + hint, readDraft/applyToForm (reapply the acdd4b07 hunk)"
-    status: pending
+    status: completed
   - id: replay-wiring
-    content: "replay.js attachShadows() after initCamera (adopt sun, prepare floor mats/tiles/liquids/props/pools/actors/structures, fitRange+sync per frame, onCameraChange on fog/resize); replay-actors + replay-structures shadow-prep hooks; drop castShadow=false in replay-ship-models"
-    status: pending
+    content: replay.js attachShadows() after initCamera (adopt sun, prepare floor mats/tiles/liquids/props/pools/actors/structures, fitRange+sync per frame, onCameraChange on fog/resize); replay-actors + replay-structures shadow-prep hooks; drop castShadow=false in replay-ship-models
+    status: completed
   - id: viewer-wiring
     content: "viewer.js (map page embed + HUD renderer, never ?topdown=1/batch): createSunShadows after initCamera, prepare terrain/ramp/minimap/tile mats, liquids, objects (receive only), props; sync in tick(); onCameraChange on resize; Shadows checkbox in HUD + embed More menu via setEnabled; ?shadows=0"
-    status: pending
+    status: completed
   - id: cache-bust
     content: "Bump import queries consistently at every importer: tile-floor.js?v=tiles2 (viewer/replay/world), replay-ship-models.js?v=shadows1 (replay, replay-actors, replay-structures, ship-controller), replay-actors/structures.js?v=shadows1, replay-quality.js?v=rqsite2 (index.html, replay.js, replay-ship-models.js), viewer.js/replay.js ?v=shadows1 in their shells, shadows.js?v=shadows1"
-    status: pending
+    status: completed
   - id: verify
     content: "Dev server + IDE browser: Cracked/Oasis/Terron/Auslt and Vortex/Plaza/Ebola in explorer, replay (on/off) and map embed; zero link errors, zero 'tile slot(s) truncated' warnings, ?shadowdebug=1 clean; lit-patch luminance parity on vs off; topdown canvas hash unchanged on a <=9-slot map; first-person self-shadow; quality presets/migration; node _investigation/check_explorer_physics.mjs"
-    status: pending
+    status: completed
   - id: docs
     content: Render README (shader findings, tile sampler budget, shadows model, surface table), DEVELOPER_GUIDE 12.1/12.2 (+ map viewer), project-overview.mdc, AGENTS.md, console-reference note (reapply acdd4b07 doc hunks, extended for the viewer + texture arrays)
-    status: pending
+    status: completed
 isProject: false
 ---
 

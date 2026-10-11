@@ -26,7 +26,7 @@ import {
   ENHANCED_SET_ID,
   ENHANCED_PACK_IDS,
   LEGO_SET_ID,
-} from '../../../js/replay-quality.js?v=rqsite1';
+} from '../../../js/replay-quality.js?v=rqsite2';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
 export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
@@ -535,8 +535,6 @@ function cloneLegoBody(tpl) {
     const srcMats = Array.isArray(obj.material) ? obj.material : [obj.material];
     const cloned = srcMats.map((mat) => mat.clone());
     obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
-    obj.castShadow = false;
-    obj.receiveShadow = false;
     obj.userData.sharedGeom = true;
   });
   return root;
@@ -896,8 +894,6 @@ export function cloneModelBody(odf, teamColor, opts) {
       return m;
     });
     obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
-    obj.castShadow = false;
-    obj.receiveShadow = false;
     obj.userData.sharedGeom = true;
   });
   if (opts && opts.deployed) poseDeployed(root, tpl.clips);

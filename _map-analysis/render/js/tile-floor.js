@@ -69,55 +69,145 @@ async function loadTileFromManifestEntry(entry) {
   });
 }
 
-function makeWhiteFallbackTile() {
-  const tex = new THREE.DataTexture(
-    new Uint8Array([255, 255, 255, 255]), 1, 1,
-    THREE.RGBAFormat, THREE.UnsignedByteType,
-  );
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
+const MISSING_CODE = 0xFF;
 
-function buildInfoMapTexture(b64, cols, rows, maxTiles) {
+// Five atlases (color, three blend maps, info) plus four cascade shadow
+// maps plus one spare. Groups past this are the only reason a slot is
+// dropped; the corpus tops out at 4 groups, under the 6-group cap on a
+// 16-unit GPU.
+const ATLAS_SAMPLERS = 5;
+const CASCADE_SAMPLERS = 4;
+const SPARE_SAMPLER = 1;
+
+function readInfoNibbles(b64, cols, rows) {
   const bin = atob(b64);
   const raw = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-
+  const nibbles = new Uint8Array(cols * rows * 4);
   const counts = new Uint32Array(16);
   for (let i = 0; i < cols * rows; i++) {
     const b0 = raw[i * 4];
     const b1 = raw[i * 4 + 1];
-    counts[ b0       & 0x0F]++;
-    counts[(b0 >> 4) & 0x0F]++;
-    counts[ b1       & 0x0F]++;
-    counts[(b1 >> 4) & 0x0F]++;
+    const n0 = b0 & 0x0F;
+    const n1 = (b0 >> 4) & 0x0F;
+    const n2 = b1 & 0x0F;
+    const n3 = (b1 >> 4) & 0x0F;
+    nibbles[i * 4] = n0;
+    nibbles[i * 4 + 1] = n1;
+    nibbles[i * 4 + 2] = n2;
+    nibbles[i * 4 + 3] = n3;
+    counts[n0]++;
+    counts[n1]++;
+    counts[n2]++;
+    counts[n3]++;
   }
+  return { nibbles, counts };
+}
 
-  const allSlots = [];
-  for (let i = 0; i < 16; i++) if (counts[i] > 0) allSlots.push(i);
-  allSlots.sort((a, b) => counts[b] - counts[a]);
-  const keep = allSlots.slice(0, maxTiles);
-  const dropped = allSlots.slice(maxTiles);
-  keep.sort((a, b) => a - b);
+function compressedKey(tex) {
+  if (!tex || !tex.isCompressedTexture || !tex.mipmaps || !tex.mipmaps.length) return null;
+  if (!tex.image || !tex.mipmaps.every(m => m && m.data)) return null;
+  return [
+    tex.image.width, tex.image.height, tex.format, tex.type, tex.mipmaps.length,
+  ].join(':');
+}
 
-  let fallbackOrigSlot = keep[0];
-  let maxCount = -1;
-  for (const s of keep) if (counts[s] > maxCount) { maxCount = counts[s]; fallbackOrigSlot = s; }
+function mipBytesMatch(a, b) {
+  if (a.mipmaps.length !== b.mipmaps.length) return false;
+  for (let i = 0; i < a.mipmaps.length; i++) {
+    if (a.mipmaps[i].data.byteLength !== b.mipmaps[i].data.byteLength) return false;
+  }
+  return true;
+}
 
-  const remap = new Array(16).fill(0);
-  keep.forEach((orig, compact) => { remap[orig] = compact; });
-  const fallbackCompact = remap[fallbackOrigSlot];
-  for (const s of dropped) remap[s] = fallbackCompact;
+function stackCompressed(textures, anisotropy) {
+  const src0 = textures[0];
+  const mipmaps = src0.mipmaps.map((mip, level) => {
+    let total = 0;
+    for (const tex of textures) total += tex.mipmaps[level].data.byteLength;
+    const data = new Uint8Array(total);
+    let off = 0;
+    for (const tex of textures) {
+      const part = tex.mipmaps[level].data;
+      data.set(part, off);
+      off += part.byteLength;
+    }
+    return { data, width: mip.width, height: mip.height };
+  });
+  const arrayTex = new THREE.CompressedArrayTexture(
+    mipmaps, src0.image.width, src0.image.height, textures.length,
+    src0.format, src0.type,
+  );
+  arrayTex.colorSpace = THREE.SRGBColorSpace;
+  arrayTex.wrapS = THREE.RepeatWrapping;
+  arrayTex.wrapT = THREE.RepeatWrapping;
+  arrayTex.wrapR = THREE.ClampToEdgeWrapping;
+  arrayTex.magFilter = THREE.LinearFilter;
+  arrayTex.minFilter = THREE.LinearMipmapLinearFilter;
+  arrayTex.generateMipmaps = false;
+  arrayTex.anisotropy = anisotropy;
+  arrayTex.needsUpdate = true;
+  return arrayTex;
+}
 
+// Membership only. Two or more DDS tiles that share size, format and mip
+// layout are one array group. A single tile, a PNG, or a layer whose mip
+// sizes disagree is its own sampler2D group.
+function planGroups(entries) {
+  const buckets = new Map();
+  const singles = [];
+  for (const entry of entries) {
+    const key = compressedKey(entry.tex);
+    if (!key) {
+      singles.push(entry);
+      continue;
+    }
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+    }
+    bucket.push(entry);
+  }
+  const arrays = [];
+  for (const members of buckets.values()) {
+    const head = members[0];
+    const ok = [];
+    for (const member of members) {
+      if (mipBytesMatch(head.tex, member.tex)) ok.push(member);
+      else singles.push(member);
+    }
+    if (ok.length >= 2) arrays.push(ok);
+    else ok.forEach(member => singles.push(member));
+  }
+  arrays.sort((a, b) => compressedKey(a[0].tex).localeCompare(compressedKey(b[0].tex)));
+  singles.sort((a, b) => a.slot - b.slot);
+  return { arrays, singles, count: arrays.length + singles.length };
+}
+
+function realizeGroups(plan, anisotropy) {
+  const groups = [];
+  const codeOf = new Map();
+  for (const members of plan.arrays) {
+    const group = groups.length;
+    const tex = stackCompressed(members.map(member => member.tex), anisotropy);
+    groups.push({ kind: 'array', tex, depth: members.length });
+    members.forEach((member, layer) => codeOf.set(member.slot, (group << 4) | layer));
+  }
+  for (const member of plan.singles) {
+    const group = groups.length;
+    member.tex.anisotropy = anisotropy;
+    groups.push({ kind: 'sampler', tex: member.tex });
+    codeOf.set(member.slot, (group << 4) | 0);
+  }
+  return { groups, codeOf };
+}
+
+function buildInfoMapTexture(nibbles, cols, rows, codeOf, fallbackCode) {
   const out = new Uint8Array(cols * rows * 4);
-  for (let i = 0; i < cols * rows; i++) {
-    const b0 = raw[i * 4];
-    const b1 = raw[i * 4 + 1];
-    out[i * 4]     = remap[ b0       & 0x0F];
-    out[i * 4 + 1] = remap[(b0 >> 4) & 0x0F];
-    out[i * 4 + 2] = remap[ b1       & 0x0F];
-    out[i * 4 + 3] = remap[(b1 >> 4) & 0x0F];
+  for (let i = 0; i < nibbles.length; i++) {
+    const code = codeOf.has(nibbles[i]) ? codeOf.get(nibbles[i]) : fallbackCode;
+    out[i] = code;
   }
   const tex = new THREE.DataTexture(
     out, cols, rows, THREE.RGBAFormat, THREE.UnsignedByteType,
@@ -129,13 +219,16 @@ function buildInfoMapTexture(b64, cols, rows, maxTiles) {
   tex.flipY = false;
   tex.colorSpace = THREE.NoColorSpace;
   tex.needsUpdate = true;
-  return { infoTex: tex, usedSlots: keep, droppedSlots: dropped };
+  return tex;
 }
 
 /**
  * Build the 4-layer game-tile material for one map.
  * Returns `{ material, textures }` or null when the map has no composite.
  * Callers cache the result; this function does not.
+ *
+ * Each same-size DDS family is one compressed texture array. The InfoMap
+ * stores `(group << 4) | layer`. A missing tile is 255 and samples white.
  */
 export async function buildTileFloorMaterial(renderer, data) {
   if (!renderer || !data || !data.tileComposite) return null;
@@ -151,41 +244,67 @@ export async function buildTileFloorMaterial(renderer, data) {
 
   const gl = renderer.getContext();
   const maxUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
-  const FIXED_SAMPLERS = 7;
-  const maxTilesAllowed = Math.max(2, maxUnits - FIXED_SAMPLERS);
-
-  const { infoTex, usedSlots, droppedSlots } = buildInfoMapTexture(
+  const maxGroups = Math.max(1, maxUnits - ATLAS_SAMPLERS - CASCADE_SAMPLERS - SPARE_SAMPLER);
+  const { nibbles, counts } = readInfoNibbles(
     tc.info_map_b64, tc.info_cluster_cols, tc.info_cluster_rows,
-    maxTilesAllowed,
   );
-  if (droppedSlots.length > 0) {
+  const usedSlots = [];
+  for (let slot = 0; slot < 16; slot++) if (counts[slot] > 0) usedSlots.push(slot);
+
+  const loaded = await Promise.all(usedSlots.map(async (slot) => {
+    const tileName = tc.tile_texture_names ? tc.tile_texture_names[slot] : null;
+    if (!tileName) return { slot, tex: null };
+    const entry = tilesManifest.byName[tileName];
+    if (!entry || entry.format === 'missing') return { slot, tex: null };
+    try {
+      return { slot, tex: await loadTileFromManifestEntry(entry) };
+    } catch {
+      return { slot, tex: null };
+    }
+  }));
+
+  const anisotropy = renderer.capabilities.getMaxAnisotropy();
+  let active = loaded.filter(entry => entry.tex);
+  const dropped = [];
+  let plan = planGroups(active);
+  while (plan.count > maxGroups && active.length > 1) {
+    let victim = active[0];
+    for (const entry of active) {
+      if (counts[entry.slot] < counts[victim.slot]) victim = entry;
+    }
+    dropped.push(victim.slot);
+    active = active.filter(entry => entry !== victim);
+    plan = planGroups(active);
+  }
+  const grouped = realizeGroups(plan, anisotropy);
+  if (dropped.length > 0) {
     console.warn(
-      `tier 3: ${droppedSlots.length} tile slot(s) truncated to fit `
-      + `${maxTilesAllowed}-sampler budget on this GPU `
+      `tier 3: ${dropped.length} tile slot(s) truncated to fit `
+      + `${maxGroups}-group budget on this GPU `
       + `(MAX_TEXTURE_IMAGE_UNITS=${maxUnits}). dropped slots:`,
-      droppedSlots
+      dropped
     );
   }
 
-  const tilePromises = usedSlots.map(slot => {
-    const tileName = tc.tile_texture_names ? tc.tile_texture_names[slot] : null;
-    if (!tileName) return Promise.resolve(makeWhiteFallbackTile());
-    const entry = tilesManifest.byName[tileName];
-    if (!entry || entry.format === 'missing') {
-      return Promise.resolve(makeWhiteFallbackTile());
+  let fallbackCode = MISSING_CODE;
+  let bestCount = -1;
+  for (const entry of active) {
+    if (counts[entry.slot] > bestCount) {
+      bestCount = counts[entry.slot];
+      fallbackCode = grouped.codeOf.get(entry.slot);
     }
-    return loadTileFromManifestEntry(entry).catch(() => makeWhiteFallbackTile());
-  });
-  const tiles = await Promise.all(tilePromises);
-  const numTiles = tiles.length;
+  }
+  const codeOf = new Map(grouped.codeOf);
+  for (const slot of dropped) codeOf.set(slot, fallbackCode);
 
-  const maxAniso = renderer.capabilities.getMaxAnisotropy();
-  for (const t of tiles) t.anisotropy = maxAniso;
+  const infoTex = buildInfoMapTexture(
+    nibbles, tc.info_cluster_cols, tc.info_cluster_rows, codeOf, MISSING_CODE,
+  );
 
-  // One texel per 2 m .TER vertex (InfoMap: per 16-vertex cluster). The
-  // extract's world_min / world_max frame centres each texel on its vertex.
   const frameMin = new THREE.Vector2(tc.world_min.x, tc.world_min.z);
-  const frameSize = new THREE.Vector2(tc.world_max.x - tc.world_min.x, tc.world_max.z - tc.world_min.z);
+  const frameSize = new THREE.Vector2(
+    tc.world_max.x - tc.world_min.x, tc.world_max.z - tc.world_min.z,
+  );
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: color,
@@ -203,21 +322,31 @@ export async function buildTileFloorMaterial(renderer, data) {
     uTexelFrameMin:       { value: frameMin },
     uTexelFrameSize:      { value: frameSize },
   };
-  for (let i = 0; i < numTiles; i++) {
-    tileUniforms[`uTile${i}`] = { value: tiles[i] };
-  }
-  mat.userData.tileUniforms = tileUniforms;
 
-  let tileDecls = '';
-  let tileSwitch = '';
-  for (let i = 0; i < numTiles; i++) {
-    tileDecls += `        uniform sampler2D uTile${i};\n`;
-    tileSwitch += `          if (idx == ${i}) return texture2D(uTile${i}, uv).rgb;\n`;
-  }
+  let decls = '';
+  let branches = '';
+  const sig = [];
+  grouped.groups.forEach((group, index) => {
+    const kw = index === 0 ? 'if' : 'else if';
+    if (group.kind === 'array') {
+      const name = `uTiles${index}`;
+      tileUniforms[name] = { value: group.tex };
+      decls += `        uniform sampler2DArray ${name};\n`;
+      branches += `          ${kw} (g == ${index}) c = textureGrad(${name}, vec3(uv, layer), ddx, ddy).rgb;\n`;
+      sig.push(`a${group.depth}`);
+    } else {
+      const name = `uTile${index}`;
+      tileUniforms[name] = { value: group.tex };
+      decls += `        uniform sampler2D ${name};\n`;
+      branches += `          ${kw} (g == ${index}) c = textureGrad(${name}, uv, ddx, ddy).rgb;\n`;
+      sig.push('s');
+    }
+  });
+  mat.userData.tileUniforms = tileUniforms;
+  mat.userData.vtTileGroups = sig.join('_') || 'none';
 
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, mat.userData.tileUniforms);
-
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `
         #include <common>
@@ -227,7 +356,6 @@ export async function buildTileFloorMaterial(renderer, data) {
         #include <worldpos_vertex>
         vTileLocalPos = transformed;
       `);
-
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `
         #include <common>
@@ -237,18 +365,24 @@ export async function buildTileFloorMaterial(renderer, data) {
         uniform sampler2D uAlpha2;
         uniform sampler2D uAlpha3;
         uniform sampler2D uInfoMap;
-${tileDecls}        uniform float uTileMetersPerRepeat;
+${decls}        uniform float uTileMetersPerRepeat;
         uniform float uColorTintStrength;
         uniform vec2 uTexelFrameMin;
         uniform vec2 uTexelFrameSize;
 
-        vec3 sampleTileByIdx(int idx, vec2 uv) {
-${tileSwitch}          return vec3(1.0);
+        vec3 sampleTile(int code, vec2 uv, vec2 ddx, vec2 ddy) {
+          vec3 c = vec3(1.0);
+          int g = code >> 4;
+          float layer = float(code & 15);
+          if (code == 255) return c;
+${branches}          return c;
         }
       `)
       .replace('#include <map_fragment>', `
         vec2 hmUv = (vTileLocalPos.xz - uTexelFrameMin) / uTexelFrameSize;
         vec2 tileUv = vTileLocalPos.xz / uTileMetersPerRepeat;
+        vec2 tileDdx = dFdx(tileUv);
+        vec2 tileDdy = dFdy(tileUv);
 
         vec4 info = texture2D(uInfoMap, hmUv) * 255.0;
         int l0 = int(info.r + 0.5);
@@ -256,10 +390,10 @@ ${tileSwitch}          return vec3(1.0);
         int l2 = int(info.b + 0.5);
         int l3 = int(info.a + 0.5);
 
-        vec3 t0 = sampleTileByIdx(l0, tileUv);
-        vec3 t1 = sampleTileByIdx(l1, tileUv);
-        vec3 t2 = sampleTileByIdx(l2, tileUv);
-        vec3 t3 = sampleTileByIdx(l3, tileUv);
+        vec3 t0 = sampleTile(l0, tileUv, tileDdx, tileDdy);
+        vec3 t1 = sampleTile(l1, tileUv, tileDdx, tileDdy);
+        vec3 t2 = sampleTile(l2, tileUv, tileDdx, tileDdy);
+        vec3 t3 = sampleTile(l3, tileUv, tileDdx, tileDdy);
 
         float a1 = texture2D(uAlpha1, hmUv).r;
         float a2 = texture2D(uAlpha2, hmUv).r;
@@ -276,10 +410,13 @@ ${tileSwitch}          return vec3(1.0);
         diffuseColor.rgb = tileComposite;
       `);
   };
-  mat.customProgramCacheKey = () => `vt_tile_composite_n${numTiles}`;
+  mat.customProgramCacheKey = () => `vt_tile_${sig.join('_') || 'none'}`;
 
   return {
     material: mat,
-    textures: { color, alpha1, alpha2, alpha3, info: infoTex, tiles },
+    textures: {
+      color, alpha1, alpha2, alpha3, info: infoTex,
+      tiles: grouped.groups.map(group => group.tex),
+    },
   };
 }

@@ -26,6 +26,8 @@ Three load-bearing conventions, restated so they are hard to miss:
 2. **The Python pipeline owns aggregation** (`scripts/process_stats.py` → `data/processed/*.json`). The single documented exception is `js/all-matches-aggregator.js`, which sums `match_contributions.json` so the match picker can scope the All Matches view.
 3. **Schema version discipline**: `scripts/statsgate.proto` is the source of truth for the current raw schema (older schemas stay frozen for backward decode). Bump `PIPELINE_VERSION` when pipeline output semantics change, `match.schema_version` when the per-match JSON contract changes, and `ELO_SCHEMA_VERSION` when rating semantics change. They are orthogonal — see `schema-migration.mdc`.
 
+Sun shadows for the explorer, the 3D replay and the map page live in `_map-analysis/render/js/shadows.js` (four cascades, sun term only). Same-size DDS tiles share a compressed texture array; any new sampler on the floor shader must fit `5 + groups + 4 <= 16`.
+
 ## Deep Reference
 
 | Path | What it is |
