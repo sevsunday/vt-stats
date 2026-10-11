@@ -6352,7 +6352,7 @@
 
     // Winner highlight: also match-global passthrough. Adds a gold accent
     // class to the winning team's panel for clean / contested outcomes.
-    // Unclear outcomes get no highlight (the kill-feed badge already
+    // Unclear outcomes get no highlight (the Outcome header badge
     // surfaces the ambiguity).
     const matchWinner = (currentData && currentData.match && currentData.match.winner) || null;
     const matchVoid = !!(currentData && currentData.match && currentData.match.void);
@@ -6424,10 +6424,9 @@
     // Outcome pill in the card header. We deliberately
     // only surface the "unclear" variant here -- clean_win / contested
     // outcomes are already conveyed by the winning team's panel trophy
-    // icon above (and the dedicated kill-feed badge on the Combat tab).
-    // Showing all three would be redundant. The unclear pill carries the
-    // Bootstrap tooltip explaining why the outcome couldn't be inferred,
-    // mirroring the kill-feed unclear badge.
+    // icon above. Showing all three would be redundant. The unclear
+    // pill carries the Bootstrap tooltip explaining why the outcome
+    // couldn't be inferred.
     const factionOutcomeBadge = document.getElementById('faction-outcome-badge');
     if (factionOutcomeBadge) {
       // Show the outcome badge on the faction section whenever there's
@@ -7042,9 +7041,9 @@
   }
 
   // --- Kill Feed ---
-  // Updates the #kill-feed-winner-badge slot from a `match.winner` block.
-  // Sets the `data-decided-by` attribute (drives CSS color), the inner
-  // HTML (label + icon), and Bootstrap tooltip metadata for contested /
+  // Fills a winner-badge slot from a `match.winner` block. Sets the
+  // `data-decided-by` attribute (drives CSS color), the inner HTML
+  // (label + icon), and Bootstrap tooltip metadata for contested /
   // unclear outcomes. Empty for pre-v3 matches; the slot's :empty CSS
   // collapses it cleanly. Caller is responsible for invoking
   // `ensureTooltips()` afterwards so any new tooltip wires up.
@@ -7197,19 +7196,6 @@
 
   function renderKillFeed(kills, tickRate, minTick) {
     const container = document.getElementById('kill-feed-content');
-    // Winner badge in the card header. Reads passthrough fields from
-    // currentData.match.{winner, team_factions} -- match-global, never
-    // narrowed by the player filter.
-    const headerBadge = document.getElementById('kill-feed-winner-badge');
-    if (headerBadge) {
-      const winnerForBadge = (currentData && currentData.match && currentData.match.void)
-        ? { decided_by: 'void' }
-        : (currentData && currentData.match && currentData.match.winner);
-      const factionsForBadge = currentData && currentData.match && currentData.match.team_factions;
-      applyWinnerBadge(headerBadge, winnerForBadge, factionsForBadge);
-      // Initialize Bootstrap tooltips on the contested / unclear variants.
-      ensureTooltips(document.getElementById('section-kill-feed'));
-    }
     if (!kills || !kills.feed || kills.feed.length === 0) {
       container.innerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
       return;
@@ -7240,7 +7226,7 @@
     // Filter-safe: read from currentData.match.winner.decided_at_tick
     // (passthrough) rather than scanning the (possibly-narrowed) feed for
     // recycler/factory destructions. Only emitted for decisive outcomes;
-    // "unclear" matches get no marker (the header badge tells the story).
+    // unclear matches get no marker.
     const winner = currentData && currentData.match && currentData.match.winner;
     const factions = currentData && currentData.match && currentData.match.team_factions;
     const milestoneTick = (winner && (winner.decided_by === 'adjudicated' || winner.decided_by === 'attested' || winner.decided_by === 'clean_win' || winner.decided_by === 'contested') && typeof winner.decided_at_tick === 'number')
