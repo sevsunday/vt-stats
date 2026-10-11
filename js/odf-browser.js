@@ -71,6 +71,93 @@ function debounce(func, wait) {
     };
 }
 
+// ODFs a VSR match can build or mount. Seeds are the three faction recyclers
+// plus the on-foot pilots the recycler graph never names (VSR still uses the
+// stock person files). A reference is followed only when its field is one the
+// engine treats as an ODF name AND that stem exists in the database.
+// inheritanceChain is not followed: gchainvsr_a parents gchain_a, and pulling
+// the parent back in would undo the filter. weaponConfig and the Explosion
+// class* fanout are stock-wide lists, not what VSR mounts.
+const VSR_PLAYSET_ROOTS = ['ibrecy_vsr', 'ebrecym_vsr', 'fbrecy_vsr'];
+const VSR_PLAYSET_PILOTS = ['isuser', 'isuser_m', 'esuser', 'esuser_m', 'fsuser', 'fsuser_m'];
+const VSR_PLAYSET_FIELDS = new Set([
+    'upgradename', 'weaponname', 'altname', 'ordname',
+    'xplground', 'xplvehicle', 'xplbuilding', 'xplblast', 'xplexpire',
+    'xplpulse', 'xplenter', 'xplexit',
+    'explosionname', 'xplname', 'xplchunk',
+    'launchord', 'payloadname', 'objectclass',
+    'bombname', 'bombertype', 'quakeclass',
+    'hitgroundname', 'hitbycarname', 'hitbybulletname',
+]);
+
+function vsrStem(value) {
+    let text = String(value == null ? '' : value).trim();
+    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+        text = text.slice(1, -1).trim();
+    }
+    return text.replace(/\.odf$/i, '').toLowerCase();
+}
+
+function vsrFieldIsRef(key) {
+    const name = String(key || '').toLowerCase();
+    if (VSR_PLAYSET_FIELDS.has(name)) return true;
+    return /^builditem\d+$/.test(name)
+        || /^weaponname\d+$/.test(name)
+        || /^lightname\d+$/.test(name);
+}
+
+function buildVsrPlayset(data) {
+    const byStem = new Map();
+    Object.values(data || {}).forEach((odfs) => {
+        Object.keys(odfs).forEach((filename) => {
+            byStem.set(vsrStem(filename), filename);
+        });
+    });
+
+    const playset = new Set();
+    const seen = new Set();
+    const stack = VSR_PLAYSET_ROOTS.concat(VSR_PLAYSET_PILOTS);
+
+    const consider = (raw) => {
+        if (raw == null || typeof raw === 'object') return;
+        const stem = vsrStem(raw);
+        if (!stem || stem === 'null' || seen.has(stem) || !byStem.has(stem)) return;
+        stack.push(stem);
+    };
+
+    const walk = (key, value) => {
+        if (value == null) return;
+        if (vsrFieldIsRef(key)) {
+            consider(value);
+            return;
+        }
+        if (typeof value !== 'object' || Array.isArray(value)) return;
+        Object.entries(value).forEach(([childKey, child]) => walk(childKey, child));
+    };
+
+    while (stack.length) {
+        const stem = stack.pop();
+        if (seen.has(stem)) continue;
+        const filename = byStem.get(stem);
+        if (!filename) continue;
+        seen.add(stem);
+        playset.add(filename);
+        let entry = null;
+        for (const odfs of Object.values(data)) {
+            if (odfs[filename]) {
+                entry = odfs[filename];
+                break;
+            }
+        }
+        if (!entry) continue;
+        Object.entries(entry).forEach(([key, value]) => {
+            if (key === 'inheritanceChain') return;
+            walk(key, value);
+        });
+    }
+    return playset;
+}
+
 // Renders tab: the model-render asset set lives under ../data/models/ (the same
 // assets the standalone Models browser serves). Shots follow a fixed 7-angle
 // convention emitted by scripts/object-render/, keyed by the model geometry
@@ -92,6 +179,8 @@ class ODFBrowser {
         this.currentCategory = null;
         this.searchTerm = '';
         this.selectedODF = null;
+        this.playset = new Set();
+        this.vsrOnly = false;
         this.currentAudio = null;
         // Renders tab: stem -> bool (has render shots on disk). Avoids re-probing
         // hero.png on every revisit of the same ODF / model.
@@ -310,6 +399,12 @@ class ODFBrowser {
             const odf = params.get('odf');
             const cat = params.get('cat');
             this._suppressCatUrl = true;
+            const wantVsr = params.get('vsr') === '1';
+            if (wantVsr && !this.vsrOnly) {
+                this.setVsrOnly(true);
+            } else if (!wantVsr && this.vsrOnly) {
+                this.writeVsrUrl();
+            }
             try {
                 if (compare) {
                     const [odf1, odf2] = compare.split(',');
@@ -373,6 +468,8 @@ class ODFBrowser {
                 }
             }
 
+            this.playset = buildVsrPlayset(this.data);
+            this.vsrOnly = this.readVsrPref();
             this.renderNavTotal();
             this.initializeSidebar();
             return true;
@@ -393,11 +490,18 @@ class ODFBrowser {
                         <kbd class="text-secondary">Ctrl</kbd><kbd class="text-secondary">K</kbd>
                     </span>
                 </div>
-                <button class="btn btn-outline-secondary" id="clearSearch" type="button">
-                    Clear
+                <button class="btn btn-outline-secondary vt-odf-icon-btn" id="clearSearch" type="button"
+                        aria-label="Clear search" title="Clear search">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
                 </button>
-                <button class="btn btn-outline-secondary" id="resetView" type="button">
-                    Reset
+                <button class="btn btn-outline-secondary vt-odf-icon-btn" id="resetView" type="button"
+                        aria-label="Reset view" title="Reset view">
+                    <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                </button>
+                <button class="btn btn-outline-secondary vt-odf-vsr-btn" id="vsrOnlyToggle" type="button"
+                        aria-pressed="${this.vsrOnly ? 'true' : 'false'}"
+                        title="Show ODFs a VSR match can build or mount">
+                    VSR
                 </button>
             </div>
         `;
@@ -453,6 +557,10 @@ class ODFBrowser {
             this.resetView();
         });
 
+        document.getElementById('vsrOnlyToggle').addEventListener('click', () => {
+            this.setVsrOnly(!this.vsrOnly);
+        });
+
         this.currentCategory = Object.keys(this.data)[0];
 
         const searchShortcut = document.getElementById('searchShortcut');
@@ -480,6 +588,9 @@ class ODFBrowser {
                 this.scheduleCategoryUrl(category);
             });
         });
+
+        this.handleSearch('');
+        this.writeVsrUrl();
     }
 
     defaultCategory() {
@@ -534,6 +645,7 @@ class ODFBrowser {
                     <button class="list-group-item list-group-item-action odf-item"
                             data-filename="${filename}"
                             data-category="${category}"
+                            data-playset="${this.playset.has(filename) ? '1' : '0'}"
                             tabindex="-1">
                         ${displayName ?
                             `<span class="odf-name">${displayName}</span> <span class="ms-2 text-secondary">${filename.replace('.odf', '')}</span>` :
@@ -553,11 +665,113 @@ class ODFBrowser {
         });
     }
 
+    readVsrPref() {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('vsr') === '1') return true;
+        try {
+            return localStorage.getItem('vt.odf.vsrOnly') === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    itemInPlayset(filename) {
+        if (!this.vsrOnly) return true;
+        return this.playset.has(filename);
+    }
+
+    setVsrOnly(on) {
+        this.vsrOnly = !!on;
+        const button = document.getElementById('vsrOnlyToggle');
+        if (button) button.setAttribute('aria-pressed', this.vsrOnly ? 'true' : 'false');
+        try {
+            localStorage.setItem('vt.odf.vsrOnly', this.vsrOnly ? '1' : '0');
+        } catch (e) {
+            // Private mode can reject the write; the URL still carries the choice.
+        }
+        this.writeVsrUrl();
+        const search = document.getElementById('odfSearch');
+        this.handleSearch(search ? search.value : '');
+        this.syncPlaysetNote();
+    }
+
+    writeVsrUrl() {
+        const url = new URL(window.location.href);
+        if (this.vsrOnly) url.searchParams.set('vsr', '1');
+        else url.searchParams.delete('vsr');
+        const next = url.pathname + url.search + url.hash;
+        const cur = window.location.pathname + window.location.search + window.location.hash;
+        if (next === cur) return;
+        history.replaceState(history.state, '', next);
+    }
+
+    playsetNoteHtml(filename) {
+        if (!this.vsrOnly || this.playset.has(filename)) return '';
+        return '<div class="vt-odf-playset-note small">Outside the VSR playset. A VSR match does not build or mount this.</div>';
+    }
+
+    syncPlaysetNote() {
+        const header = this.content && this.content.querySelector('.card-header');
+        if (!header) return;
+        header.querySelectorAll('.vt-odf-playset-note').forEach((node) => node.remove());
+        if (!this.vsrOnly || !this.selectedODF || this.playset.has(this.selectedODF.filename)) return;
+        const title = header.querySelector('h3');
+        if (!title || title.textContent === 'Comparing ODFs') return;
+        const block = title.parentElement;
+        if (!block) return;
+        block.insertAdjacentHTML('beforeend', this.playsetNoteHtml(this.selectedODF.filename));
+    }
+
+    syncCategoryTabs() {
+        const tabs = Array.from(document.querySelectorAll('#categoryTabs .nav-link'));
+        const rows = tabs.map((tab) => {
+            const category = tab.id.replace('sidebar-tab-', '');
+            const pane = document.querySelector(`#list-${category}`);
+            const visible = pane
+                ? Array.from(pane.querySelectorAll('.odf-item')).filter((el) => el.style.display !== 'none').length
+                : 0;
+            const pinned = this.vsrOnly && visible === 0 && this.selectedODF
+                && this.selectedODF.category === category
+                && !this.playset.has(this.selectedODF.filename);
+            return { tab, category, pane, visible, hide: this.vsrOnly && visible === 0 && !pinned };
+        });
+        const anyShown = rows.some((row) => !row.hide);
+        rows.forEach((row) => {
+            const li = row.tab.closest('.nav-item');
+            if (!li) return;
+            const keepActive = !anyShown && row.tab.classList.contains('active');
+            li.hidden = row.hide && !keepActive;
+        });
+
+        document.querySelectorAll('.vsr-empty-alert').forEach((node) => node.remove());
+        if (this.vsrOnly && !this.searchTerm) {
+            rows.forEach((row) => {
+                const li = row.tab.closest('.nav-item');
+                if (!row.pane || !li || li.hidden || row.visible > 0) return;
+                const list = row.pane.querySelector('.list-group');
+                if (!list) return;
+                list.insertAdjacentHTML('beforebegin',
+                    '<div class="alert vt-odf-alert-secondary vsr-empty-alert">Nothing in this category is in the VSR playset.</div>');
+            });
+        }
+
+        const active = document.querySelector('#categoryTabs .nav-link.active');
+        if (active && active.closest('.nav-item')?.hidden) {
+            const next = rows.find((row) => !row.tab.closest('.nav-item')?.hidden);
+            if (next) {
+                this._suppressCatUrl = true;
+                next.tab.click();
+                this._suppressCatUrl = false;
+            }
+        }
+    }
+
     handleSearch(term) {
+        this.searchTerm = term || '';
         if (!term) {
             document.querySelectorAll('.odf-item').forEach(item => {
-                item.style.display = '';
                 item.classList.remove('active');
+                item.style.display = this.itemInPlayset(item.dataset.filename) ? '' : 'none';
             });
             document.querySelectorAll('.no-matches-alert').forEach(alert => {
                 alert.remove();
@@ -567,6 +781,7 @@ class ODFBrowser {
                 const tab = document.getElementById(`sidebar-tab-${category}`);
                 tab.textContent = category;
             });
+            this.syncCategoryTabs();
             return;
         }
 
@@ -584,6 +799,11 @@ class ODFBrowser {
             const odfData = this.data[category][filename];
 
             categoryCounts[category] = categoryCounts[category] || 0;
+
+            if (!this.itemInPlayset(item.dataset.filename)) {
+                item.style.display = 'none';
+                return;
+            }
 
             const searchableNames = [
                 filename,
@@ -680,6 +900,7 @@ class ODFBrowser {
                 existingAlert.remove();
             }
         });
+        this.syncCategoryTabs();
     }
 
     getAllSearchableTerms(obj, terms = []) {
@@ -720,6 +941,7 @@ class ODFBrowser {
         const displayName = odfData.GameObjectClass?.unitName || odfData.WeaponClass?.wpnName || filename;
         const inheritanceHtml = odfData.inheritanceChain ?
             `<div class="vt-odf-inherits small">Inherits: ${odfData.inheritanceChain.join(' → ')}</div>` : '';
+        const playsetHtml = this.playsetNoteHtml(filename);
 
         const groupedEntries = {};
 
@@ -782,6 +1004,7 @@ class ODFBrowser {
                             <h3 class="mb-0">${displayName}</h3>
                             <small class="text-secondary">${filename}</small>
                             ${inheritanceHtml}
+                            ${playsetHtml}
                         </div>
                         <div class="d-flex gap-2">
                             <div class="position-relative" style="width: 200px;">
@@ -931,6 +1154,8 @@ class ODFBrowser {
         document.querySelectorAll('[data-bs-toggle="popover"]').forEach(popoverTriggerEl => {
             new bootstrap.Popover(popoverTriggerEl, { customClass: 'vt-odf-popover' });
         });
+
+        this.syncCategoryTabs();
     }
 
     formatODFDataColumn(classEntries) {
@@ -1190,7 +1415,9 @@ class ODFBrowser {
     }
 
     cycleTabs(forward = true) {
-        const tabs = Array.from(document.querySelectorAll('#categoryTabs .nav-link'));
+        const tabs = Array.from(document.querySelectorAll('#categoryTabs .nav-link'))
+            .filter(tab => !tab.closest('.nav-item')?.hidden);
+        if (!tabs.length) return;
         const currentTab = document.querySelector('#categoryTabs .nav-link.active');
         const currentIndex = tabs.indexOf(currentTab);
 
@@ -1620,7 +1847,9 @@ class ODFBrowser {
 
         const sortedUnnamedOdfs = unnamedOdfs.sort(([a], [b]) => a.localeCompare(b));
 
-        const firstVehicleODF = [...sortedNamedOdfs, ...sortedUnnamedOdfs][0]?.[0];
+        const firstVehicleODF = [...sortedNamedOdfs, ...sortedUnnamedOdfs]
+            .map(([filename]) => filename)
+            .find((filename) => this.itemInPlayset(filename));
 
         if (firstVehicleODF) {
             const vehicleTab = document.querySelector('#sidebar-tab-Vehicle');
@@ -1671,6 +1900,7 @@ class ODFBrowser {
                         (displayName || '').toLowerCase()
                     ].join(' ');
 
+                    if (!this.itemInPlayset(filename)) continue;
                     if (searchableText.includes(term)) {
                         matches.push({ category, filename, displayName });
                     }
@@ -1732,6 +1962,7 @@ class ODFBrowser {
     }
 
     compareODFs(odf1, odf2) {
+        this.selectedODF = null;
         const odf1Name = odf1.filename.replace('.odf', '');
         const odf2Name = odf2.filename.replace('.odf', '');
         this.updateURL({ compare: `${odf1Name},${odf2Name}` });
@@ -1816,6 +2047,7 @@ class ODFBrowser {
         this.initializeComparisonHovers();
 
         this.equalizeCardHeights();
+        this.syncCategoryTabs();
     }
 
     filterComparisonProperties(term) {
@@ -2136,8 +2368,12 @@ class ODFBrowser {
         document.getElementById('odfSearch').value = '';
         this.handleSearch('');
 
-        const baseUrl = window.location.pathname;
-        window.history.pushState({}, '', baseUrl);
+        const url = new URL(window.location.href);
+        const keep = new URLSearchParams();
+        if (url.searchParams.get('embed') === '1') keep.set('embed', '1');
+        if (this.vsrOnly) keep.set('vsr', '1');
+        const qs = keep.toString();
+        window.history.pushState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
 
         this.loadFirstVehicleODF();
 

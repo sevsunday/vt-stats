@@ -241,6 +241,39 @@
     display: none;
 }
 
+/* Search-row controls. Clear and Reset are icon-only so the VSR label fits
+ * on the same row as the field. Height matches a default Bootstrap input. */
+.vt-odf-icon-btn {
+    --vt-odf-ctrl: 2.375rem;
+    width: var(--vt-odf-ctrl);
+    height: var(--vt-odf-ctrl);
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.vt-odf-vsr-btn {
+    height: 2.375rem;
+    flex: 0 0 auto;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+#vsrOnlyToggle[aria-pressed="true"],
+#vsrOnlyToggle[aria-pressed="true"]:hover,
+#vsrOnlyToggle[aria-pressed="true"]:focus {
+    background: var(--kb-primary);
+    border-color: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
+.vt-odf-playset-note {
+    color: var(--kb-text-secondary);
+    margin-top: 0.25rem;
+}
+
 /* Property search input + clear button styling. */
 #odfPropertySearch {
     border-right: 0;
