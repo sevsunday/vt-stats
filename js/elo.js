@@ -289,7 +289,7 @@
     net_damage_share: {
       label: 'Net damage share',
       formula: '(dealt - received) / sum_lobby(dealt)',
-      desc:    'Your damage output minus damage taken, as a share of total damage dealt in the lobby. Captures both offensive output and survivability.',
+      desc:    'All damage you dealt minus all damage you took (players, friendly fire, AI, and buildings), as a share of total damage dealt in the lobby. Your own splash cancels out. Damage from turrets and scavengers you own is not included.',
     },
     thug_kill_rate: {
       label: 'Thug kill rate',
@@ -1153,9 +1153,6 @@
     const need = comebackGamesRequired(c);
     const staleWin = commandStaleWindowDays(c);
     const banner = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
-      <i class="bi bi-flask me-1"></i>
-      <strong>Experimental.</strong>
-      This ranking only looks at whether a commander won or lost, not how they played.
       Winning with a weaker group of thugs raises the rating more than winning with a stronger one.
       Ranked commanders have at least ${fmt(minV4)} proto-v4 games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats),
       have played within ${fmt(win)} days of the newest match, and have commanded within ${fmt(staleWin)} days
@@ -1704,7 +1701,7 @@
       }).join('');
       axisOutcomeHtml = `<div class="vt-elo-acc-section">
         <h6>Which axes actually win games?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% the axis lined up with the losing side. These measure one player\u2019s game, not the win itself \u2014 a team can win while shooting less accurately or less efficiently than the other. Updated every pipeline run. (50% = the axis says nothing about winning; a self-omitting axis has a smaller sample, so treat a thin one with care.)</p>
+        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% that axis lined up with the losing side. The four bars are the axes that score today. Updated every pipeline run. (50% = the axis says nothing about winning; a self-omitting axis has a smaller sample, so treat a thin one with care.)</p>
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;
     }
