@@ -1381,15 +1381,15 @@
     pane.innerHTML = `<div class="vt-elo-doc">
       <section class="vt-vtsr-doc-section">
         <h6>What gets measured</h6>
-        <p class="mb-1">Your match score isn&rsquo;t one stat &mdash; it&rsquo;s <strong>6 of them, mixed by weight</strong>. Think of it as a mixing board: the wider the slider, the more that axis moves your rating. Step through each one:</p>
+        <p class="mb-1">Your match score isn&rsquo;t one stat &mdash; it&rsquo;s <strong>4 of them, mixed by share</strong>. Think of it as a mixing board: the wider the slider, the more that axis moves your rating. Step through each one:</p>
         ${E.axesBoardHtml()}
         <p class="mb-0 mt-2 text-muted small">Every axis is scored <em>against the lobby you played in</em> &mdash; being average earns roughly zero, beating the room earns positive, trailing it earns negative.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The weights</h6>
+        <h6>The shares</h6>
         ${E.weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters. Snipes and T-key usage are recorded on the match page and are not part of this rating.</div>
+        <div class="vt-katex-caveat">PvE kills count at half-weight on kill rate, so role players still get credit without crowding out pure dogfighters. Damage to bases and scavengers is its own axis (PvE share). Shot accuracy and fight efficiency are not rating inputs: accuracy scored economy fire as misses, and the efficiency ratio scored the winning side lower.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">

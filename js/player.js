@@ -946,15 +946,18 @@
 
   // Approximate ΔVTSR for a +0.5σ improvement on a given axis. Mirrors
   // the elo.py update rule at a first-order approximation:
-  //   perf_idx += weight[A] * 0.25     (0.5σ pre-clip ≈ +0.25 post-clip)
+  //   perf_idx += share[A] * 0.25     (0.5σ pre-clip ≈ +0.25 post-clip)
   //   ΔVTSR_per_match ≈ perf_idx_delta * rating_scale * K_eff
+  // share[A] is the raw weight divided by the sum, matching elo.py.
   // K_eff settles around 25 once a player passes the provisional
   // threshold (K_base=40 attenuated by the matches-played taper). We
   // surface this as "rough monthly gain" rather than per-match so the
   // number is more graspable.
   function quickWinDeltaPerMatch(axisKey) {
     const weights = (state.elo && state.elo.weights) || {};
-    const w = +weights[axisKey] || 0;
+    const raw = +weights[axisKey] || 0;
+    const total = Object.keys(weights).reduce((s, k) => s + (+weights[k] || 0), 0);
+    const w = total > 0 ? raw / total : 0;
     const ratingScale = +((state.elo && state.elo.rating_scale) || 2.5);
     const kEff = 25; // settles here for non-provisional players
     return w * 0.25 * ratingScale * kEff;

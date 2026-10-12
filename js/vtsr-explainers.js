@@ -111,11 +111,21 @@
       blurb: 'How much of the map you covered.' },
   ];
 
+  // Share of the match score when every axis is present. Raw weights
+  // stay in AXES so they keep matching THUG_WEIGHTS; the scorer divides
+  // by their sum, and that share is what the table and callouts show.
+  function axisShareLabel(weight) {
+    const total = AXES.reduce((s, a) => s + a.weight, 0) || 1;
+    const rounded = Math.round((weight / total) * 1000) / 10;
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return text + '%';
+  }
+
   // Mixing-board steps (solo mode: one callout at a time, anchored to
   // the bar segments). Callouts alternate above/below the bar.
   const AXES_STEPS = AXES.map((a, i) => ({
     sel: `[data-axis="${a.key}"]`,
-    title: `${a.label} \u00b7 weight ${a.weight}`,
+    title: `${a.label} \u00b7 ${axisShareLabel(a.weight)}`,
     body: a.blurb + (i >= 6 ? '' : ''),
     x: Math.min(70, 3 + (i % 3) * 33.5),
     y: i % 2 === 0 ? 5 : 63,
@@ -372,7 +382,7 @@
       const label = `<span class="vt-axesboard-seg-label">${a.label}</span>`;
       return `<span class="vt-axesboard-seg"
         data-axis="${a.key}" style="flex-basis:${pct.toFixed(2)}%;"
-        title="${esc(a.label)} \u00b7 weight ${a.weight}">${label}</span>`;
+        title="${esc(a.label)} \u00b7 ${axisShareLabel(a.weight)}">${label}</span>`;
     }).join('');
     const board = `<div class="vt-axesboard" role="img"
       aria-label="The 4 scoring axes sized by weight">${segs}</div>`;
@@ -380,15 +390,20 @@
       { mode: 'solo', hint: 'Press <strong>Next</strong> to spotlight each axis.' });
   }
 
-  // Plain weights table (shared by the modal + the axes tab).
+  // Plain shares table (shared by the modal + the axes tab).
+  // Raw AXES weights are renormalized the same way elo.py does, so the
+  // column is the share of the match score and the total row is 100%.
   function weightsTableHtml() {
     const rows = AXES.map((a) =>
       `<tr><td><strong>${a.label}</strong><br><small class="text-muted">${a.blurb}</small></td>
-       <td class="text-end align-top">${a.weight}</td></tr>`).join('');
+       <td class="text-end align-top">${axisShareLabel(a.weight)}</td></tr>`).join('');
     return `<table class="vt-katex-weights">
-      <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+      <thead><tr><th>Axis</th><th class="text-end">Share</th></tr></thead>
+      <tbody>${rows}
+        <tr><td><strong>Total</strong></td><td class="text-end align-top">100%</td></tr>
+      </tbody>
+    </table>
+    <p class="mb-0 mt-2 text-muted small">These are the shares when all four axes are present.</p>`;
   }
 
   // Plain tier-ladder table (shared by the modal + the How tab).
