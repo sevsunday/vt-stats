@@ -3,7 +3,7 @@
     "id": "2026-10-02T02-32-46",
     "source_file": "2026-10-02-02-32-46.binpb.gz",
     "source_size_bytes": 7524672,
-    "pipeline_version": 55,
+    "pipeline_version": 56,
     "submitter": "Nomad",
     "map": "vsrMojave.bzn",
     "date": "2026-10-02T02:32:46.974257+00:00",
@@ -142,7 +142,32 @@
     "has_bullet_hit_data": true,
     "has_resource_data": true,
     "has_build_data": true,
-    "schema_version": 31,
+    "schema_version": 32,
+    "event_calibration": {
+      "r_by_weapon": {
+        "plasball.odf": 1.0,
+        "cphcg_c.odf": 1.0,
+        "fsnip_c.odf": 0.5241,
+        "epulse.odf": 1.0,
+        "eburst_c.odf": 1.0,
+        "slicer_c.odf": 1.0,
+        "shellgun_c.odf": 1.0,
+        "plasstream.odf": 1.0,
+        "gauss_c.odf": 1.0,
+        "gauss_a.odf": 1.0,
+        "dragb_a.odf": 1.0,
+        "shellgun.odf": 1.0,
+        "dragb_c.odf": 1.0,
+        "arcboltvsr.odf": 1.0,
+        "lockervsr.odf": 1.0
+      },
+      "r_lobby": 1.0,
+      "ref_hits": 3347,
+      "source": "in_match",
+      "damage_scale": 1.0,
+      "dup_era": false,
+      "hits_est_source": "damage_events"
+    },
     "proto_schema_version": "v4",
     "shutdown_requested": false,
     "game_outcome": "OUTCOME_TEAM1_WIN",
@@ -321,6 +346,10 @@
         "pvp_shots_hit": 1019,
         "pvp_accuracy": 0.164,
         "accuracy": 0.164,
+        "pve_shots_hit_est": 3681,
+        "shots_hit_est": 4700,
+        "accuracy_est": 0.756,
+        "hits_est_source": "damage_events",
         "pvp_kills": 12,
         "pve_kills": 9,
         "pvp_deaths": 5,
@@ -364,7 +393,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 1248,
+          "hits_est": 1248,
+          "accuracy_est": 0.947
         },
         "Craft Explosion (Hadean)": {
           "dealt": 312.3,
@@ -373,7 +405,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Beam (dragb_a)": {
           "dealt": 36525.0,
@@ -383,6 +418,9 @@
           "pvp_hits": 55,
           "self_hits": 0,
           "accuracy": 0.714,
+          "pve_hits_est": 12,
+          "hits_est": 67,
+          "accuracy_est": 0.87,
           "range_hist": {
             "pvp": [
               0,
@@ -426,7 +464,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Blast": {
           "dealt": 1400.0,
@@ -435,7 +476,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 28,
+          "hits_est": 28,
+          "accuracy_est": 0.875
         },
         "Flame Mine (xfbseeke)": {
           "dealt": 62.3,
@@ -444,7 +488,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
           "dealt": 10776.0,
@@ -454,6 +501,9 @@
           "pvp_hits": 432,
           "self_hits": 0,
           "accuracy": 0.205,
+          "pve_hits_est": 1194,
+          "hits_est": 1626,
+          "accuracy_est": 0.771,
           "range_hist": {
             "pvp": [
               0,
@@ -498,6 +548,9 @@
           "pvp_hits": 2,
           "self_hits": 0,
           "accuracy": 0.091,
+          "pve_hits_est": 0,
+          "hits_est": 2,
+          "accuracy_est": 0.091,
           "range_hist": {
             "pvp": [
               0,
@@ -542,6 +595,9 @@
           "pvp_hits": 353,
           "self_hits": 0,
           "accuracy": 0.16,
+          "pve_hits_est": 1008,
+          "hits_est": 1361,
+          "accuracy_est": 0.617,
           "range_hist": {
             "pvp": [
               9,
@@ -585,7 +641,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 38,
+          "hits_est": 38,
+          "accuracy_est": 1.0
         },
         "Slag Cannon": {
           "dealt": 650.0,
@@ -594,7 +653,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 5,
+          "hits_est": 5,
+          "accuracy_est": 1.0
         },
         "Slicer": {
           "dealt": 3990.0,
@@ -604,6 +666,9 @@
           "pvp_hits": 176,
           "self_hits": 0,
           "accuracy": 0.429,
+          "pve_hits_est": 148,
+          "hits_est": 324,
+          "accuracy_est": 0.79,
           "range_hist": {
             "pvp": [
               0,
@@ -648,6 +713,9 @@
           "pvp_hits": 1,
           "self_hits": 0,
           "accuracy": 0.5,
+          "pve_hits_est": 0,
+          "hits_est": 1,
+          "accuracy_est": 0.5,
           "range_hist": {
             "pvp": [
               0,
@@ -691,7 +759,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -863,6 +934,10 @@
         "pvp_shots_hit": 225,
         "pvp_accuracy": 0.119,
         "accuracy": 0.119,
+        "pve_shots_hit_est": 1405,
+        "shots_hit_est": 1630,
+        "accuracy_est": 0.859,
+        "hits_est_source": "damage_events",
         "pvp_kills": 5,
         "pve_kills": 5,
         "pvp_deaths": 6,
@@ -907,6 +982,9 @@
           "pvp_hits": 76,
           "self_hits": 0,
           "accuracy": 0.345,
+          "pve_hits_est": 93,
+          "hits_est": 169,
+          "accuracy_est": 0.768,
           "range_hist": {
             "pvp": [
               0,
@@ -950,7 +1028,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion": {
           "dealt": 441.3,
@@ -959,7 +1040,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Fang": {
           "dealt": 11308.5,
@@ -968,7 +1052,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 240,
+          "hits_est": 240,
+          "accuracy_est": 1.0
         },
         "Gauss Gun (gauss_a)": {
           "dealt": 22320.0,
@@ -978,6 +1065,9 @@
           "pvp_hits": 40,
           "self_hits": 0,
           "accuracy": 0.261,
+          "pve_hits_est": 90,
+          "hits_est": 130,
+          "accuracy_est": 0.85,
           "range_hist": {
             "pvp": [
               0,
@@ -1022,6 +1112,9 @@
           "pvp_hits": 82,
           "self_hits": 0,
           "accuracy": 0.24,
+          "pve_hits_est": 144,
+          "hits_est": 226,
+          "accuracy_est": 0.661,
           "range_hist": {
             "pvp": [
               0,
@@ -1066,6 +1159,9 @@
           "pvp_hits": 17,
           "self_hits": 0,
           "accuracy": 0.288,
+          "pve_hits_est": 3,
+          "hits_est": 20,
+          "accuracy_est": 0.339,
           "range_hist": {
             "pvp": [
               0,
@@ -1109,7 +1205,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 685,
+          "hits_est": 685,
+          "accuracy_est": 0.946
         },
         "Pulse (fsnip_c)": {
           "dealt": 550.0,
@@ -1119,6 +1218,9 @@
           "pvp_hits": 10,
           "self_hits": 0,
           "accuracy": 0.062,
+          "pve_hits_est": 150,
+          "hits_est": 160,
+          "accuracy_est": 1.0,
           "range_hist": {
             "pvp": [
               0,
@@ -1162,7 +1264,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Sign Explosion": {
           "dealt": 696.7,
@@ -1171,7 +1276,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Solar Flare (flaremine_s_vsr)": {
           "dealt": 5311.0,
@@ -1180,7 +1288,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Vehicle Explosion": {
           "dealt": 3839.2,
@@ -1189,7 +1300,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -1385,6 +1499,10 @@
         "pvp_shots_hit": 510,
         "pvp_accuracy": 0.265,
         "accuracy": 0.265,
+        "pve_shots_hit_est": 1004,
+        "shots_hit_est": 1514,
+        "accuracy_est": 0.785,
+        "hits_est_source": "damage_events",
         "pvp_kills": 8,
         "pve_kills": 9,
         "pvp_deaths": 8,
@@ -1429,6 +1547,9 @@
           "pvp_hits": 79,
           "self_hits": 0,
           "accuracy": 0.385,
+          "pve_hits_est": 65,
+          "hits_est": 144,
+          "accuracy_est": 0.702,
           "range_hist": {
             "pvp": [
               0,
@@ -1472,7 +1593,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Blink (xblinkoutvsr)": {
           "dealt": 39.4,
@@ -1481,7 +1605,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion": {
           "dealt": 923.0,
@@ -1490,7 +1617,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Gauss Gun (gauss_a)": {
           "dealt": 11620.0,
@@ -1500,6 +1630,9 @@
           "pvp_hits": 48,
           "self_hits": 0,
           "accuracy": 0.649,
+          "pve_hits_est": 20,
+          "hits_est": 68,
+          "accuracy_est": 0.919,
           "range_hist": {
             "pvp": [
               0,
@@ -1544,6 +1677,9 @@
           "pvp_hits": 25,
           "self_hits": 0,
           "accuracy": 0.291,
+          "pve_hits_est": 24,
+          "hits_est": 49,
+          "accuracy_est": 0.57,
           "range_hist": {
             "pvp": [
               0,
@@ -1588,6 +1724,9 @@
           "pvp_hits": 96,
           "self_hits": 0,
           "accuracy": 0.451,
+          "pve_hits_est": 100,
+          "hits_est": 196,
+          "accuracy_est": 0.92,
           "range_hist": {
             "pvp": [
               0,
@@ -1631,7 +1770,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Plasma Cannon": {
           "dealt": 9996.0,
@@ -1641,6 +1783,9 @@
           "pvp_hits": 95,
           "self_hits": 0,
           "accuracy": 0.531,
+          "pve_hits_est": 10,
+          "hits_est": 105,
+          "accuracy_est": 0.587,
           "range_hist": {
             "pvp": [
               7,
@@ -1685,6 +1830,9 @@
           "pvp_hits": 50,
           "self_hits": 0,
           "accuracy": 0.061,
+          "pve_hits_est": 754,
+          "hits_est": 804,
+          "accuracy_est": 0.977,
           "range_hist": {
             "pvp": [
               28,
@@ -1729,6 +1877,9 @@
           "pvp_hits": 117,
           "self_hits": 0,
           "accuracy": 0.336,
+          "pve_hits_est": 31,
+          "hits_est": 148,
+          "accuracy_est": 0.425,
           "range_hist": {
             "pvp": [
               4,
@@ -1772,7 +1923,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Vehicle Explosion": {
           "dealt": 3081.1,
@@ -1781,7 +1935,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -2005,6 +2162,10 @@
         "pvp_shots_hit": 446,
         "pvp_accuracy": 0.097,
         "accuracy": 0.097,
+        "pve_shots_hit_est": 2753,
+        "shots_hit_est": 3199,
+        "accuracy_est": 0.696,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 12,
         "pvp_deaths": 6,
@@ -2049,6 +2210,9 @@
           "pvp_hits": 64,
           "self_hits": 0,
           "accuracy": 0.094,
+          "pve_hits_est": 484,
+          "hits_est": 548,
+          "accuracy_est": 0.806,
           "range_hist": {
             "pvp": [
               0,
@@ -2092,7 +2256,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Beam (dragb_a)": {
           "dealt": 27400.0,
@@ -2102,6 +2269,9 @@
           "pvp_hits": 19,
           "self_hits": 0,
           "accuracy": 0.339,
+          "pve_hits_est": 26,
+          "hits_est": 45,
+          "accuracy_est": 0.804,
           "range_hist": {
             "pvp": [
               0,
@@ -2145,7 +2315,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
           "dealt": 100.3,
@@ -2154,7 +2327,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
           "dealt": 9296.0,
@@ -2164,6 +2340,9 @@
           "pvp_hits": 206,
           "self_hits": 0,
           "accuracy": 0.094,
+          "pve_hits_est": 1364,
+          "hits_est": 1570,
+          "accuracy_est": 0.716,
           "range_hist": {
             "pvp": [
               7,
@@ -2208,6 +2387,9 @@
           "pvp_hits": 42,
           "self_hits": 0,
           "accuracy": 0.144,
+          "pve_hits_est": 0,
+          "hits_est": 42,
+          "accuracy_est": 0.144,
           "range_hist": {
             "pvp": [
               0,
@@ -2252,6 +2434,9 @@
           "pvp_hits": 16,
           "self_hits": 0,
           "accuracy": 0.015,
+          "pve_hits_est": 841,
+          "hits_est": 857,
+          "accuracy_est": 0.812,
           "range_hist": {
             "pvp": [
               0,
@@ -2296,6 +2481,9 @@
           "pvp_hits": 97,
           "self_hits": 0,
           "accuracy": 0.315,
+          "pve_hits_est": 38,
+          "hits_est": 135,
+          "accuracy_est": 0.438,
           "range_hist": {
             "pvp": [
               0,
@@ -2340,6 +2528,9 @@
           "pvp_hits": 2,
           "self_hits": 0,
           "accuracy": 0.2,
+          "pve_hits_est": 0,
+          "hits_est": 2,
+          "accuracy_est": 0.2,
           "range_hist": {
             "pvp": [
               0,
@@ -2383,7 +2574,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -2583,6 +2777,10 @@
         "pvp_shots_hit": 98,
         "pvp_accuracy": 0.048,
         "accuracy": 0.048,
+        "pve_shots_hit_est": 1761,
+        "shots_hit_est": 1859,
+        "accuracy_est": 0.919,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 12,
         "pvp_deaths": 2,
@@ -2627,6 +2825,9 @@
           "pvp_hits": 8,
           "self_hits": 0,
           "accuracy": 0.041,
+          "pve_hits_est": 163,
+          "hits_est": 171,
+          "accuracy_est": 0.877,
           "range_hist": {
             "pvp": [
               0,
@@ -2670,7 +2871,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion": {
           "dealt": 246.5,
@@ -2679,7 +2883,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Multi Lock (lockervsr)": {
           "dealt": 16750.0,
@@ -2689,6 +2896,9 @@
           "pvp_hits": 59,
           "self_hits": 0,
           "accuracy": 0.5,
+          "pve_hits_est": 45,
+          "hits_est": 104,
+          "accuracy_est": 0.881,
           "range_hist": {
             "pvp": [
               0,
@@ -2732,7 +2942,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Multi Lock (xlockgnd)": {
           "dealt": 6.2,
@@ -2741,7 +2954,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Plasma Cannon": {
           "dealt": 3456.0,
@@ -2751,6 +2967,9 @@
           "pvp_hits": 31,
           "self_hits": 0,
           "accuracy": 0.207,
+          "pve_hits_est": 17,
+          "hits_est": 48,
+          "accuracy_est": 0.32,
           "range_hist": {
             "pvp": [
               5,
@@ -2794,7 +3013,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 1536,
+          "hits_est": 1536,
+          "accuracy_est": 0.985
         },
         "Vehicle Explosion": {
           "dealt": 300.0,
@@ -2803,7 +3025,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Wasp": {
           "dealt": 6102.0,
@@ -2812,7 +3037,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -2984,6 +3212,10 @@
         "pvp_shots_hit": 244,
         "pvp_accuracy": 0.054,
         "accuracy": 0.054,
+        "pve_shots_hit_est": 3243,
+        "shots_hit_est": 3487,
+        "accuracy_est": 0.771,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 16,
         "pvp_deaths": 3,
@@ -3028,6 +3260,9 @@
           "pvp_hits": 110,
           "self_hits": 0,
           "accuracy": 0.037,
+          "pve_hits_est": 2367,
+          "hits_est": 2477,
+          "accuracy_est": 0.831,
           "range_hist": {
             "pvp": [
               0,
@@ -3071,7 +3306,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Beam (dragb_a)": {
           "dealt": 6075.0,
@@ -3081,6 +3319,9 @@
           "pvp_hits": 7,
           "self_hits": 0,
           "accuracy": 0.412,
+          "pve_hits_est": 4,
+          "hits_est": 11,
+          "accuracy_est": 0.647,
           "range_hist": {
             "pvp": [
               0,
@@ -3124,7 +3365,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Beam (xdragbcar_a)": {
           "dealt": 1552.3,
@@ -3133,7 +3377,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Blast": {
           "dealt": 9190.0,
@@ -3143,6 +3390,9 @@
           "pvp_hits": 19,
           "self_hits": 0,
           "accuracy": 0.066,
+          "pve_hits_est": 137,
+          "hits_est": 156,
+          "accuracy_est": 0.544,
           "range_hist": {
             "pvp": [
               0,
@@ -3187,6 +3437,9 @@
           "pvp_hits": 45,
           "self_hits": 0,
           "accuracy": 0.049,
+          "pve_hits_est": 684,
+          "hits_est": 729,
+          "accuracy_est": 0.798,
           "range_hist": {
             "pvp": [
               4,
@@ -3231,6 +3484,9 @@
           "pvp_hits": 4,
           "self_hits": 0,
           "accuracy": 0.032,
+          "pve_hits_est": 0,
+          "hits_est": 4,
+          "accuracy_est": 0.032,
           "range_hist": {
             "pvp": [
               0,
@@ -3275,6 +3531,9 @@
           "pvp_hits": 59,
           "self_hits": 0,
           "accuracy": 0.335,
+          "pve_hits_est": 51,
+          "hits_est": 110,
+          "accuracy_est": 0.625,
           "range_hist": {
             "pvp": [
               0,
@@ -3318,7 +3577,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Sniper": {
           "dealt": 0,
@@ -3327,7 +3589,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         },
         "Vehicle Explosion (Hadean)": {
           "dealt": 945.5,
@@ -3336,7 +3601,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -3536,6 +3804,10 @@
         "pvp_shots_hit": 232,
         "pvp_accuracy": 0.158,
         "accuracy": 0.158,
+        "pve_shots_hit_est": 1097,
+        "shots_hit_est": 1329,
+        "accuracy_est": 0.902,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 5,
         "pvp_deaths": 3,
@@ -3580,6 +3852,9 @@
           "pvp_hits": 75,
           "self_hits": 0,
           "accuracy": 0.342,
+          "pve_hits_est": 100,
+          "hits_est": 175,
+          "accuracy_est": 0.799,
           "range_hist": {
             "pvp": [
               0,
@@ -3623,7 +3898,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Blink (xblinkoutvsr)": {
           "dealt": 63.7,
@@ -3632,7 +3910,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion": {
           "dealt": 637.0,
@@ -3641,7 +3922,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Gauss Gun (gauss_a)": {
           "dealt": 1600.0,
@@ -3651,6 +3935,9 @@
           "pvp_hits": 10,
           "self_hits": 0,
           "accuracy": 1.0,
+          "pve_hits_est": 0,
+          "hits_est": 10,
+          "accuracy_est": 1.0,
           "range_hist": {
             "pvp": [
               0,
@@ -3695,6 +3982,9 @@
           "pvp_hits": 72,
           "self_hits": 0,
           "accuracy": 0.232,
+          "pve_hits_est": 205,
+          "hits_est": 277,
+          "accuracy_est": 0.891,
           "range_hist": {
             "pvp": [
               0,
@@ -3739,6 +4029,9 @@
           "pvp_hits": 46,
           "self_hits": 0,
           "accuracy": 0.821,
+          "pve_hits_est": 9,
+          "hits_est": 55,
+          "accuracy_est": 0.982,
           "range_hist": {
             "pvp": [
               1,
@@ -3782,7 +4075,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Plasma Cannon": {
           "dealt": 1100.0,
@@ -3792,6 +4088,9 @@
           "pvp_hits": 11,
           "self_hits": 0,
           "accuracy": 0.275,
+          "pve_hits_est": 0,
+          "hits_est": 11,
+          "accuracy_est": 0.275,
           "range_hist": {
             "pvp": [
               0,
@@ -3835,7 +4134,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 783,
+          "hits_est": 783,
+          "accuracy_est": 1.0
         },
         "Pulse (fsnip_c)": {
           "dealt": 90.0,
@@ -3845,6 +4147,9 @@
           "pvp_hits": 18,
           "self_hits": 0,
           "accuracy": 0.333,
+          "pve_hits_est": 0,
+          "hits_est": 18,
+          "accuracy_est": 0.333,
           "range_hist": {
             "pvp": [
               3,
@@ -3888,7 +4193,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -4108,6 +4416,10 @@
         "pvp_shots_hit": 579,
         "pvp_accuracy": 0.186,
         "accuracy": 0.186,
+        "pve_shots_hit_est": 1536,
+        "shots_hit_est": 2115,
+        "accuracy_est": 0.679,
+        "hits_est_source": "damage_events",
         "pvp_kills": 6,
         "pve_kills": 6,
         "pvp_deaths": 2,
@@ -4152,6 +4464,9 @@
           "pvp_hits": 83,
           "self_hits": 0,
           "accuracy": 0.097,
+          "pve_hits_est": 609,
+          "hits_est": 692,
+          "accuracy_est": 0.805,
           "range_hist": {
             "pvp": [
               0,
@@ -4195,7 +4510,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Beam (dragb_a)": {
           "dealt": 0,
@@ -4204,7 +4522,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         },
         "Dragon Blast": {
           "dealt": 12965.0,
@@ -4214,6 +4535,9 @@
           "pvp_hits": 55,
           "self_hits": 0,
           "accuracy": 0.185,
+          "pve_hits_est": 104,
+          "hits_est": 159,
+          "accuracy_est": 0.535,
           "range_hist": {
             "pvp": [
               4,
@@ -4258,6 +4582,9 @@
           "pvp_hits": 3,
           "self_hits": 0,
           "accuracy": 0.1,
+          "pve_hits_est": 4,
+          "hits_est": 7,
+          "accuracy_est": 0.233,
           "range_hist": {
             "pvp": [
               0,
@@ -4301,7 +4628,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Fireball Gun (xfbgnd_c)": {
           "dealt": 208.8,
@@ -4310,7 +4640,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
           "dealt": 45.2,
@@ -4319,7 +4652,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
           "dealt": 5791.8,
@@ -4329,6 +4665,9 @@
           "pvp_hits": 256,
           "self_hits": 0,
           "accuracy": 0.197,
+          "pve_hits_est": 664,
+          "hits_est": 920,
+          "accuracy_est": 0.707,
           "range_hist": {
             "pvp": [
               5,
@@ -4373,6 +4712,9 @@
           "pvp_hits": 115,
           "self_hits": 0,
           "accuracy": 0.371,
+          "pve_hits_est": 0,
+          "hits_est": 115,
+          "accuracy_est": 0.371,
           "range_hist": {
             "pvp": [
               0,
@@ -4417,6 +4759,9 @@
           "pvp_hits": 67,
           "self_hits": 0,
           "accuracy": 0.215,
+          "pve_hits_est": 155,
+          "hits_est": 222,
+          "accuracy_est": 0.712,
           "range_hist": {
             "pvp": [
               0,
@@ -4460,7 +4805,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -4656,6 +5004,10 @@
         "pvp_shots_hit": 0,
         "pvp_accuracy": 0,
         "accuracy": 0,
+        "pve_shots_hit_est": 0,
+        "shots_hit_est": 0,
+        "accuracy_est": 0,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 0,
         "pvp_deaths": 0,
@@ -4734,7 +5086,9 @@
       "total_received": 305717.2,
       "shots": 7321,
       "hits": 1065,
-      "accuracy": 0.145
+      "accuracy": 0.145,
+      "hits_est": 6332,
+      "accuracy_est": 0.865
     },
     "2": {
       "player_dealt": 278071.9,
@@ -4749,7 +5103,9 @@
       "total_received": 313286.9,
       "shots": 18448,
       "hits": 2288,
-      "accuracy": 0.124
+      "accuracy": 0.124,
+      "hits_est": 13501,
+      "accuracy_est": 0.732
     }
   },
   "rivalry_matrix": {
@@ -4860,6 +5216,8 @@
       "total_shots": 5838,
       "total_hits": 257,
       "accuracy": 0.044,
+      "total_hits_est": 4965,
+      "accuracy_est": 0.85,
       "users": 4
     },
     {
@@ -4869,6 +5227,8 @@
       "total_shots": 152,
       "total_hits": 81,
       "accuracy": 0.533,
+      "total_hits_est": 123,
+      "accuracy_est": 0.809,
       "users": 3
     },
     {
@@ -4878,6 +5238,8 @@
       "total_shots": 839,
       "total_hits": 238,
       "accuracy": 0.284,
+      "total_hits_est": 659,
+      "accuracy_est": 0.785,
       "users": 4
     },
     {
@@ -4887,6 +5249,8 @@
       "total_shots": 3889,
       "total_hits": 50,
       "accuracy": 0.013,
+      "total_hits_est": 3808,
+      "accuracy_est": 0.979,
       "users": 4
     },
     {
@@ -4896,6 +5260,8 @@
       "total_shots": 387,
       "total_hits": 201,
       "accuracy": 0.519,
+      "total_hits_est": 355,
+      "accuracy_est": 0.917,
       "users": 3
     },
     {
@@ -4905,6 +5271,8 @@
       "total_shots": 237,
       "total_hits": 98,
       "accuracy": 0.414,
+      "total_hits_est": 208,
+      "accuracy_est": 0.878,
       "users": 3
     },
     {
@@ -4914,6 +5282,8 @@
       "total_shots": 3438,
       "total_hits": 428,
       "accuracy": 0.124,
+      "total_hits_est": 2328,
+      "accuracy_est": 0.677,
       "users": 3
     },
     {
@@ -4923,6 +5293,8 @@
       "total_shots": 6517,
       "total_hits": 939,
       "accuracy": 0.144,
+      "total_hits_est": 4845,
+      "accuracy_est": 0.743,
       "users": 4
     },
     {
@@ -4932,6 +5304,8 @@
       "total_shots": 616,
       "total_hits": 74,
       "accuracy": 0.12,
+      "total_hits_est": 343,
+      "accuracy_est": 0.557,
       "users": 3
     },
     {
@@ -4941,6 +5315,8 @@
       "total_shots": 739,
       "total_hits": 179,
       "accuracy": 0.242,
+      "total_hits_est": 552,
+      "accuracy_est": 0.747,
       "users": 3
     },
     {
@@ -4950,6 +5326,8 @@
       "total_shots": 428,
       "total_hits": 154,
       "accuracy": 0.36,
+      "total_hits_est": 184,
+      "accuracy_est": 0.43,
       "users": 4
     },
     {
@@ -4959,6 +5337,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 3
     },
     {
@@ -4968,6 +5348,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 4
     },
     {
@@ -4977,6 +5359,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
@@ -4986,6 +5370,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 4
     },
     {
@@ -4995,6 +5381,8 @@
       "total_shots": 240,
       "total_hits": 0,
       "accuracy": 0.0,
+      "total_hits_est": 240,
+      "accuracy_est": 1.0,
       "users": 1
     },
     {
@@ -5004,6 +5392,8 @@
       "total_shots": 722,
       "total_hits": 243,
       "accuracy": 0.337,
+      "total_hits_est": 546,
+      "accuracy_est": 0.756,
       "users": 2
     },
     {
@@ -5013,6 +5403,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
@@ -5022,6 +5414,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
@@ -5031,6 +5425,8 @@
       "total_shots": 656,
       "total_hits": 212,
       "accuracy": 0.323,
+      "total_hits_est": 288,
+      "accuracy_est": 0.439,
       "users": 3
     },
     {
@@ -5040,6 +5436,8 @@
       "total_shots": 30,
       "total_hits": 3,
       "accuracy": 0.1,
+      "total_hits_est": 7,
+      "accuracy_est": 0.233,
       "users": 1
     },
     {
@@ -5049,6 +5447,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 4
     },
     {
@@ -5058,6 +5458,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 3
     },
     {
@@ -5067,6 +5469,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 4
     },
     {
@@ -5076,6 +5480,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 4
     },
     {
@@ -5085,6 +5491,8 @@
       "total_shots": 15,
       "total_hits": 2,
       "accuracy": 0.133,
+      "total_hits_est": 7,
+      "accuracy_est": 0.467,
       "users": 2
     },
     {
@@ -5094,6 +5502,8 @@
       "total_shots": 562,
       "total_hits": 145,
       "accuracy": 0.258,
+      "total_hits_est": 326,
+      "accuracy_est": 0.58,
       "users": 3
     },
     {
@@ -5103,6 +5513,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
@@ -5112,6 +5524,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
@@ -5121,6 +5535,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
@@ -5130,6 +5546,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 3
     },
     {
@@ -5139,6 +5557,8 @@
       "total_shots": 439,
       "total_hits": 48,
       "accuracy": 0.109,
+      "total_hits_est": 48,
+      "accuracy_est": 0.109,
       "users": 3
     },
     {
@@ -5148,6 +5568,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
@@ -5157,6 +5579,8 @@
       "total_shots": 25,
       "total_hits": 1,
       "accuracy": 0.04,
+      "total_hits_est": 1,
+      "accuracy_est": 0.04,
       "users": 1
     },
     {
@@ -5166,6 +5590,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
@@ -5175,6 +5601,8 @@
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     }
   ],
@@ -255867,20 +256295,21 @@
         "icon": "bi-bullseye",
         "winner": {
           "type": "player",
-          "name": "Nomad",
-          "steam64": "76561199066952713"
+          "name": "The_Bylarge",
+          "steam64": "76561198834945971"
         },
-        "value": 0.265,
+        "value": 0.919,
         "value_format": "accuracy",
         "runner_up": {
-          "name": "Lithium",
-          "value": 0.186
+          "name": "Darkvale",
+          "value": 0.902
         },
-        "delta_pct": 0.425,
-        "narrative": "clear",
+        "delta_pct": 0.019,
+        "narrative": "close",
         "value_breakdown": {
-          "shots_hit": 510,
-          "shots_fired": 1928
+          "shots_hit": 1859,
+          "shots_fired": 2022,
+          "estimated": true
         }
       },
       {
@@ -255901,7 +256330,8 @@
         "delta_pct": 0.354,
         "narrative": "clear",
         "value_breakdown": {
-          "accuracy": 0.164
+          "accuracy": 0.756,
+          "estimated": true
         }
       },
       {

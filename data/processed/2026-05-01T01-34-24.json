@@ -3,7 +3,7 @@
     "id": "2026-05-01T01-34-24",
     "source_file": "2026-05-01-01-34-24.binpb.gz",
     "source_size_bytes": 4025068,
-    "pipeline_version": 55,
+    "pipeline_version": 56,
     "submitter": "VTrider",
     "map": "vsrmortwasteland.bzn",
     "date": "2026-05-01T01:34:24.676795+00:00",
@@ -144,7 +144,25 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 31,
+    "schema_version": 32,
+    "event_calibration": {
+      "r_by_weapon": {
+        "minigun_c.odf": 2.119,
+        "fafmsl_c.odf": 2.1719,
+        "tracer.odf": 2.1979,
+        "shadowvsr_c.odf": 2.2222,
+        "laservsr_c.odf": 2.0566,
+        "swarmervsr_c.odf": 2.3571,
+        "chainvsr_c.odf": 2.1671,
+        "pummelvsr_c.odf": 1.8333
+      },
+      "r_lobby": 2.119,
+      "ref_hits": 5477,
+      "source": "in_match",
+      "damage_scale": 0.471928,
+      "dup_era": true,
+      "hits_est_source": "damage_events"
+    },
     "proto_schema_version": "v1",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -201,28 +219,32 @@
       "deaths": 2,
       "kd_ratio": 3.0,
       "personal": {
-        "dealt": 71476.2,
-        "received": 22423.9,
-        "pvp_dealt": 23075.4,
-        "pve_dealt": 48260.0,
-        "pvp_received": 22267.1,
-        "pve_received": 16.0,
+        "dealt": 33731.6,
+        "received": 10582.5,
+        "pvp_dealt": 10889.9,
+        "pve_dealt": 22775.2,
+        "pvp_received": 10508.5,
+        "pve_received": 7.6,
         "structure_dealt": 0,
-        "net": 49052.3,
+        "net": 23149.1,
         "ratio": 3.19,
         "shots_fired": 3081,
         "shots_hit": 384,
         "pvp_shots_hit": 384,
         "pvp_accuracy": 0.125,
         "accuracy": 0.125,
+        "pve_shots_hit_est": 1939,
+        "shots_hit_est": 2323,
+        "accuracy_est": 0.754,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 5,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 1.98,
         "pvp_assists": 3,
-        "self_dealt": 140.8,
-        "self_received": 140.8,
+        "self_dealt": 66.5,
+        "self_received": 66.5,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -231,93 +253,120 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.014,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 7.0
+        "hp_efficiency": 3.3
       },
       "assets": {
-        "dealt": 1295.0,
-        "received": 105257.2
+        "dealt": 611.1,
+        "received": 49673.8
       },
       "weapon_breakdown": {
         "Blast": {
-          "dealt": 2400.0,
+          "dealt": 1132.6,
           "received": 0,
           "shots": 1,
           "hits": 1,
           "pvp_hits": 1,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "pve_hits_est": 0,
+          "hits_est": 1,
+          "accuracy_est": 1.0
         },
         "Chain Gun": {
-          "dealt": 14936.0,
-          "received": 4240.0,
+          "dealt": 7048.7,
+          "received": 2001.0,
           "shots": 626,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 570,
+          "hits_est": 570,
+          "accuracy_est": 0.911
         },
         "Craft Explosion": {
-          "dealt": 389.2,
-          "received": 140.8,
+          "dealt": 183.7,
+          "received": 66.5,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 330.0,
-          "received": 1250.0,
+          "dealt": 155.7,
+          "received": 589.9,
           "shots": 6,
           "hits": 2,
           "pvp_hits": 2,
           "self_hits": 0,
-          "accuracy": 0.333
+          "accuracy": 0.333,
+          "pve_hits_est": 1,
+          "hits_est": 3,
+          "accuracy_est": 0.5
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 610.4,
-          "received": 2330.3,
+          "dealt": 288.0,
+          "received": 1099.7,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 9150.0,
-          "received": 2000.0,
+          "dealt": 4318.1,
+          "received": 943.9,
           "shots": 32,
           "hits": 15,
           "pvp_hits": 15,
           "self_hits": 0,
-          "accuracy": 0.469
+          "accuracy": 0.469,
+          "pve_hits_est": 14,
+          "hits_est": 29,
+          "accuracy_est": 0.906
         },
         "Minigun": {
-          "dealt": 9281.0,
-          "received": 7692.0,
+          "dealt": 4380.0,
+          "received": 3630.1,
           "shots": 1146,
           "hits": 290,
           "pvp_hits": 290,
           "self_hits": 0,
-          "accuracy": 0.253
+          "accuracy": 0.253,
+          "pve_hits_est": 257,
+          "hits_est": 547,
+          "accuracy_est": 0.477
         },
         "Pulse": {
-          "dealt": 60.0,
-          "received": 774.0,
+          "dealt": 28.3,
+          "received": 365.3,
           "shots": 61,
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.082
+          "accuracy": 0.082,
+          "pve_hits_est": 0,
+          "hits_est": 5,
+          "accuracy_est": 0.082
         },
         "Pummel": {
-          "dealt": 17822.0,
+          "dealt": 8410.7,
           "received": 0,
           "shots": 1084,
           "hits": 42,
           "pvp_hits": 42,
           "self_hits": 0,
-          "accuracy": 0.039
+          "accuracy": 0.039,
+          "pve_hits_est": 1042,
+          "hits_est": 1084,
+          "accuracy_est": 1.0
         },
         "TAG Cannon (leadervsr_c)": {
           "dealt": 0,
@@ -326,43 +375,58 @@
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.172
+          "accuracy": 0.172,
+          "pve_hits_est": 0,
+          "hits_est": 5,
+          "accuracy_est": 0.172
         },
         "TAG Cannon (swarmervsr_c)": {
-          "dealt": 10206.0,
+          "dealt": 4816.5,
           "received": 0,
           "shots": 96,
           "hits": 24,
           "pvp_hits": 24,
           "self_hits": 0,
-          "accuracy": 0.25
+          "accuracy": 0.25,
+          "pve_hits_est": 55,
+          "hits_est": 79,
+          "accuracy_est": 0.823
         },
         "TAG Cannon (xtagbld_c)": {
-          "dealt": 184.0,
+          "dealt": 86.8,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "TAG Cannon (xtagcar_c)": {
-          "dealt": 964.5,
+          "dealt": 455.2,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Vehicle Explosion": {
-          "dealt": 5143.1,
-          "received": 82.6,
+          "dealt": 2427.2,
+          "received": 39.0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -412,13 +476,13 @@
           "pvp_deaths": 2,
           "pve_kills": 5,
           "pve_deaths": 0,
-          "dealt": 41294.2,
+          "dealt": 19487.9,
           "shots": 1023,
           "hits": 73,
           "pvp_hits": 73,
           "accuracy": 0.071,
           "pvp_accuracy": 0.071,
-          "dpm": 4288.8,
+          "dpm": 2024.0,
           "kd": 0.0
         },
         {
@@ -431,13 +495,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1673.3,
+          "dealt": 789.7,
           "shots": 61,
           "hits": 5,
           "pvp_hits": 5,
           "accuracy": 0.082,
           "pvp_accuracy": 0.082,
-          "dpm": 396.6,
+          "dpm": 187.2,
           "kd": null
         },
         {
@@ -450,13 +514,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 8286.7,
+          "dealt": 3910.7,
           "shots": 912,
           "hits": 263,
           "pvp_hits": 263,
           "accuracy": 0.288,
           "pvp_accuracy": 0.288,
-          "dpm": 3001.5,
+          "dpm": 1416.5,
           "kd": null
         },
         {
@@ -469,36 +533,36 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 20222.0,
+          "dealt": 9543.3,
           "shots": 1085,
           "hits": 43,
           "pvp_hits": 43,
           "accuracy": 0.04,
           "pvp_accuracy": 0.04,
-          "dpm": 19906.8,
+          "dpm": 9394.6,
           "kd": null
         }
       ],
       "hit_targets": {
         "VTrider": {
           "hits": 217,
-          "damage": 10125.1
+          "damage": 4778.3
         },
         "Certified Bad Guy": {
           "hits": 142,
-          "damage": 9235.3
+          "damage": 4358.4
         },
         "Vivify": {
           "hits": 23,
-          "damage": 3488.6
+          "damage": 1646.4
         },
         "Totokomo": {
           "hits": 1,
-          "damage": 187.4
+          "damage": 88.4
         },
         "Domakus": {
           "hits": 1,
-          "damage": 28.0
+          "damage": 13.2
         }
       }
     },
@@ -520,28 +584,32 @@
       "deaths": 4,
       "kd_ratio": 1.25,
       "personal": {
-        "dealt": 57748.1,
-        "received": 22059.8,
-        "pvp_dealt": 22141.0,
-        "pve_dealt": 35220.3,
-        "pvp_received": 21673.0,
+        "dealt": 27253.0,
+        "received": 10410.7,
+        "pvp_dealt": 10449.0,
+        "pve_dealt": 16621.4,
+        "pvp_received": 10228.1,
         "pve_received": 0.0,
         "structure_dealt": 0,
-        "net": 35688.3,
+        "net": 16842.3,
         "ratio": 2.62,
         "shots_fired": 3157,
         "shots_hit": 601,
         "pvp_shots_hit": 601,
         "pvp_accuracy": 0.19,
         "accuracy": 0.19,
+        "pve_shots_hit_est": 1620,
+        "shots_hit_est": 2221,
+        "accuracy_est": 0.704,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 3,
         "pvp_deaths": 4,
         "pve_deaths": 0,
         "effective_pvp_kills": 1.74,
         "pvp_assists": 1,
-        "self_dealt": 386.8,
-        "self_received": 386.8,
+        "self_dealt": 182.6,
+        "self_received": 182.6,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -550,84 +618,108 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.029,
         "ammo_out_episodes": 3,
-        "hp_efficiency": 5.94
+        "hp_efficiency": 2.8
       },
       "assets": {
-        "dealt": 200.0,
-        "received": 1672.1
+        "dealt": 94.4,
+        "received": 789.1
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 34832.0,
-          "received": 1232.0,
+          "dealt": 16438.2,
+          "received": 581.4,
           "shots": 1546,
           "hits": 272,
           "pvp_hits": 272,
           "self_hits": 0,
-          "accuracy": 0.176
+          "accuracy": 0.176,
+          "pve_hits_est": 967,
+          "hits_est": 1239,
+          "accuracy_est": 0.801
         },
         "Craft Explosion": {
-          "dealt": 1015.0,
-          "received": 386.8,
+          "dealt": 479.0,
+          "received": 182.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 2260.0,
-          "received": 550.0,
+          "dealt": 1066.6,
+          "received": 259.6,
           "shots": 38,
           "hits": 11,
           "pvp_hits": 11,
           "self_hits": 0,
-          "accuracy": 0.289
+          "accuracy": 0.289,
+          "pve_hits_est": 13,
+          "hits_est": 24,
+          "accuracy_est": 0.632
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 3262.1,
-          "received": 1065.6,
+          "dealt": 1539.5,
+          "received": 502.9,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 3500.0,
-          "received": 8000.0,
+          "dealt": 1651.7,
+          "received": 3775.4,
           "shots": 8,
           "hits": 8,
           "pvp_hits": 8,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "pve_hits_est": 0,
+          "hits_est": 8,
+          "accuracy_est": 1.0
         },
         "Minigun": {
-          "dealt": 11874.0,
-          "received": 6809.0,
+          "dealt": 5603.7,
+          "received": 3213.4,
           "shots": 1350,
           "hits": 253,
           "pvp_hits": 253,
           "self_hits": 0,
-          "accuracy": 0.187
+          "accuracy": 0.187,
+          "pve_hits_est": 582,
+          "hits_est": 835,
+          "accuracy_est": 0.619
         },
         "Pulse": {
-          "dealt": 1005.0,
-          "received": 1510.0,
+          "dealt": 474.3,
+          "received": 712.6,
           "shots": 214,
           "hits": 57,
           "pvp_hits": 57,
           "self_hits": 0,
-          "accuracy": 0.266
+          "accuracy": 0.266,
+          "pve_hits_est": 58,
+          "hits_est": 115,
+          "accuracy_est": 0.537
         },
         "Shadower Msl (shadowvsr_c)": {
           "dealt": 0,
-          "received": 800.0,
+          "received": 377.5,
           "shots": 1,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         }
       },
       "loadout": {
@@ -672,13 +764,13 @@
           "pvp_deaths": 2,
           "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 35180.7,
+          "dealt": 16602.8,
           "shots": 1546,
           "hits": 272,
           "pvp_hits": 272,
           "accuracy": 0.176,
           "pvp_accuracy": 0.176,
-          "dpm": 5145.9,
+          "dpm": 2428.5,
           "kd": 0.5
         },
         {
@@ -691,13 +783,13 @@
           "pvp_deaths": 2,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 21562.4,
+          "dealt": 10175.9,
           "shots": 1397,
           "hits": 272,
           "pvp_hits": 272,
           "accuracy": 0.195,
           "pvp_accuracy": 0.195,
-          "dpm": 3457.8,
+          "dpm": 1631.8,
           "kd": 0.5
         },
         {
@@ -710,40 +802,40 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1005.0,
+          "dealt": 474.3,
           "shots": 214,
           "hits": 57,
           "pvp_hits": 57,
           "accuracy": 0.266,
           "pvp_accuracy": 0.266,
-          "dpm": 220.8,
+          "dpm": 104.2,
           "kd": null
         }
       ],
       "hit_targets": {
         "Domakus": {
           "hits": 196,
-          "damage": 8240.3
+          "damage": 3888.8
         },
         "Muffin": {
           "hits": 161,
-          "damage": 5216.0
+          "damage": 2461.6
         },
         "Cloaket": {
           "hits": 126,
-          "damage": 4424.9
+          "damage": 2088.3
         },
         "Totokomo": {
           "hits": 71,
-          "damage": 2875.6
+          "damage": 1357.1
         },
         "Nomad": {
           "hits": 46,
-          "damage": 1325.2
+          "damage": 625.4
         },
         "Lithium": {
           "hits": 1,
-          "damage": 43.0
+          "damage": 20.3
         }
       }
     },
@@ -765,28 +857,32 @@
       "deaths": 4,
       "kd_ratio": 1.25,
       "personal": {
-        "dealt": 57618.5,
-        "received": 31640.0,
-        "pvp_dealt": 42522.7,
-        "pve_dealt": 14701.9,
-        "pvp_received": 29525.3,
-        "pve_received": 1720.9,
+        "dealt": 27191.8,
+        "received": 14931.8,
+        "pvp_dealt": 20067.7,
+        "pve_dealt": 6938.3,
+        "pvp_received": 13933.8,
+        "pve_received": 812.1,
         "structure_dealt": 0,
-        "net": 25978.5,
+        "net": 12260.0,
         "ratio": 1.82,
         "shots_fired": 1759,
         "shots_hit": 721,
         "pvp_shots_hit": 721,
         "pvp_accuracy": 0.41,
         "accuracy": 0.41,
+        "pve_shots_hit_est": 465,
+        "shots_hit_est": 1186,
+        "accuracy_est": 0.674,
+        "hits_est_source": "damage_events",
         "pvp_kills": 5,
         "pve_kills": 0,
         "pvp_deaths": 4,
         "pve_deaths": 0,
         "effective_pvp_kills": 5.49,
         "pvp_assists": 2,
-        "self_dealt": 393.8,
-        "self_received": 393.8,
+        "self_dealt": 185.9,
+        "self_received": 185.9,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -795,129 +891,168 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.116,
         "ammo_out_episodes": 1,
-        "hp_efficiency": 4.13
+        "hp_efficiency": 1.95
       },
       "assets": {
         "dealt": 0,
-        "received": 8178.7
+        "received": 3859.8
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 4320.0,
-          "received": 880.0,
+          "dealt": 2038.7,
+          "received": 415.3,
           "shots": 120,
           "hits": 109,
           "pvp_hits": 109,
           "self_hits": 0,
-          "accuracy": 0.908
+          "accuracy": 0.908,
+          "pve_hits_est": 0,
+          "hits_est": 109,
+          "accuracy_est": 0.908
         },
         "Craft Explosion": {
-          "dealt": 548.4,
-          "received": 393.8,
+          "dealt": 258.8,
+          "received": 185.9,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 3480.0,
-          "received": 450.0,
+          "dealt": 1642.3,
+          "received": 212.4,
           "shots": 61,
           "hits": 13,
           "pvp_hits": 13,
           "self_hits": 0,
-          "accuracy": 0.213
+          "accuracy": 0.213,
+          "pve_hits_est": 24,
+          "hits_est": 37,
+          "accuracy_est": 0.607
         },
         "FAF Msl (xfafgnd)": {
-          "dealt": 397.6,
+          "dealt": 187.7,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 4795.2,
-          "received": 570.1,
+          "dealt": 2263.0,
+          "received": 269.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 9000.0,
-          "received": 9500.0,
+          "dealt": 4247.4,
+          "received": 4483.3,
           "shots": 20,
           "hits": 16,
           "pvp_hits": 16,
           "self_hits": 0,
-          "accuracy": 0.8
+          "accuracy": 0.8,
+          "pve_hits_est": 0,
+          "hits_est": 16,
+          "accuracy_est": 0.8
         },
         "Minigun": {
-          "dealt": 16992.0,
-          "received": 9977.0,
+          "dealt": 8019.0,
+          "received": 4708.4,
           "shots": 1406,
           "hits": 499,
           "pvp_hits": 499,
           "self_hits": 0,
-          "accuracy": 0.355
+          "accuracy": 0.355,
+          "pve_hits_est": 418,
+          "hits_est": 917,
+          "accuracy_est": 0.652
         },
         "Pulse": {
-          "dealt": 832.0,
-          "received": 725.0,
+          "dealt": 392.6,
+          "received": 342.1,
           "shots": 103,
           "hits": 63,
           "pvp_hits": 63,
           "self_hits": 0,
-          "accuracy": 0.612
+          "accuracy": 0.612,
+          "pve_hits_est": 10,
+          "hits_est": 73,
+          "accuracy_est": 0.709
         },
         "Shadower Msl (shadowvsr_c)": {
-          "dealt": 13060.0,
-          "received": 3000.0,
+          "dealt": 6163.4,
+          "received": 1415.8,
           "shots": 49,
           "hits": 21,
           "pvp_hits": 21,
           "self_hits": 0,
-          "accuracy": 0.429
+          "accuracy": 0.429,
+          "pve_hits_est": 13,
+          "hits_est": 34,
+          "accuracy_est": 0.694
         },
         "Shadower Msl (xshdwbld)": {
-          "dealt": 916.1,
+          "dealt": 432.3,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Shadower Msl (xshdwcar)": {
-          "dealt": 1951.7,
-          "received": 1077.5,
+          "dealt": 921.1,
+          "received": 508.5,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Shadower Msl (xshdwgnd)": {
-          "dealt": 361.9,
+          "dealt": 170.8,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Vehicle Explosion": {
-          "dealt": 963.6,
+          "dealt": 454.7,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -962,13 +1097,13 @@
           "pvp_deaths": 3,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 50276.5,
+          "dealt": 23726.9,
           "shots": 1428,
           "hits": 465,
           "pvp_hits": 465,
           "accuracy": 0.326,
           "pvp_accuracy": 0.326,
-          "dpm": 4420.2,
+          "dpm": 2086.0,
           "kd": 1.67
         },
         {
@@ -981,13 +1116,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 832.0,
+          "dealt": 392.6,
           "shots": 103,
           "hits": 63,
           "pvp_hits": 63,
           "accuracy": 0.612,
           "pvp_accuracy": 0.612,
-          "dpm": 183.2,
+          "dpm": 86.5,
           "kd": null
         },
         {
@@ -1000,36 +1135,36 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 6510.0,
+          "dealt": 3072.3,
           "shots": 228,
           "hits": 193,
           "pvp_hits": 193,
           "accuracy": 0.846,
           "pvp_accuracy": 0.846,
-          "dpm": 3808.9,
+          "dpm": 1797.5,
           "kd": 0.0
         }
       ],
       "hit_targets": {
         "Cloaket": {
           "hits": 254,
-          "damage": 13407.7
+          "damage": 6327.5
         },
         "Muffin": {
           "hits": 203,
-          "damage": 12122.6
+          "damage": 5721.0
         },
         "Totokomo": {
           "hits": 121,
-          "damage": 7614.6
+          "damage": 3593.6
         },
         "Domakus": {
           "hits": 112,
-          "damage": 3590.1
+          "damage": 1694.3
         },
         "Nomad": {
           "hits": 31,
-          "damage": 5787.7
+          "damage": 2731.4
         }
       }
     },
@@ -1051,28 +1186,32 @@
       "deaths": 5,
       "kd_ratio": 1.2,
       "personal": {
-        "dealt": 52222.7,
-        "received": 26563.1,
-        "pvp_dealt": 19506.1,
-        "pve_dealt": 32235.8,
-        "pvp_received": 25097.7,
-        "pve_received": 984.6,
+        "dealt": 24645.4,
+        "received": 12535.9,
+        "pvp_dealt": 9205.5,
+        "pve_dealt": 15213.0,
+        "pvp_received": 11844.3,
+        "pve_received": 464.6,
         "structure_dealt": 0,
-        "net": 25659.7,
+        "net": 12109.5,
         "ratio": 1.97,
         "shots_fired": 3785,
         "shots_hit": 775,
         "pvp_shots_hit": 775,
         "pvp_accuracy": 0.205,
         "accuracy": 0.205,
+        "pve_shots_hit_est": 1838,
+        "shots_hit_est": 2613,
+        "accuracy_est": 0.69,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 4,
         "pvp_deaths": 5,
         "pve_deaths": 0,
         "effective_pvp_kills": 1.65,
         "pvp_assists": 5,
-        "self_dealt": 480.8,
-        "self_received": 480.8,
+        "self_dealt": 226.9,
+        "self_received": 226.9,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1081,75 +1220,96 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.023,
         "ammo_out_episodes": 32,
-        "hp_efficiency": 4.23
+        "hp_efficiency": 2.0
       },
       "assets": {
         "dealt": 0,
-        "received": 128.0
+        "received": 60.4
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 29228.0,
-          "received": 4944.0,
+          "dealt": 13793.5,
+          "received": 2333.2,
           "shots": 1466,
           "hits": 254,
           "pvp_hits": 254,
           "self_hits": 0,
-          "accuracy": 0.173
+          "accuracy": 0.173,
+          "pve_hits_est": 769,
+          "hits_est": 1023,
+          "accuracy_est": 0.698
         },
         "Craft Explosion": {
-          "dealt": 1042.6,
-          "received": 480.8,
+          "dealt": 492.0,
+          "received": 226.9,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 350.0,
-          "received": 1600.0,
+          "dealt": 165.2,
+          "received": 755.1,
           "shots": 10,
           "hits": 4,
           "pvp_hits": 4,
           "self_hits": 0,
-          "accuracy": 0.4
+          "accuracy": 0.4,
+          "pve_hits_est": 0,
+          "hits_est": 4,
+          "accuracy_est": 0.4
         },
         "FAF Msl (xfafgnd)": {
-          "dealt": 41.2,
-          "received": 178.0,
+          "dealt": 19.4,
+          "received": 84.0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 665.9,
-          "received": 2944.2,
+          "dealt": 314.3,
+          "received": 1389.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Minigun": {
-          "dealt": 19021.0,
-          "received": 7249.0,
+          "dealt": 8976.5,
+          "received": 3421.0,
           "shots": 1890,
           "hits": 357,
           "pvp_hits": 357,
           "self_hits": 0,
-          "accuracy": 0.189
+          "accuracy": 0.189,
+          "pve_hits_est": 1055,
+          "hits_est": 1412,
+          "accuracy_est": 0.747
         },
         "Pulse": {
-          "dealt": 1874.0,
-          "received": 525.0,
+          "dealt": 884.4,
+          "received": 247.8,
           "shots": 419,
           "hits": 160,
           "pvp_hits": 160,
           "self_hits": 0,
-          "accuracy": 0.382
+          "accuracy": 0.382,
+          "pve_hits_est": 14,
+          "hits_est": 174,
+          "accuracy_est": 0.415
         }
       },
       "loadout": {
@@ -1194,13 +1354,13 @@
           "pvp_deaths": 4,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 40129.3,
+          "dealt": 18938.1,
           "shots": 2338,
           "hits": 559,
           "pvp_hits": 559,
           "accuracy": 0.239,
           "pvp_accuracy": 0.239,
-          "dpm": 4871.5,
+          "dpm": 2299.0,
           "kd": 0.5
         },
         {
@@ -1213,13 +1373,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1874.0,
+          "dealt": 884.4,
           "shots": 419,
           "hits": 160,
           "pvp_hits": 160,
           "accuracy": 0.382,
           "pvp_accuracy": 0.382,
-          "dpm": 334.9,
+          "dpm": 158.0,
           "kd": null
         },
         {
@@ -1232,40 +1392,40 @@
           "pvp_deaths": 1,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 10219.4,
+          "dealt": 4822.8,
           "shots": 1028,
           "hits": 56,
           "pvp_hits": 56,
           "accuracy": 0.054,
           "pvp_accuracy": 0.054,
-          "dpm": 2695.8,
+          "dpm": 1272.2,
           "kd": 0.0
         }
       ],
       "hit_targets": {
         "Domakus": {
           "hits": 326,
-          "damage": 8552.8
+          "damage": 4036.3
         },
         "Muffin": {
           "hits": 168,
-          "damage": 3581.1
+          "damage": 1690.0
         },
         "Nomad": {
           "hits": 166,
-          "damage": 3711.0
+          "damage": 1751.3
         },
         "Totokomo": {
           "hits": 89,
-          "damage": 3089.2
+          "damage": 1457.9
         },
         "Cloaket": {
           "hits": 25,
-          "damage": 550.0
+          "damage": 259.6
         },
         "Darkvale": {
           "hits": 1,
-          "damage": 22.0
+          "damage": 10.4
         }
       }
     },
@@ -1287,28 +1447,32 @@
       "deaths": 2,
       "kd_ratio": 3.5,
       "personal": {
-        "dealt": 50580.7,
-        "received": 23595.5,
-        "pvp_dealt": 25155.8,
-        "pve_dealt": 25144.0,
-        "pvp_received": 22976.7,
-        "pve_received": 338.0,
+        "dealt": 23870.5,
+        "received": 11135.4,
+        "pvp_dealt": 11871.7,
+        "pve_dealt": 11866.2,
+        "pvp_received": 10843.3,
+        "pve_received": 159.5,
         "structure_dealt": 0,
-        "net": 26985.2,
+        "net": 12735.1,
         "ratio": 2.14,
         "shots_fired": 2786,
         "shots_hit": 395,
         "pvp_shots_hit": 395,
         "pvp_accuracy": 0.142,
         "accuracy": 0.142,
+        "pve_shots_hit_est": 1538,
+        "shots_hit_est": 1933,
+        "accuracy_est": 0.694,
+        "hits_est_source": "damage_events",
         "pvp_kills": 5,
         "pve_kills": 2,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 5.71,
         "pvp_assists": 7,
-        "self_dealt": 280.9,
-        "self_received": 280.9,
+        "self_dealt": 132.5,
+        "self_received": 132.5,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1317,75 +1481,96 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.011,
         "ammo_out_episodes": 6,
-        "hp_efficiency": 4.85
+        "hp_efficiency": 2.29
       },
       "assets": {
         "dealt": 0,
-        "received": 87.0
+        "received": 41.1
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 11440.0,
-          "received": 9440.0,
+          "dealt": 5398.9,
+          "received": 4455.0,
           "shots": 548,
           "hits": 86,
           "pvp_hits": 86,
           "self_hits": 0,
-          "accuracy": 0.157
+          "accuracy": 0.157,
+          "pve_hits_est": 330,
+          "hits_est": 416,
+          "accuracy_est": 0.759
         },
         "Craft Explosion": {
-          "dealt": 442.7,
-          "received": 246.7,
+          "dealt": 208.9,
+          "received": 116.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 1530.0,
-          "received": 50.0,
+          "dealt": 722.0,
+          "received": 23.6,
           "shots": 25,
           "hits": 9,
           "pvp_hits": 9,
           "self_hits": 0,
-          "accuracy": 0.36
+          "accuracy": 0.36,
+          "pve_hits_est": 6,
+          "hits_est": 15,
+          "accuracy_est": 0.6
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 2422.5,
-          "received": 126.6,
+          "dealt": 1143.3,
+          "received": 59.7,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 11000.0,
-          "received": 3500.0,
+          "dealt": 5191.2,
+          "received": 1651.7,
           "shots": 22,
           "hits": 20,
           "pvp_hits": 20,
           "self_hits": 0,
-          "accuracy": 0.909
+          "accuracy": 0.909,
+          "pve_hits_est": 0,
+          "hits_est": 20,
+          "accuracy_est": 0.909
         },
         "Minigun": {
-          "dealt": 16587.0,
-          "received": 4972.0,
+          "dealt": 7827.9,
+          "received": 2346.4,
           "shots": 1968,
           "hits": 222,
           "pvp_hits": 222,
           "self_hits": 0,
-          "accuracy": 0.113
+          "accuracy": 0.113,
+          "pve_hits_est": 1122,
+          "hits_est": 1344,
+          "accuracy_est": 0.683
         },
         "Pulse": {
-          "dealt": 1080.0,
-          "received": 1535.0,
+          "dealt": 509.7,
+          "received": 724.4,
           "shots": 148,
           "hits": 35,
           "pvp_hits": 35,
           "self_hits": 0,
-          "accuracy": 0.236
+          "accuracy": 0.236,
+          "pve_hits_est": 58,
+          "hits_est": 93,
+          "accuracy_est": 0.628
         },
         "TAG Cannon (leadervsr_c)": {
           "dealt": 0,
@@ -1394,34 +1579,46 @@
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.238
+          "accuracy": 0.238,
+          "pve_hits_est": 0,
+          "hits_est": 5,
+          "accuracy_est": 0.238
         },
         "TAG Cannon (swarmervsr_c)": {
-          "dealt": 5454.0,
+          "dealt": 2573.9,
           "received": 0,
           "shots": 54,
           "hits": 18,
           "pvp_hits": 18,
           "self_hits": 0,
-          "accuracy": 0.333
+          "accuracy": 0.333,
+          "pve_hits_est": 22,
+          "hits_est": 40,
+          "accuracy_est": 0.741
         },
         "TAG Cannon (xtagbld_c)": {
-          "dealt": 50.4,
-          "received": 4.4,
+          "dealt": 23.8,
+          "received": 2.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "TAG Cannon (xtagcar_c)": {
-          "dealt": 574.0,
+          "dealt": 270.9,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -1461,13 +1658,13 @@
           "pvp_deaths": 2,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 49500.7,
+          "dealt": 23360.8,
           "shots": 2638,
           "hits": 360,
           "pvp_hits": 360,
           "accuracy": 0.136,
           "pvp_accuracy": 0.136,
-          "dpm": 3132.8,
+          "dpm": 1478.5,
           "kd": 2.5
         },
         {
@@ -1480,40 +1677,40 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1080.0,
+          "dealt": 509.7,
           "shots": 148,
           "hits": 35,
           "pvp_hits": 35,
           "accuracy": 0.236,
           "pvp_accuracy": 0.236,
-          "dpm": 592.3,
+          "dpm": 279.5,
           "kd": null
         }
       ],
       "hit_targets": {
         "Lithium": {
           "hits": 159,
-          "damage": 7049.1
+          "damage": 3326.7
         },
         "Vivify": {
           "hits": 111,
-          "damage": 5866.7
+          "damage": 2768.6
         },
         "Darkvale": {
           "hits": 82,
-          "damage": 6204.9
+          "damage": 2928.3
         },
         "VTrider": {
           "hits": 31,
-          "damage": 4226.5
+          "damage": 1994.6
         },
         "Certified Bad Guy": {
           "hits": 11,
-          "damage": 1776.6
+          "damage": 838.4
         },
         "Domakus": {
           "hits": 1,
-          "damage": 32.0
+          "damage": 15.1
         }
       }
     },
@@ -1535,28 +1732,32 @@
       "deaths": 2,
       "kd_ratio": 5.5,
       "personal": {
-        "dealt": 50577.7,
-        "received": 31392.2,
-        "pvp_dealt": 46055.4,
-        "pve_dealt": 4329.4,
-        "pvp_received": 31117.2,
-        "pve_received": 82.0,
+        "dealt": 23869.0,
+        "received": 14814.9,
+        "pvp_dealt": 21734.8,
+        "pve_dealt": 2043.1,
+        "pvp_received": 14685.1,
+        "pve_received": 38.7,
         "structure_dealt": 0,
-        "net": 19185.5,
+        "net": 9054.2,
         "ratio": 1.61,
         "shots_fired": 1603,
         "shots_hit": 588,
         "pvp_shots_hit": 588,
         "pvp_accuracy": 0.367,
         "accuracy": 0.367,
+        "pve_shots_hit_est": 48,
+        "shots_hit_est": 636,
+        "accuracy_est": 0.397,
+        "hits_est_source": "damage_events",
         "pvp_kills": 11,
         "pve_kills": 0,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 10.89,
         "pvp_assists": 7,
-        "self_dealt": 193.0,
-        "self_received": 193.0,
+        "self_dealt": 91.1,
+        "self_received": 91.1,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1565,120 +1766,156 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.081,
         "ammo_out_episodes": 23,
-        "hp_efficiency": 3.28
+        "hp_efficiency": 1.55
       },
       "assets": {
         "dealt": 0,
-        "received": 2196.9
+        "received": 1036.8
       },
       "weapon_breakdown": {
         "Craft Explosion": {
-          "dealt": 904.8,
-          "received": 246.0,
+          "dealt": 427.0,
+          "received": 116.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 2250.0,
-          "received": 900.0,
+          "dealt": 1061.8,
+          "received": 424.7,
           "shots": 40,
           "hits": 19,
           "pvp_hits": 19,
           "self_hits": 0,
-          "accuracy": 0.475
+          "accuracy": 0.475,
+          "pve_hits_est": 2,
+          "hits_est": 21,
+          "accuracy_est": 0.525
         },
         "FAF Msl (xfafgnd)": {
-          "dealt": 178.0,
+          "dealt": 84.0,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 3787.4,
-          "received": 1621.2,
+          "dealt": 1787.4,
+          "received": 765.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 19000.0,
-          "received": 5500.0,
+          "dealt": 8966.6,
+          "received": 2595.6,
           "shots": 42,
           "hits": 38,
           "pvp_hits": 38,
           "self_hits": 0,
-          "accuracy": 0.905
+          "accuracy": 0.905,
+          "pve_hits_est": 0,
+          "hits_est": 38,
+          "accuracy_est": 0.905
         },
         "Minigun": {
-          "dealt": 11660.0,
-          "received": 11671.0,
+          "dealt": 5502.7,
+          "received": 5507.9,
           "shots": 1294,
           "hits": 495,
           "pvp_hits": 495,
           "self_hits": 0,
-          "accuracy": 0.383
+          "accuracy": 0.383,
+          "pve_hits_est": 11,
+          "hits_est": 506,
+          "accuracy_est": 0.391
         },
         "Pulse": {
-          "dealt": 412.0,
-          "received": 866.0,
+          "dealt": 194.4,
+          "received": 408.7,
           "shots": 176,
           "hits": 21,
           "pvp_hits": 21,
           "self_hits": 0,
-          "accuracy": 0.119
+          "accuracy": 0.119,
+          "pve_hits_est": 19,
+          "hits_est": 40,
+          "accuracy_est": 0.227
         },
         "Pummel": {
-          "dealt": 176.0,
-          "received": 28.0,
+          "dealt": 83.1,
+          "received": 13.2,
           "shots": 10,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 10,
+          "hits_est": 10,
+          "accuracy_est": 1.0
         },
         "Shadower Msl (shadowvsr_c)": {
-          "dealt": 9120.0,
+          "dealt": 4304.0,
           "received": 0,
           "shots": 41,
           "hits": 15,
           "pvp_hits": 15,
           "self_hits": 0,
-          "accuracy": 0.366
+          "accuracy": 0.366,
+          "pve_hits_est": 6,
+          "hits_est": 21,
+          "accuracy_est": 0.512
         },
         "Shadower Msl (xshdwbld)": {
-          "dealt": 240.0,
+          "dealt": 113.3,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Shadower Msl (xshdwcar)": {
-          "dealt": 2683.9,
+          "dealt": 1266.6,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Shadower Msl (xshdwgnd)": {
-          "dealt": 165.6,
+          "dealt": 78.2,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -1728,13 +1965,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 40473.6,
+          "dealt": 19100.6,
           "shots": 1395,
           "hits": 549,
           "pvp_hits": 549,
           "accuracy": 0.394,
           "pvp_accuracy": 0.394,
-          "dpm": 2957.9,
+          "dpm": 1395.9,
           "kd": 8.0
         },
         {
@@ -1747,13 +1984,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 642.3,
+          "dealt": 303.1,
           "shots": 176,
           "hits": 21,
           "pvp_hits": 21,
           "accuracy": 0.119,
           "pvp_accuracy": 0.119,
-          "dpm": 281.5,
+          "dpm": 132.9,
           "kd": null
         },
         {
@@ -1766,13 +2003,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 9285.8,
+          "dealt": 4382.2,
           "shots": 22,
           "hits": 18,
           "pvp_hits": 18,
           "accuracy": 0.818,
           "pvp_accuracy": 0.818,
-          "dpm": 5779.5,
+          "dpm": 2727.5,
           "kd": 3.0
         },
         {
@@ -1785,44 +2022,44 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 176.0,
+          "dealt": 83.1,
           "shots": 10,
           "hits": 0,
           "pvp_hits": 0,
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
-          "dpm": 3352.4,
+          "dpm": 1582.1,
           "kd": null
         }
       ],
       "hit_targets": {
         "Certified Bad Guy": {
           "hits": 210,
-          "damage": 13769.5
+          "damage": 6498.2
         },
         "Lithium": {
           "hits": 136,
-          "damage": 10581.3
+          "damage": 4993.6
         },
         "VTrider": {
           "hits": 93,
-          "damage": 9115.7
+          "damage": 4301.9
         },
         "Vivify": {
           "hits": 81,
-          "damage": 6708.6
+          "damage": 3166.0
         },
         "Darkvale": {
           "hits": 55,
-          "damage": 5768.4
+          "damage": 2722.3
         },
         "Cloaket": {
           "hits": 8,
-          "damage": 57.0
+          "damage": 26.9
         },
         "Totokomo": {
           "hits": 5,
-          "damage": 55.0
+          "damage": 26.0
         }
       }
     },
@@ -1844,28 +2081,32 @@
       "deaths": 2,
       "kd_ratio": 2.5,
       "personal": {
-        "dealt": 46134.4,
-        "received": 14824.4,
-        "pvp_dealt": 11308.6,
-        "pve_dealt": 34681.2,
-        "pvp_received": 14647.8,
-        "pve_received": 32.0,
+        "dealt": 21772.1,
+        "received": 6996.0,
+        "pvp_dealt": 5336.9,
+        "pve_dealt": 16367.0,
+        "pvp_received": 6912.7,
+        "pve_received": 15.1,
         "structure_dealt": 0,
-        "net": 31310.0,
+        "net": 14776.1,
         "ratio": 3.11,
         "shots_fired": 4479,
         "shots_hit": 433,
         "pvp_shots_hit": 433,
         "pvp_accuracy": 0.097,
         "accuracy": 0.097,
+        "pve_shots_hit_est": 2041,
+        "shots_hit_est": 2474,
+        "accuracy_est": 0.552,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 4,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 0.86,
         "pvp_assists": 6,
-        "self_dealt": 144.6,
-        "self_received": 144.6,
+        "self_dealt": 68.2,
+        "self_received": 68.2,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1874,66 +2115,84 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.005,
         "ammo_out_episodes": 15,
-        "hp_efficiency": 6.99
+        "hp_efficiency": 3.3
       },
       "assets": {
         "dealt": 0,
-        "received": 370.0
+        "received": 174.6
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 26564.0,
-          "received": 4240.0,
+          "dealt": 12536.3,
+          "received": 2001.0,
           "shots": 1465,
           "hits": 160,
           "pvp_hits": 160,
           "self_hits": 0,
-          "accuracy": 0.109
+          "accuracy": 0.109,
+          "pve_hits_est": 804,
+          "hits_est": 964,
+          "accuracy_est": 0.658
         },
         "Craft Explosion": {
-          "dealt": 455.8,
-          "received": 144.6,
+          "dealt": 215.1,
+          "received": 68.2,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 250.0,
-          "received": 650.0,
+          "dealt": 118.0,
+          "received": 306.8,
           "shots": 14,
           "hits": 2,
           "pvp_hits": 2,
           "self_hits": 0,
-          "accuracy": 0.143
+          "accuracy": 0.143,
+          "pve_hits_est": 0,
+          "hits_est": 2,
+          "accuracy_est": 0.143
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 470.6,
-          "received": 1226.0,
+          "dealt": 222.1,
+          "received": 578.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Minigun": {
-          "dealt": 17044.0,
-          "received": 3630.0,
+          "dealt": 8043.5,
+          "received": 1713.1,
           "shots": 2502,
           "hits": 150,
           "pvp_hits": 150,
           "self_hits": 0,
-          "accuracy": 0.06
+          "accuracy": 0.06,
+          "pve_hits_est": 1237,
+          "hits_est": 1387,
+          "accuracy_est": 0.554
         },
         "Pulse": {
-          "dealt": 1350.0,
-          "received": 590.0,
+          "dealt": 637.1,
+          "received": 278.4,
           "shots": 498,
           "hits": 121,
           "pvp_hits": 121,
           "self_hits": 0,
-          "accuracy": 0.243
+          "accuracy": 0.243,
+          "pve_hits_est": 0,
+          "hits_est": 121,
+          "accuracy_est": 0.243
         }
       },
       "loadout": {
@@ -1978,13 +2237,13 @@
           "pvp_deaths": 1,
           "pve_kills": 4,
           "pve_deaths": 0,
-          "dealt": 38758.6,
+          "dealt": 18291.3,
           "shots": 2955,
           "hits": 171,
           "pvp_hits": 171,
           "accuracy": 0.058,
           "pvp_accuracy": 0.058,
-          "dpm": 3647.3,
+          "dpm": 1721.3,
           "kd": 1.0
         },
         {
@@ -1997,13 +2256,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 6025.8,
+          "dealt": 2843.7,
           "shots": 1026,
           "hits": 141,
           "pvp_hits": 141,
           "accuracy": 0.137,
           "pvp_accuracy": 0.137,
-          "dpm": 1679.7,
+          "dpm": 792.7,
           "kd": 0.0
         },
         {
@@ -2016,48 +2275,48 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1350.0,
+          "dealt": 637.1,
           "shots": 498,
           "hits": 121,
           "pvp_hits": 121,
           "accuracy": 0.243,
           "pvp_accuracy": 0.243,
-          "dpm": 395.9,
+          "dpm": 186.8,
           "kd": null
         }
       ],
       "hit_targets": {
         "Lithium": {
           "hits": 156,
-          "damage": 5329.6
+          "damage": 2515.2
         },
         "Vivify": {
           "hits": 96,
-          "damage": 1247.0
+          "damage": 588.5
         },
         "VTrider": {
           "hits": 89,
-          "damage": 1931.0
+          "damage": 911.3
         },
         "Certified Bad Guy": {
           "hits": 41,
-          "damage": 1153.0
+          "damage": 544.1
         },
         "Darkvale": {
           "hits": 40,
-          "damage": 1312.0
+          "damage": 619.2
         },
         "Cloaket": {
           "hits": 6,
-          "damage": 192.0
+          "damage": 90.6
         },
         "Muffin": {
           "hits": 4,
-          "damage": 112.0
+          "damage": 52.9
         },
         "Nomad": {
           "hits": 1,
-          "damage": 32.0
+          "damage": 15.1
         }
       }
     },
@@ -2079,28 +2338,32 @@
       "deaths": 6,
       "kd_ratio": 0.5,
       "personal": {
-        "dealt": 35895.3,
-        "received": 29289.3,
-        "pvp_dealt": 12368.4,
-        "pve_dealt": 23000.4,
-        "pvp_received": 28762.9,
+        "dealt": 16940.0,
+        "received": 13822.5,
+        "pvp_dealt": 5837.0,
+        "pve_dealt": 10854.5,
+        "pvp_received": 13574.0,
         "pve_received": 0.0,
         "structure_dealt": 0,
-        "net": 6605.9,
+        "net": 3117.5,
         "ratio": 1.23,
         "shots_fired": 2212,
         "shots_hit": 547,
         "pvp_shots_hit": 547,
         "pvp_accuracy": 0.247,
         "accuracy": 0.247,
+        "pve_shots_hit_est": 963,
+        "shots_hit_est": 1510,
+        "accuracy_est": 0.683,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 3,
         "pvp_deaths": 6,
         "pve_deaths": 0,
         "effective_pvp_kills": 0.14,
         "pvp_assists": 1,
-        "self_dealt": 526.4,
-        "self_received": 526.4,
+        "self_dealt": 248.4,
+        "self_received": 248.4,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -2109,75 +2372,96 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.095,
         "ammo_out_episodes": 30,
-        "hp_efficiency": 2.77
+        "hp_efficiency": 1.31
       },
       "assets": {
         "dealt": 0,
-        "received": 304.7
+        "received": 143.8
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 22292.0,
-          "received": 64.0,
+          "dealt": 10520.2,
+          "received": 30.2,
           "shots": 1074,
           "hits": 122,
           "pvp_hits": 122,
           "self_hits": 0,
-          "accuracy": 0.114
+          "accuracy": 0.114,
+          "pve_hits_est": 682,
+          "hits_est": 804,
+          "accuracy_est": 0.749
         },
         "Craft Explosion": {
-          "dealt": 1160.2,
-          "received": 526.4,
+          "dealt": 547.5,
+          "received": 248.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 640.0,
-          "received": 500.0,
+          "dealt": 302.0,
+          "received": 236.0,
           "shots": 8,
           "hits": 3,
           "pvp_hits": 3,
           "self_hits": 0,
-          "accuracy": 0.375
+          "accuracy": 0.375,
+          "pve_hits_est": 3,
+          "hits_est": 6,
+          "accuracy_est": 0.75
         },
         "FAF Msl (xfafgnd)": {
-          "dealt": 111.3,
+          "dealt": 52.5,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 2047.7,
-          "received": 921.3,
+          "dealt": 966.4,
+          "received": 434.8,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Minigun": {
-          "dealt": 7251.0,
-          "received": 9218.0,
+          "dealt": 3421.9,
+          "received": 4350.2,
           "shots": 692,
           "hits": 218,
           "pvp_hits": 218,
           "self_hits": 0,
-          "accuracy": 0.315
+          "accuracy": 0.315,
+          "pve_hits_est": 259,
+          "hits_est": 477,
+          "accuracy_est": 0.689
         },
         "Pulse": {
-          "dealt": 2393.0,
-          "received": 965.0,
+          "dealt": 1129.3,
+          "received": 455.4,
           "shots": 438,
           "hits": 204,
           "pvp_hits": 204,
           "self_hits": 0,
-          "accuracy": 0.466
+          "accuracy": 0.466,
+          "pve_hits_est": 19,
+          "hits_est": 223,
+          "accuracy_est": 0.509
         }
       },
       "loadout": {
@@ -2222,13 +2506,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 2512.6,
+          "dealt": 1185.8,
           "shots": 438,
           "hits": 204,
           "pvp_hits": 204,
           "accuracy": 0.466,
           "pvp_accuracy": 0.466,
-          "dpm": 260.0,
+          "dpm": 122.7,
           "kd": null
         },
         {
@@ -2241,13 +2525,13 @@
           "pvp_deaths": 5,
           "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 26796.7,
+          "dealt": 12646.1,
           "shots": 1344,
           "hits": 292,
           "pvp_hits": 292,
           "accuracy": 0.217,
           "pvp_accuracy": 0.217,
-          "dpm": 6102.9,
+          "dpm": 2880.1,
           "kd": 0.0
         },
         {
@@ -2260,36 +2544,36 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 6586.0,
+          "dealt": 3108.1,
           "shots": 430,
           "hits": 51,
           "pvp_hits": 51,
           "accuracy": 0.119,
           "pvp_accuracy": 0.119,
-          "dpm": 1844.8,
+          "dpm": 870.6,
           "kd": 0.0
         }
       ],
       "hit_targets": {
         "Domakus": {
           "hits": 220,
-          "damage": 5462.0
+          "damage": 2577.7
         },
         "Cloaket": {
           "hits": 123,
-          "damage": 3085.9
+          "damage": 1456.3
         },
         "Nomad": {
           "hits": 117,
-          "damage": 2201.6
+          "damage": 1039.0
         },
         "Muffin": {
           "hits": 77,
-          "damage": 1411.0
+          "damage": 665.9
         },
         "Darkvale": {
           "hits": 10,
-          "damage": 120.0
+          "damage": 56.6
         }
       }
     },
@@ -2311,28 +2595,32 @@
       "deaths": 3,
       "kd_ratio": 2.0,
       "personal": {
-        "dealt": 34733.8,
-        "received": 19491.5,
-        "pvp_dealt": 16343.8,
-        "pve_dealt": 18094.0,
-        "pvp_received": 19050.2,
-        "pve_received": 145.3,
+        "dealt": 16391.8,
+        "received": 9198.6,
+        "pvp_dealt": 7713.1,
+        "pve_dealt": 8539.0,
+        "pvp_received": 8990.3,
+        "pve_received": 68.6,
         "structure_dealt": 0,
-        "net": 15242.3,
+        "net": 7193.3,
         "ratio": 1.78,
         "shots_fired": 2997,
         "shots_hit": 690,
         "pvp_shots_hit": 690,
         "pvp_accuracy": 0.23,
         "accuracy": 0.23,
+        "pve_shots_hit_est": 1255,
+        "shots_hit_est": 1945,
+        "accuracy_est": 0.649,
+        "hits_est_source": "damage_events",
         "pvp_kills": 5,
         "pve_kills": 1,
         "pvp_deaths": 3,
         "pve_deaths": 0,
         "effective_pvp_kills": 3.64,
         "pvp_assists": 7,
-        "self_dealt": 296.0,
-        "self_received": 296.0,
+        "self_dealt": 139.7,
+        "self_received": 139.7,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -2341,84 +2629,108 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.025,
         "ammo_out_episodes": 12,
-        "hp_efficiency": 4.04
+        "hp_efficiency": 1.91
       },
       "assets": {
         "dealt": 0,
-        "received": 491.0
+        "received": 231.7
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 10212.0,
-          "received": 5072.0,
+          "dealt": 4819.3,
+          "received": 2393.6,
           "shots": 520,
           "hits": 82,
           "pvp_hits": 82,
           "self_hits": 0,
-          "accuracy": 0.158
+          "accuracy": 0.158,
+          "pve_hits_est": 276,
+          "hits_est": 358,
+          "accuracy_est": 0.688
         },
         "Craft Explosion": {
-          "dealt": 296.0,
-          "received": 328.8,
+          "dealt": 139.7,
+          "received": 155.2,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 260.0,
-          "received": 450.0,
+          "dealt": 122.7,
+          "received": 212.4,
           "shots": 14,
           "hits": 1,
           "pvp_hits": 1,
           "self_hits": 0,
-          "accuracy": 0.071
+          "accuracy": 0.071,
+          "pve_hits_est": 2,
+          "hits_est": 3,
+          "accuracy_est": 0.214
         },
         "FAF Msl (xfafgnd)": {
-          "dealt": 261.2,
+          "dealt": 123.3,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 343.6,
-          "received": 851.8,
+          "dealt": 162.2,
+          "received": 402.0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 1250.0,
-          "received": 3500.0,
+          "dealt": 589.9,
+          "received": 1651.7,
           "shots": 4,
           "hits": 3,
           "pvp_hits": 3,
           "self_hits": 0,
-          "accuracy": 0.75
+          "accuracy": 0.75,
+          "pve_hits_est": 0,
+          "hits_est": 3,
+          "accuracy_est": 0.75
         },
         "Minigun": {
-          "dealt": 19665.0,
-          "received": 5126.0,
+          "dealt": 9280.5,
+          "received": 2419.1,
           "shots": 2040,
           "hits": 390,
           "pvp_hits": 390,
           "self_hits": 0,
-          "accuracy": 0.191
+          "accuracy": 0.191,
+          "pve_hits_est": 965,
+          "hits_est": 1355,
+          "accuracy_est": 0.664
         },
         "Pulse": {
-          "dealt": 2446.0,
-          "received": 2430.0,
+          "dealt": 1154.3,
+          "received": 1146.8,
           "shots": 419,
           "hits": 214,
           "pvp_hits": 214,
           "self_hits": 0,
-          "accuracy": 0.511
+          "accuracy": 0.511,
+          "pve_hits_est": 12,
+          "hits_est": 226,
+          "accuracy_est": 0.539
         }
       },
       "loadout": {
@@ -2463,13 +2775,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 2446.0,
+          "dealt": 1154.3,
           "shots": 419,
           "hits": 214,
           "pvp_hits": 214,
           "accuracy": 0.511,
           "pvp_accuracy": 0.511,
-          "dpm": 386.1,
+          "dpm": 182.2,
           "kd": null
         },
         {
@@ -2482,13 +2794,13 @@
           "pvp_deaths": 2,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 24861.0,
+          "dealt": 11732.6,
           "shots": 1770,
           "hits": 244,
           "pvp_hits": 244,
           "accuracy": 0.138,
           "pvp_accuracy": 0.138,
-          "dpm": 4303.1,
+          "dpm": 2030.7,
           "kd": 1.0
         },
         {
@@ -2501,48 +2813,48 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 7426.8,
+          "dealt": 3504.9,
           "shots": 808,
           "hits": 232,
           "pvp_hits": 232,
           "accuracy": 0.287,
           "pvp_accuracy": 0.287,
-          "dpm": 1347.7,
+          "dpm": 636.0,
           "kd": 2.0
         }
       ],
       "hit_targets": {
         "Vivify": {
           "hits": 175,
-          "damage": 4205.0
+          "damage": 1984.5
         },
         "Certified Bad Guy": {
           "hits": 154,
-          "damage": 2828.6
+          "damage": 1334.9
         },
         "VTrider": {
           "hits": 141,
-          "damage": 4127.0
+          "damage": 1947.6
         },
         "Lithium": {
           "hits": 102,
-          "damage": 1944.0
+          "damage": 917.4
         },
         "Darkvale": {
           "hits": 84,
-          "damage": 2312.0
+          "damage": 1091.1
         },
         "Cloaket": {
           "hits": 22,
-          "damage": 464.0
+          "damage": 219.0
         },
         "Totokomo": {
           "hits": 10,
-          "damage": 253.0
+          "damage": 119.4
         },
         "Muffin": {
           "hits": 2,
-          "damage": 210.2
+          "damage": 99.2
         }
       }
     },
@@ -2564,28 +2876,32 @@
       "deaths": 4,
       "kd_ratio": 0.5,
       "personal": {
-        "dealt": 26469.7,
-        "received": 16526.9,
-        "pvp_dealt": 12395.8,
-        "pve_dealt": 13733.7,
-        "pvp_received": 15755.3,
-        "pve_received": 431.3,
+        "dealt": 12491.8,
+        "received": 7799.5,
+        "pvp_dealt": 5849.9,
+        "pve_dealt": 6481.3,
+        "pvp_received": 7435.4,
+        "pve_received": 203.6,
         "structure_dealt": 0,
-        "net": 9942.9,
+        "net": 4692.3,
         "ratio": 1.6,
         "shots_fired": 1248,
         "shots_hit": 354,
         "pvp_shots_hit": 354,
         "pvp_accuracy": 0.284,
         "accuracy": 0.284,
+        "pve_shots_hit_est": 569,
+        "shots_hit_est": 923,
+        "accuracy_est": 0.74,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 0,
         "pvp_deaths": 4,
         "pve_deaths": 0,
         "effective_pvp_kills": 1.91,
         "pvp_assists": 2,
-        "self_dealt": 340.2,
-        "self_received": 340.2,
+        "self_dealt": 160.6,
+        "self_received": 160.6,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -2594,66 +2910,84 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.018,
         "ammo_out_episodes": 7,
-        "hp_efficiency": 3.48
+        "hp_efficiency": 1.64
       },
       "assets": {
         "dealt": 0,
-        "received": 123228.0
+        "received": 58154.7
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 10580.0,
-          "received": 3904.0,
+          "dealt": 4993.0,
+          "received": 1842.4,
           "shots": 552,
           "hits": 190,
           "pvp_hits": 190,
           "self_hits": 0,
-          "accuracy": 0.344
+          "accuracy": 0.344,
+          "pve_hits_est": 173,
+          "hits_est": 363,
+          "accuracy_est": 0.658
         },
         "Craft Explosion": {
-          "dealt": 982.0,
-          "received": 340.2,
+          "dealt": 463.4,
+          "received": 160.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Laser": {
-          "dealt": 3000.0,
-          "received": 6500.0,
+          "dealt": 1415.8,
+          "received": 3067.5,
           "shots": 6,
           "hits": 6,
           "pvp_hits": 6,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "pve_hits_est": 0,
+          "hits_est": 6,
+          "accuracy_est": 1.0
         },
         "Minigun": {
-          "dealt": 5303.0,
-          "received": 1947.0,
+          "dealt": 2502.6,
+          "received": 918.8,
           "shots": 478,
           "hits": 68,
           "pvp_hits": 68,
           "self_hits": 0,
-          "accuracy": 0.142
+          "accuracy": 0.142,
+          "pve_hits_est": 343,
+          "hits_est": 411,
+          "accuracy_est": 0.86
         },
         "Pulse": {
-          "dealt": 1450.0,
-          "received": 660.0,
+          "dealt": 684.3,
+          "received": 311.5,
           "shots": 212,
           "hits": 90,
           "pvp_hits": 90,
           "self_hits": 0,
-          "accuracy": 0.425
+          "accuracy": 0.425,
+          "pve_hits_est": 53,
+          "hits_est": 143,
+          "accuracy_est": 0.675
         },
         "Vehicle Explosion": {
-          "dealt": 5154.7,
+          "dealt": 2432.7,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -2698,13 +3032,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 5343.6,
+          "dealt": 2521.8,
           "shots": 212,
           "hits": 90,
           "pvp_hits": 90,
           "accuracy": 0.425,
           "pvp_accuracy": 0.425,
-          "dpm": 470.6,
+          "dpm": 222.1,
           "kd": null
         },
         {
@@ -2717,13 +3051,13 @@
           "pvp_deaths": 4,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 21126.2,
+          "dealt": 9970.0,
           "shots": 1036,
           "hits": 264,
           "pvp_hits": 264,
           "accuracy": 0.255,
           "pvp_accuracy": 0.255,
-          "dpm": 4632.9,
+          "dpm": 2186.4,
           "kd": 0.25
         },
         {
@@ -2749,345 +3083,385 @@
       "hit_targets": {
         "Nomad": {
           "hits": 228,
-          "damage": 5992.8
+          "damage": 2828.2
         },
         "Domakus": {
           "hits": 83,
-          "damage": 5212.0
+          "damage": 2459.7
         },
         "Totokomo": {
           "hits": 30,
-          "damage": 484.9
+          "damage": 228.9
         },
         "Muffin": {
           "hits": 12,
-          "damage": 312.7
+          "damage": 147.6
         },
         "Lithium": {
           "hits": 1,
-          "damage": 150.7
+          "damage": 71.1
         }
       }
     }
   ],
   "faction_totals": {
     "1": {
-      "player_dealt": 253502.8,
-      "pvp_dealt": 121939.1,
-      "pve_dealt": 131563.7,
-      "asset_dealt": 1295.0,
-      "total_dealt": 254797.8,
-      "player_received": 111727.5,
-      "pvp_received": 110058.9,
-      "pve_received": 1668.5,
-      "asset_received": 108402.1,
-      "total_received": 220129.6,
+      "player_dealt": 119635.1,
+      "pvp_dealt": 57546.5,
+      "pve_dealt": 62088.6,
+      "asset_dealt": 611.1,
+      "total_dealt": 120246.2,
+      "player_received": 52727.3,
+      "pvp_received": 51939.9,
+      "pve_received": 787.4,
+      "asset_received": 51158.0,
+      "total_received": 103885.3,
       "shots": 14946,
       "hits": 2490,
-      "accuracy": 0.167
+      "accuracy": 0.167,
+      "hits_est": 9311,
+      "accuracy_est": 0.623
     },
     "2": {
-      "player_dealt": 229954.3,
-      "pvp_dealt": 108934.1,
-      "pve_dealt": 121020.2,
-      "asset_dealt": 200.0,
-      "total_dealt": 230154.3,
-      "player_received": 126079.1,
-      "pvp_received": 120814.2,
-      "pve_received": 5264.9,
-      "asset_received": 133511.5,
-      "total_received": 259590.6,
+      "player_dealt": 108521.9,
+      "pvp_dealt": 51409.1,
+      "pve_dealt": 57112.8,
+      "asset_dealt": 94.4,
+      "total_dealt": 108616.3,
+      "player_received": 59500.3,
+      "pvp_received": 57015.6,
+      "pve_received": 2484.6,
+      "asset_received": 63007.8,
+      "total_received": 122508.1,
       "shots": 12161,
       "hits": 2998,
-      "accuracy": 0.247
+      "accuracy": 0.247,
+      "hits_est": 8453,
+      "accuracy_est": 0.695
     }
   },
   "rivalry_matrix": {
     "Nomad": {
-      "VTrider": 4127.0,
-      "Certified Bad Guy": 2828.6,
-      "Cloaket": 464.0,
-      "Muffin": 210.2,
-      "Vivify": 4205.0,
-      "Lithium": 1944.0,
-      "Darkvale": 2312.0,
-      "Totokomo": 253.0
+      "VTrider": 1947.6,
+      "Certified Bad Guy": 1334.9,
+      "Cloaket": 219.0,
+      "Muffin": 99.2,
+      "Vivify": 1984.5,
+      "Lithium": 917.4,
+      "Darkvale": 1091.1,
+      "Totokomo": 119.4
     },
     "VTrider": {
-      "Nomad": 5787.7,
-      "Domakus": 3590.1,
-      "Cloaket": 13407.7,
-      "Totokomo": 7614.6,
-      "Muffin": 12122.6
+      "Nomad": 2731.4,
+      "Domakus": 1694.3,
+      "Cloaket": 6327.5,
+      "Totokomo": 3593.6,
+      "Muffin": 5721.0
     },
     "Certified Bad Guy": {
-      "Nomad": 2201.6,
-      "Cloaket": 3085.9,
-      "Muffin": 1411.0,
-      "Domakus": 5462.0,
-      "Darkvale": 120.0,
-      "Totokomo": 88.0
+      "Nomad": 1039.0,
+      "Cloaket": 1456.3,
+      "Muffin": 665.9,
+      "Domakus": 2577.7,
+      "Darkvale": 56.6,
+      "Totokomo": 41.5
     },
     "Cloaket": {
-      "Certified Bad Guy": 9235.3,
-      "Totokomo": 187.4,
-      "Muffin": 11.0,
-      "VTrider": 10125.1,
-      "Vivify": 3488.6,
-      "Domakus": 28.0
+      "Certified Bad Guy": 4358.4,
+      "Totokomo": 88.4,
+      "Muffin": 5.2,
+      "VTrider": 4778.3,
+      "Vivify": 1646.4,
+      "Domakus": 13.2
     },
     "Totokomo": {
-      "Certified Bad Guy": 1153.0,
-      "VTrider": 1931.0,
-      "Lithium": 5329.6,
-      "Vivify": 1247.0,
-      "Darkvale": 1312.0,
-      "Muffin": 112.0,
-      "Cloaket": 192.0,
-      "Nomad": 32.0
+      "Certified Bad Guy": 544.1,
+      "VTrider": 911.3,
+      "Lithium": 2515.2,
+      "Vivify": 588.5,
+      "Darkvale": 619.2,
+      "Muffin": 52.9,
+      "Cloaket": 90.6,
+      "Nomad": 15.1
     },
     "Vivify": {
-      "Totokomo": 2875.6,
-      "Muffin": 5216.0,
-      "Nomad": 1325.2,
-      "Domakus": 8240.3,
-      "Lithium": 43.0,
-      "Cloaket": 4424.9,
-      "Darkvale": 16.0
+      "Totokomo": 1357.1,
+      "Muffin": 2461.6,
+      "Nomad": 625.4,
+      "Domakus": 3888.8,
+      "Lithium": 20.3,
+      "Cloaket": 2088.3,
+      "Darkvale": 7.6
     },
     "Domakus": {
-      "VTrider": 9115.7,
-      "Vivify": 6708.6,
-      "Certified Bad Guy": 13769.5,
-      "Lithium": 10581.3,
-      "Darkvale": 5768.4,
-      "Cloaket": 57.0,
-      "Totokomo": 55.0
+      "VTrider": 4301.9,
+      "Vivify": 3166.0,
+      "Certified Bad Guy": 6498.2,
+      "Lithium": 4993.6,
+      "Darkvale": 2722.3,
+      "Cloaket": 26.9,
+      "Totokomo": 26.0
     },
     "Muffin": {
-      "Vivify": 5866.7,
-      "VTrider": 4226.5,
-      "Lithium": 7049.1,
-      "Darkvale": 6204.9,
-      "Certified Bad Guy": 1776.6,
-      "Domakus": 32.0
+      "Vivify": 2768.6,
+      "VTrider": 1994.6,
+      "Lithium": 3326.7,
+      "Darkvale": 2928.3,
+      "Certified Bad Guy": 838.4,
+      "Domakus": 15.1
     },
     "Darkvale": {
-      "Cloaket": 85.6,
-      "Muffin": 312.7,
-      "Nomad": 5992.8,
-      "Domakus": 5212.0,
-      "Totokomo": 484.9,
-      "Lithium": 150.7,
-      "Vivify": 157.1
+      "Cloaket": 40.4,
+      "Muffin": 147.6,
+      "Nomad": 2828.2,
+      "Domakus": 2459.7,
+      "Totokomo": 228.9,
+      "Lithium": 71.1,
+      "Vivify": 74.2
     },
     "Lithium": {
-      "Domakus": 8552.8,
-      "Totokomo": 3089.2,
-      "Muffin": 3581.1,
-      "Nomad": 3711.0,
-      "Darkvale": 22.0,
-      "Cloaket": 550.0
+      "Domakus": 4036.3,
+      "Totokomo": 1457.9,
+      "Muffin": 1690.0,
+      "Nomad": 1751.3,
+      "Darkvale": 10.4,
+      "Cloaket": 259.6
     }
   },
   "top_rivalries": [
     {
       "a": "Cloaket",
       "b": "VTrider",
-      "a_to_b": 10125.1,
-      "b_to_a": 13407.7,
-      "total": 23532.8
+      "a_to_b": 4778.3,
+      "b_to_a": 6327.5,
+      "total": 11105.8
     },
     {
       "a": "Certified Bad Guy",
       "b": "Domakus",
-      "a_to_b": 5462.0,
-      "b_to_a": 13769.5,
-      "total": 19231.5
+      "a_to_b": 2577.7,
+      "b_to_a": 6498.2,
+      "total": 9075.9
     },
     {
       "a": "Domakus",
       "b": "Lithium",
-      "a_to_b": 10581.3,
-      "b_to_a": 8552.8,
-      "total": 19134.1
+      "a_to_b": 4993.6,
+      "b_to_a": 4036.3,
+      "total": 9029.9
     },
     {
       "a": "Muffin",
       "b": "VTrider",
-      "a_to_b": 4226.5,
-      "b_to_a": 12122.6,
-      "total": 16349.1
+      "a_to_b": 1994.6,
+      "b_to_a": 5721.0,
+      "total": 7715.6
     },
     {
       "a": "Domakus",
       "b": "Vivify",
-      "a_to_b": 6708.6,
-      "b_to_a": 8240.3,
-      "total": 14948.9
+      "a_to_b": 3166.0,
+      "b_to_a": 3888.8,
+      "total": 7054.8
     }
   ],
   "weapon_meta": [
     {
       "weapon": "Chain Gun",
       "odf": "chainvsr_c.odf",
-      "total_damage": 164404.0,
+      "total_damage": 77586.9,
       "total_shots": 7917,
       "total_hits": 1275,
       "accuracy": 0.161,
+      "total_hits_est": 5846,
+      "accuracy_est": 0.738,
       "users": 9
     },
     {
       "weapon": "Minigun",
       "odf": "minigun_c.odf",
-      "total_damage": 134678.0,
+      "total_damage": 63558.3,
       "total_shots": 14766,
       "total_hits": 2942,
       "accuracy": 0.199,
+      "total_hits_est": 9191,
+      "accuracy_est": 0.622,
       "users": 10
     },
     {
       "weapon": "Laser",
       "odf": "laservsr_c.odf",
-      "total_damage": 55900.0,
+      "total_damage": 26380.8,
       "total_shots": 134,
       "total_hits": 106,
       "accuracy": 0.791,
+      "total_hits_est": 120,
+      "accuracy_est": 0.896,
       "users": 7
     },
     {
       "weapon": "Shadower Msl (shadowvsr_c)",
       "odf": "shadowvsr_c.odf",
-      "total_damage": 22180.0,
+      "total_damage": 10467.4,
       "total_shots": 91,
       "total_hits": 36,
       "accuracy": 0.396,
+      "total_hits_est": 55,
+      "accuracy_est": 0.604,
       "users": 2
     },
     {
       "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
-      "total_damage": 18405.6,
+      "total_damage": 8686.1,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 9
     },
     {
       "weapon": "Pummel",
       "odf": "pummelvsr_c.odf",
-      "total_damage": 17998.0,
+      "total_damage": 8493.8,
       "total_shots": 1094,
       "total_hits": 42,
       "accuracy": 0.038,
+      "total_hits_est": 1094,
+      "accuracy_est": 1.0,
       "users": 2
     },
     {
       "weapon": "TAG Cannon (swarmervsr_c)",
       "odf": "swarmervsr_c.odf",
-      "total_damage": 15660.0,
+      "total_damage": 7390.4,
       "total_shots": 150,
       "total_hits": 42,
       "accuracy": 0.28,
+      "total_hits_est": 119,
+      "accuracy_est": 0.793,
       "users": 2
     },
     {
       "weapon": "Pulse",
       "odf": "tracer.odf",
-      "total_damage": 12902.0,
+      "total_damage": 6088.8,
       "total_shots": 2688,
       "total_hits": 970,
       "accuracy": 0.361,
+      "total_hits_est": 1213,
+      "accuracy_est": 0.451,
       "users": 10
     },
     {
       "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
-      "total_damage": 11350.0,
+      "total_damage": 5356.4,
       "total_shots": 216,
       "total_hits": 64,
       "accuracy": 0.296,
+      "total_hits_est": 115,
+      "accuracy_est": 0.532,
       "users": 9
     },
     {
       "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
-      "total_damage": 11261.5,
+      "total_damage": 5314.6,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 3
     },
     {
       "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
-      "total_damage": 7236.7,
+      "total_damage": 3415.2,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 10
     },
     {
       "weapon": "Shadower Msl (xshdwcar)",
       "odf": "xshdwcar.odf",
-      "total_damage": 4635.6,
+      "total_damage": 2187.7,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Blast",
       "odf": "blast_c.odf",
-      "total_damage": 2400.0,
+      "total_damage": 1132.6,
       "total_shots": 1,
       "total_hits": 1,
       "accuracy": 1.0,
+      "total_hits_est": 1,
+      "accuracy_est": 1.0,
       "users": 1
     },
     {
       "weapon": "TAG Cannon (xtagcar_c)",
       "odf": "xtagcar_c.odf",
-      "total_damage": 1538.5,
+      "total_damage": 726.1,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Shadower Msl (xshdwbld)",
       "odf": "xshdwbld.odf",
-      "total_damage": 1156.1,
+      "total_damage": 545.6,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "FAF Msl (xfafgnd)",
       "odf": "xfafgnd.odf",
-      "total_damage": 989.3,
+      "total_damage": 466.9,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 5
     },
     {
       "weapon": "Shadower Msl (xshdwgnd)",
       "odf": "xshdwgnd.odf",
-      "total_damage": 527.5,
+      "total_damage": 248.9,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "TAG Cannon (xtagbld_c)",
       "odf": "xtagbld_c.odf",
-      "total_damage": 234.4,
+      "total_damage": 110.6,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
@@ -3097,6 +3471,8 @@
       "total_shots": 50,
       "total_hits": 10,
       "accuracy": 0.2,
+      "total_hits_est": 10,
+      "accuracy_est": 0.2,
       "users": 0
     }
   ],
@@ -3262,40 +3638,18 @@
       "Nomad": [
         0,
         0,
-        506.0,
-        528.0,
+        238.8,
+        249.2,
         0,
-        396.0,
-        1372.6,
-        0,
-        0,
-        0,
-        230.0,
-        775.0,
-        0,
-        33.0,
+        186.9,
+        647.8,
         0,
         0,
         0,
+        108.5,
+        365.7,
         0,
-        0,
-        0,
-        0,
-        796.0,
-        730.2,
-        0,
-        0,
-        0,
-        0,
-        0,
-        88.0,
-        1012.0,
-        0,
-        0,
-        633.0,
-        352.0,
-        340.0,
-        65.0,
+        15.6,
         0,
         0,
         0,
@@ -3303,8 +3657,21 @@
         0,
         0,
         0,
-        115.0,
-        60.0,
+        375.7,
+        344.6,
+        0,
+        0,
+        0,
+        0,
+        0,
+        41.5,
+        477.6,
+        0,
+        0,
+        298.7,
+        166.1,
+        160.5,
+        30.7,
         0,
         0,
         0,
@@ -3312,45 +3679,8 @@
         0,
         0,
         0,
-        0,
-        0,
-        197.0,
-        0,
-        0,
-        1788.0,
-        3384.0,
-        0,
-        992.0,
-        1648.0,
-        0,
-        0,
-        0,
-        0,
-        1416.0,
-        0,
-        1084.0,
-        0,
-        55.0,
-        105.0,
-        90.0,
-        305.0,
-        460.0,
-        35.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1350.0,
-        215.0,
-        105.0,
-        0,
-        0,
-        0,
-        0,
-        195.0,
-        0,
-        215.0,
+        54.3,
+        28.3,
         0,
         0,
         0,
@@ -3359,75 +3689,102 @@
         0,
         0,
         0,
-        1160.0,
-        2446.0,
-        1345.0,
-        1330.0,
-        2132.0,
-        2020.0,
-        2630.0
+        0,
+        93.0,
+        0,
+        0,
+        843.8,
+        1597.0,
+        0,
+        468.2,
+        777.7,
+        0,
+        0,
+        0,
+        0,
+        668.3,
+        0,
+        511.6,
+        0,
+        26.0,
+        49.6,
+        42.5,
+        143.9,
+        217.1,
+        16.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        637.1,
+        101.5,
+        49.6,
+        0,
+        0,
+        0,
+        0,
+        92.0,
+        0,
+        101.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        547.4,
+        1154.3,
+        634.7,
+        627.7,
+        1006.2,
+        953.3,
+        1241.2
       ],
       "VTrider": [
         0,
         0,
-        506.0,
+        238.8,
         0,
         0,
         0,
-        66.0,
-        542.7,
-        451.1,
-        2366.9,
-        10.0,
-        3140.3,
-        835.9,
-        22.0,
-        1673.6,
-        460.0,
+        31.1,
+        256.1,
+        212.9,
+        1117.0,
+        4.7,
+        1482.0,
+        394.5,
+        10.4,
+        789.8,
+        217.1,
         0,
-        862.3,
-        1012.0,
-        0,
-        0,
-        2404.7,
-        904.0,
-        1776.7,
-        1730.0,
-        530.0,
+        407.0,
+        477.6,
         0,
         0,
-        0,
-        2132.0,
-        957.6,
-        1548.8,
+        1134.9,
+        426.6,
+        838.5,
+        816.4,
+        250.1,
         0,
         0,
         0,
-        0,
-        0,
-        0,
-        482.8,
-        2887.9,
-        490.0,
+        1006.2,
+        451.9,
+        730.9,
         0,
         0,
         0,
         0,
         0,
         0,
-        0,
-        0,
-        0,
-        2090.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        2040.0,
-        1020.0,
-        963.6,
-        2658.7,
+        227.9,
+        1362.9,
+        231.2,
         0,
         0,
         0,
@@ -3435,38 +3792,57 @@
         0,
         0,
         0,
-        423.5,
-        3720.5,
+        0,
+        0,
+        986.3,
         0,
         0,
         0,
-        3732.3,
-        1000.0,
         0,
         0,
-        1036.3,
-        0,
-        0,
-        0,
-        1584.5,
-        4543.7,
+        962.7,
+        481.4,
+        454.7,
+        1254.7,
         0,
         0,
         0,
         0,
         0,
         0,
-        1888.0,
-        2532.0,
+        0,
+        199.9,
+        1755.8,
         0,
         0,
         0,
-        290.0,
-        5.0,
-        270.0,
+        1761.4,
+        471.9,
         0,
         0,
-        27.0,
+        489.0,
+        0,
+        0,
+        0,
+        747.8,
+        2144.3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        891.0,
+        1194.9,
+        0,
+        0,
+        0,
+        136.9,
+        2.4,
+        127.4,
+        0,
+        0,
+        12.7,
         0,
         0,
         0,
@@ -3482,68 +3858,36 @@
         0,
         0,
         0,
-        996.6,
-        160.0,
-        2573.9,
+        470.3,
+        75.5,
+        1214.7,
         0,
         0,
         0,
         0,
         0,
         0,
-        1190.0,
-        530.0,
-        797.6,
+        561.6,
+        250.1,
+        376.4,
         0,
         0,
         0,
-        388.0,
-        535.0,
-        40.0,
+        183.1,
+        252.5,
+        18.9,
         0,
         0,
-        250.0,
-        1320.0,
-        933.9,
-        0,
-        0,
-        0,
-        510.0,
-        20.0,
-        255.0,
-        30.0,
+        118.0,
+        622.9,
+        440.7,
         0,
         0,
         0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        564.0,
-        4924.0,
-        320.0,
-        495.9,
-        0,
-        0,
-        256.0,
-        12.0,
-        15.0,
-        450.0,
-        150.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        2784.0,
-        4280.0,
-        1842.8,
+        240.7,
+        9.4,
+        120.3,
+        14.2,
         0,
         0,
         0,
@@ -3556,27 +3900,59 @@
         0,
         0,
         0,
+        266.2,
+        2323.8,
+        151.0,
+        234.0,
         0,
         0,
-        0,
-        816.0,
-        2556.0,
-        2144.0,
-        0,
-        0,
-        0,
-        624.0,
-        1427.9,
-        0,
-        0,
-        0,
+        120.8,
+        5.7,
+        7.1,
+        212.4,
+        70.8,
         0,
         0,
         0,
         0,
         0,
-        304.0,
-        1399.8,
+        0,
+        1313.8,
+        2019.9,
+        869.7,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        385.1,
+        1206.2,
+        1011.8,
+        0,
+        0,
+        0,
+        294.5,
+        673.8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        143.5,
+        660.6,
         0,
         0,
         0,
@@ -3592,86 +3968,84 @@
         0,
         0,
         0,
-        1442.6,
+        680.8,
         0,
-        821.8,
-        755.1,
-        0,
-        0,
-        578.8,
-        0,
-        854.7,
-        1408.0,
-        0,
-        10.0,
-        1515.0,
-        528.0,
-        0,
-        957.0,
+        387.8,
+        356.4,
         0,
         0,
+        273.1,
         0,
+        403.4,
+        664.5,
         0,
+        4.7,
+        715.0,
+        249.2,
         0,
-        704.0,
-        132.0,
-        2178.0,
-        0,
-        0,
-        0,
-        0,
-        100.0,
-        2208.0,
-        0,
-        3515.9,
-        417.8,
-        0,
-        1000.0,
-        2049.4,
+        451.6,
         0,
         0,
         0,
         0,
         0,
+        332.2,
+        62.3,
+        1027.9,
         0,
-        1000.0,
-        2029.1,
-        2164.0,
+        0,
+        0,
+        0,
+        47.2,
+        1042.0,
+        0,
+        1659.2,
+        197.2,
+        0,
+        471.9,
+        967.2,
         0,
         0,
         0,
         0,
         0,
         0,
-        2727.8,
-        60.0,
+        471.9,
+        957.6,
+        1021.3,
         0,
         0,
         0,
         0,
         0,
-        1034.5,
         0,
-        0,
-        288.0,
-        2840.0,
-        0,
-        0,
-        766.0,
-        0,
-        0,
-        711.8,
-        569.1,
-        1746.0,
-        4692.0,
+        1287.3,
+        28.3,
         0,
         0,
         0,
-        3456.0,
-        5884.0,
-        110.0,
         0,
         0,
+        488.2,
+        0,
+        0,
+        135.9,
+        1340.3,
+        0,
+        0,
+        361.5,
+        0,
+        0,
+        335.9,
+        268.6,
+        824.0,
+        2214.3,
+        0,
+        0,
+        0,
+        1631.0,
+        2776.8,
+        51.9,
         0,
         0,
         0,
@@ -3682,11 +4056,13 @@
         0,
         0,
         0,
-        1280.0,
-        2656.0,
-        8370.0,
-        5932.0,
-        1984.0,
+        0,
+        0,
+        604.1,
+        1253.4,
+        3950.0,
+        2799.5,
+        936.3,
         0,
         0,
         0
@@ -3700,69 +4076,45 @@
         0,
         0,
         0,
-        594.0,
+        280.3,
         0,
-        1245.0,
-        351.0,
+        587.6,
+        165.6,
         0,
-        429.0,
-        0,
-        0,
-        0,
-        495.0,
-        1441.1,
-        0,
-        962.6,
-        508.1,
-        0,
-        55.0,
-        310.0,
+        202.5,
         0,
         0,
         0,
-        110.0,
-        395.0,
-        340.0,
+        233.6,
+        680.1,
+        0,
+        454.3,
+        239.8,
+        0,
+        26.0,
+        146.3,
         0,
         0,
         0,
-        1070.0,
-        1675.0,
-        2120.0,
-        1926.0,
+        51.9,
+        186.4,
+        160.5,
         0,
         0,
         0,
-        0,
-        0,
-        1610.0,
-        2130.0,
-        1210.0,
-        308.0,
+        505.0,
+        790.5,
+        1000.5,
+        908.9,
         0,
         0,
         0,
         0,
         0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        272.0,
-        2196.0,
-        0,
-        0,
-        1240.0,
-        0,
-        0,
-        0,
-        636.0,
-        0,
-        0,
-        660.0,
-        4368.0,
-        3188.0,
+        759.8,
+        1005.2,
+        571.0,
+        145.4,
         0,
         0,
         0,
@@ -3772,11 +4124,33 @@
         0,
         0,
         0,
-        1888.0,
-        635.6,
-        130.0,
+        0,
+        128.4,
+        1036.4,
         0,
         0,
+        585.2,
+        0,
+        0,
+        0,
+        300.1,
+        0,
+        0,
+        311.5,
+        2061.4,
+        1504.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        891.0,
+        300.0,
+        61.4,
         0,
         0,
         0,
@@ -3789,14 +4163,16 @@
         0,
         0,
         0,
-        1024.0,
-        1104.0,
-        1344.0,
-        3196.0,
-        3780.0,
-        948.0,
-        156.0,
-        84.0,
+        0,
+        0,
+        483.3,
+        521.0,
+        634.3,
+        1508.3,
+        1783.9,
+        447.4,
+        73.6,
+        39.6,
         0
       ],
       "Vivify": [
@@ -3808,81 +4184,33 @@
         0,
         0,
         0,
-        939.6,
-        187.0,
+        443.4,
+        88.3,
         0,
-        1364.0,
-        583.0,
-        1373.2,
-        2286.9,
-        2094.3,
-        510.0,
+        643.7,
+        275.1,
+        648.0,
+        1079.3,
+        988.4,
+        240.7,
         0,
-        1259.0,
-        0,
-        0,
-        0,
-        0,
-        1170.1,
-        1170.0,
-        0,
-        1150.0,
-        559.0,
-        1860.0,
-        410.0,
-        480.0,
-        0,
-        0,
-        0,
-        408.4,
+        594.2,
         0,
         0,
         0,
         0,
+        552.2,
+        552.2,
+        0,
+        542.7,
+        263.8,
+        877.8,
+        193.5,
+        226.5,
         0,
         0,
         0,
-        0,
-        288.0,
-        96.6,
-        157.0,
-        74.0,
-        145.0,
-        299.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        304.0,
-        80.0,
-        0,
-        3204.0,
-        608.0,
-        996.2,
-        140.0,
-        0,
-        0,
-        0,
-        0,
-        190.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1248.0,
-        5376.0,
-        4056.0,
-        2472.0,
-        0,
-        0,
-        0,
-        1500.0,
-        2257.9,
+        192.7,
         0,
         0,
         0,
@@ -3891,20 +4219,68 @@
         0,
         0,
         0,
+        135.9,
+        45.6,
+        74.1,
+        34.9,
+        68.4,
+        141.1,
         0,
         0,
-        3780.0,
         0,
         0,
         0,
         0,
-        608.0,
+        143.5,
+        37.8,
+        0,
+        1512.1,
+        286.9,
+        470.1,
+        66.1,
         0,
         0,
-        2300.0,
-        4656.0,
-        4136.0,
-        972.0,
+        0,
+        0,
+        89.7,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        589.0,
+        2537.1,
+        1914.1,
+        1166.6,
+        0,
+        0,
+        0,
+        707.9,
+        1065.6,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1783.9,
+        0,
+        0,
+        0,
+        0,
+        286.9,
+        0,
+        0,
+        1085.4,
+        2197.3,
+        1951.9,
+        458.7,
         0
       ],
       "Domakus": [
@@ -3916,50 +4292,50 @@
         0,
         0,
         0,
-        176.0,
-        1443.6,
+        83.1,
+        681.3,
         0,
         0,
         0,
         0,
-        1573.2,
+        742.4,
         0,
         0,
-        1265.0,
+        597.0,
         0,
         0,
-        1676.2,
-        330.0,
+        791.0,
+        155.7,
         0,
-        341.3,
+        161.1,
         0,
         0,
         0,
-        2622.6,
-        1166.0,
+        1237.7,
+        550.3,
         0,
         0,
         0,
         0,
         0,
-        1105.8,
+        521.8,
         0,
         0,
         0,
         0,
         0,
-        742.2,
-        2068.4,
+        350.3,
+        976.1,
         0,
-        22.0,
+        10.4,
         0,
-        612.9,
-        2730.3,
+        289.2,
+        1288.5,
         0,
         0,
         0,
         0,
-        1000.0,
+        471.9,
         0,
         0,
         0,
@@ -3968,52 +4344,52 @@
         0,
         0,
         0,
-        5454.9,
-        1540.0,
+        2574.3,
+        726.8,
         0,
         0,
         0,
         0,
         0,
-        3215.9,
+        1517.7,
         0,
         0,
-        1020.0,
+        481.4,
         0,
         0,
         0,
-        1721.7,
+        812.5,
         0,
         0,
-        2153.4,
-        1850.5,
+        1016.3,
+        873.3,
         0,
         0,
-        3824.1,
-        857.7,
+        1804.7,
+        404.8,
         0,
-        35.0,
+        16.5,
         0,
         0,
         0,
         0,
-        2500.0,
-        3000.0,
+        1179.8,
+        1415.8,
         0,
         0,
         0,
         0,
         0,
-        1500.0,
-        2285.8,
+        707.9,
+        1078.7,
         0,
         0,
-        45.0,
-        162.0,
-        406.3,
+        21.2,
+        76.5,
+        191.8,
         0,
         0,
-        130.0
+        61.4
       ],
       "Muffin": [
         0,
@@ -4025,59 +4401,48 @@
         0,
         0,
         0,
-        1352.0,
-        2010.0,
-        375.0,
+        638.0,
+        948.6,
+        177.0,
         0,
         0,
         0,
-        11.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        3103.8,
-        0,
-        0,
-        0,
-        130.0,
-        2035.0,
-        1115.0,
-        1270.0,
-        22.0,
-        1287.0,
-        440.0,
-        0,
-        0,
-        0,
-        1770.0,
-        361.0,
-        0,
-        0,
-        22.0,
-        860.0,
-        242.0,
-        0,
-        583.7,
-        0,
-        0,
-        0,
-        520.0,
-        2600.0,
-        430.0,
+        5.2,
         0,
         0,
         0,
         0,
         0,
         0,
+        1464.8,
         0,
         0,
         0,
+        61.4,
+        960.4,
+        526.2,
+        599.3,
+        10.4,
+        607.4,
+        207.6,
         0,
-        656.0,
+        0,
+        0,
+        835.3,
+        170.4,
+        0,
+        0,
+        10.4,
+        405.9,
+        114.2,
+        0,
+        275.4,
+        0,
+        0,
+        0,
+        245.4,
+        1227.0,
+        202.9,
         0,
         0,
         0,
@@ -4087,39 +4452,50 @@
         0,
         0,
         0,
-        672.0,
         0,
-        650.0,
-        310.0,
-        170.0,
-        345.0,
-        205.0,
-        0,
-        0,
-        0,
-        4133.9,
-        4680.0,
-        1706.6,
+        309.6,
         0,
         0,
         0,
         0,
-        1814.1,
-        1707.7,
         0,
         0,
         0,
         0,
-        2586.0,
-        3438.0,
-        256.0,
-        2432.0,
         0,
-        192.0,
-        1596.0,
-        1452.4,
-        904.0,
-        134.5,
+        317.1,
+        0,
+        306.8,
+        146.3,
+        80.2,
+        162.8,
+        96.7,
+        0,
+        0,
+        0,
+        1950.9,
+        2208.6,
+        805.4,
+        0,
+        0,
+        0,
+        0,
+        856.1,
+        805.9,
+        0,
+        0,
+        0,
+        0,
+        1220.4,
+        1622.5,
+        120.8,
+        1147.7,
+        0,
+        90.6,
+        753.2,
+        685.4,
+        426.6,
+        63.5,
         0,
         0
       ],
@@ -4135,41 +4511,41 @@
         0,
         0,
         0,
-        1619.0,
+        764.0,
         0,
         0,
         0,
         0,
         0,
         0,
-        180.0,
+        84.9,
         0,
         0,
         0,
         0,
         0,
         0,
-        1300.0,
-        1910.0,
-        410.0,
+        613.5,
+        901.4,
+        193.5,
         0,
         0,
         0,
         0,
-        1199.0,
-        220.0,
+        565.8,
+        103.8,
         0,
-        264.0,
+        124.6,
         0,
         0,
         0,
-        384.0,
-        4156.0,
-        2301.7,
+        181.2,
+        1961.3,
+        1086.2,
         0,
         0,
         0,
-        996.1,
+        470.1,
         0,
         0,
         0,
@@ -4184,8 +4560,8 @@
         0,
         0,
         0,
-        1440.0,
-        994.3,
+        679.6,
+        469.2,
         0,
         0,
         0,
@@ -4194,18 +4570,18 @@
         0,
         0,
         0,
-        60.0,
+        28.3,
         0,
         0,
         0,
         0,
-        10.0,
-        30.0,
-        180.0,
+        4.7,
+        14.2,
+        84.9,
         0,
-        573.5,
+        270.7,
         0,
-        2188.4,
+        1032.8,
         0,
         0,
         0,
@@ -4219,17 +4595,17 @@
         0,
         0,
         0,
-        711.6,
-        2000.0,
-        1142.7,
+        335.8,
+        943.9,
+        539.3,
         0,
         0,
         0,
         0,
-        100.0,
-        500.0,
+        47.2,
+        236.0,
         0,
-        1599.5
+        754.8
       ],
       "Lithium": [
         0,
@@ -4244,43 +4620,41 @@
         0,
         0,
         0,
-        1058.0,
-        1990.0,
-        1840.0,
-        2290.0,
-        610.0,
+        499.3,
+        939.1,
+        868.3,
+        1080.7,
+        287.9,
         0,
-        599.8,
+        283.1,
         0,
-        577.2,
+        272.4,
         0,
-        1254.4,
-        125.0,
-        0,
-        0,
-        1540.0,
-        0,
-        363.0,
-        506.0,
+        592.0,
+        59.0,
         0,
         0,
-        528.0,
-        88.0,
-        1539.0,
-        1636.0,
+        726.8,
+        0,
+        171.3,
+        238.8,
         0,
         0,
-        890.0,
-        1972.0,
-        20.0,
+        249.2,
+        41.5,
+        726.3,
+        772.1,
+        0,
+        0,
+        420.0,
+        930.6,
+        9.4,
         0,
         0,
         0,
         0,
-        3788.0,
-        1908.3,
-        0,
-        0,
+        1787.7,
+        900.6,
         0,
         0,
         0,
@@ -4289,273 +4663,275 @@
         0,
         0,
         0,
-        224.0,
-        0,
-        496.0,
-        3816.0,
-        1359.6,
         0,
         0,
+        105.7,
         0,
-        0,
-        60.0,
-        10.0,
-        990.0,
-        0,
-        0,
-        0,
-        4440.0,
-        2120.0,
-        0,
-        768.0,
-        36.0,
-        492.0,
-        1464.0,
-        5280.0,
-        0,
-        288.0,
-        1683.4,
-        130.0,
-        85.0,
-        10.0,
-        0,
-        0,
-        0,
-        135.0,
-        190.0,
+        234.1,
+        1800.9,
+        641.6,
         0,
         0,
         0,
         0,
+        28.3,
+        4.7,
+        467.2,
         0,
         0,
-        2079.0,
+        0,
+        2095.4,
+        1000.5,
+        0,
+        362.4,
+        17.0,
+        232.2,
+        690.9,
+        2491.8,
+        0,
+        135.9,
+        794.4,
+        61.4,
+        40.1,
+        4.7,
         0,
         0,
         0,
-        54.0,
-        200.0,
-        260.0,
-        190.0,
-        240.0
+        63.7,
+        89.7,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        981.1,
+        0,
+        0,
+        0,
+        25.5,
+        94.4,
+        122.7,
+        89.7,
+        113.3
       ]
     },
     "by_faction": {
       "1": [
         0,
         0,
-        506.0,
-        528.0,
+        238.8,
+        249.2,
         0,
-        396.0,
-        1372.6,
+        186.9,
+        647.8,
         0,
-        2212.6,
-        2795.5,
-        4306.8,
-        2256.1,
+        1044.2,
+        1319.3,
+        2032.5,
+        1064.7,
         0,
-        462.0,
-        2152.0,
-        11.0,
-        854.7,
-        3168.0,
-        1441.1,
-        10.0,
-        4153.8,
-        2162.1,
-        3834.0,
-        1353.3,
-        310.0,
+        218.0,
+        1015.6,
+        5.2,
+        403.4,
+        1495.1,
+        680.1,
+        4.7,
+        1960.3,
+        1020.4,
+        1809.4,
+        638.7,
+        146.3,
         0,
-        130.0,
-        4657.6,
-        2479.0,
-        3381.0,
-        494.0,
-        3465.0,
-        1073.0,
-        352.0,
-        2515.8,
-        1740.0,
-        3990.0,
-        4495.0,
+        61.4,
+        2198.0,
+        1169.9,
+        1595.6,
+        233.1,
+        1635.2,
+        506.4,
+        166.1,
+        1187.3,
+        821.2,
+        1883.0,
+        2121.3,
         0,
-        3515.9,
-        1182.0,
-        2928.4,
-        1242.0,
-        3796.4,
-        2773.7,
-        1822.9,
-        3038.3,
+        1659.2,
+        557.8,
+        1382.0,
+        586.1,
+        1791.6,
+        1309.0,
+        860.3,
+        1433.8,
         0,
-        520.0,
-        2600.0,
-        1430.0,
-        3029.1,
-        2164.0,
+        245.4,
+        1227.0,
+        674.9,
+        1429.5,
+        1021.3,
         0,
-        197.0,
-        0,
-        0,
-        2060.0,
-        5580.0,
-        2727.8,
-        6506.9,
-        5084.0,
+        93.0,
         0,
         0,
-        0,
-        636.0,
-        2450.5,
-        3215.9,
-        1744.0,
-        4656.0,
-        7103.0,
-        777.0,
-        90.0,
-        1721.0,
-        2491.7,
-        205.0,
-        1056.8,
-        2927.5,
-        3596.5,
-        4692.0,
-        1888.0,
-        9943.6,
-        5882.7,
-        5267.6,
-        5919.0,
-        110.0,
-        0,
-        0,
-        2009.1,
-        4207.7,
-        3215.0,
+        972.2,
+        2633.4,
+        1287.3,
+        3070.8,
+        2399.3,
         0,
         0,
         0,
-        2586.0,
-        3438.0,
-        1756.0,
-        5741.8,
-        2384.0,
-        6647.0,
-        15653.0,
-        12671.4,
-        5572.3,
-        2422.5,
-        2104.0,
-        2760.0
+        300.1,
+        1156.5,
+        1517.7,
+        823.0,
+        2197.3,
+        3352.1,
+        366.7,
+        42.5,
+        812.2,
+        1175.9,
+        96.7,
+        498.7,
+        1381.6,
+        1697.3,
+        2214.3,
+        891.0,
+        4692.7,
+        2776.2,
+        2485.9,
+        2793.3,
+        51.9,
+        0,
+        0,
+        948.1,
+        1985.7,
+        1517.2,
+        0,
+        0,
+        0,
+        1220.4,
+        1622.5,
+        828.7,
+        2709.7,
+        1125.1,
+        3136.9,
+        7387.1,
+        5980.0,
+        2629.7,
+        1143.2,
+        992.9,
+        1302.5
       ],
       "2": [
         0,
         0,
-        506.0,
+        238.8,
         0,
         0,
         0,
-        1062.6,
-        702.7,
-        3964.6,
-        2553.9,
-        10.0,
-        6123.3,
-        2476.9,
-        3385.2,
-        5800.5,
-        6034.3,
-        1650.0,
-        1659.9,
-        3050.8,
+        501.5,
+        331.6,
+        1871.0,
+        1205.3,
+        4.7,
+        2889.8,
+        1168.9,
+        1597.6,
+        2737.4,
+        2847.8,
+        778.7,
+        783.3,
+        1439.8,
         0,
-        577.2,
-        2792.7,
-        2693.4,
-        3111.8,
-        2900.0,
-        1830.0,
-        4850.0,
-        2289.0,
-        3156.9,
-        3048.0,
-        1437.6,
-        1548.8,
-        2237.0,
-        328.0,
-        2202.4,
-        1930.0,
-        0,
-        0,
-        1372.8,
-        5243.9,
-        4666.0,
-        2301.7,
-        0,
-        288.0,
-        96.6,
-        4941.1,
-        1982.3,
-        145.0,
-        863.0,
-        4924.0,
-        2410.0,
-        495.9,
+        272.4,
+        1318.0,
+        1271.1,
+        1468.6,
+        1368.6,
+        863.6,
+        2288.9,
+        1080.2,
+        1489.8,
+        1438.4,
+        678.4,
+        730.9,
+        1055.7,
+        154.8,
+        1039.4,
+        910.8,
         0,
         0,
-        256.0,
-        316.0,
-        2135.0,
-        1694.0,
-        4317.6,
-        3762.7,
-        6252.2,
-        2493.9,
+        647.9,
+        2474.7,
+        2202.0,
+        1086.2,
+        0,
+        135.9,
+        45.6,
+        2331.9,
+        935.5,
+        68.4,
+        407.3,
+        2323.8,
+        1137.3,
+        234.0,
+        0,
+        0,
+        120.8,
+        149.1,
+        1007.6,
+        799.4,
+        2037.6,
+        1775.7,
+        2950.6,
+        1176.9,
         0,
         0,
         0,
-        2784.0,
-        4530.0,
-        2276.3,
-        4710.5,
+        1313.8,
+        2137.8,
+        1074.3,
+        2223.0,
         0,
-        60.0,
+        28.3,
         0,
-        8172.3,
-        3120.0,
-        1248.0,
-        6154.0,
-        5158.3,
-        3344.0,
-        1464.0,
-        5853.5,
-        1584.5,
-        8520.1,
-        3941.2,
-        946.0,
-        2641.0,
-        2154.0,
-        0,
-        0,
-        1888.0,
-        3291.0,
-        1617.9,
+        3856.7,
+        1472.4,
+        589.0,
+        2904.2,
+        2434.3,
+        1578.1,
+        690.9,
+        2762.4,
+        747.8,
+        4020.9,
+        1860.0,
+        446.4,
+        1246.4,
+        1016.5,
         0,
         0,
-        4070.0,
-        5.0,
-        981.6,
-        2000.0,
-        3221.7,
-        635.0,
-        304.0,
-        1399.8,
-        2354.0,
-        4956.0,
-        4896.0,
-        1162.0,
-        1839.5
+        891.0,
+        1553.1,
+        763.5,
+        0,
+        0,
+        1920.7,
+        2.4,
+        463.3,
+        943.9,
+        1520.4,
+        299.7,
+        143.5,
+        660.6,
+        1110.9,
+        2338.9,
+        2310.6,
+        548.4,
+        868.1
       ]
     }
   },
@@ -4568,1862 +4944,1575 @@
         "v": "VTrider",
         "t0": 25.55,
         "t1": 27.15,
-        "dmg": 506.0
+        "dmg": 238.8
       },
       {
         "s": "VTrider",
         "v": "Nomad",
         "t0": 25.7,
         "t1": 26.95,
-        "dmg": 506.0
+        "dmg": 238.8
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 32.15,
         "t1": 33.0,
-        "dmg": 132.0
+        "dmg": 62.3
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 38.65,
         "t1": 39.55,
-        "dmg": 396.0
+        "dmg": 186.9
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 59.1,
         "t1": 62.8,
-        "dmg": 1199.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Nomad",
-        "t0": 62.95,
-        "t1": 63.1,
-        "dmg": 66.0
+        "dmg": 565.8
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 66.2,
         "t1": 68.5,
-        "dmg": 996.6
+        "dmg": 470.3
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 66.9,
         "t1": 68.5,
-        "dmg": 569.6
+        "dmg": 268.8
       },
       {
         "s": "Cloaket",
         "v": "Certified Bad Guy",
         "t0": 80.35,
         "t1": 82.65,
-        "dmg": 1155.2
+        "dmg": 545.2
       },
       {
         "s": "Certified Bad Guy",
         "v": "Cloaket",
         "t0": 81.3,
         "t1": 83.6,
-        "dmg": 606.3
+        "dmg": 286.1
       },
       {
         "s": "Totokomo",
         "v": "Certified Bad Guy",
         "t0": 84.95,
         "t1": 87.5,
-        "dmg": 594.0
+        "dmg": 280.3
       },
       {
         "s": "Cloaket",
         "v": "Totokomo",
         "t0": 85.55,
         "t1": 86.1,
-        "dmg": 187.4
+        "dmg": 88.4
       },
       {
         "s": "Vivify",
         "v": "Totokomo",
         "t0": 86.9,
         "t1": 88.95,
-        "dmg": 939.6
+        "dmg": 443.4
       },
       {
         "s": "VTrider",
         "v": "Domakus",
         "t0": 89.45,
         "t1": 94.9,
-        "dmg": 2470.1
+        "dmg": 1165.7
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 89.45,
         "t1": 94.9,
-        "dmg": 1619.6
+        "dmg": 764.3
       },
       {
         "s": "Muffin",
         "v": "Vivify",
         "t0": 91.3,
         "t1": 94.2,
-        "dmg": 1052.0
+        "dmg": 496.5
       },
       {
         "s": "Vivify",
         "v": "Muffin",
         "t0": 91.8,
         "t1": 92.2,
-        "dmg": 187.0
+        "dmg": 88.3
       },
       {
         "s": "VTrider",
         "v": "Domakus",
         "t0": 97.55,
         "t1": 100.15,
-        "dmg": 240.0
+        "dmg": 113.3
       },
       {
         "s": "Nomad",
         "v": "Cloaket",
         "t0": 110.55,
         "t1": 111.3,
-        "dmg": 264.0
-      },
-      {
-        "s": "Nomad",
-        "v": "Muffin",
-        "t0": 111.55,
-        "t1": 111.75,
-        "dmg": 66.0
+        "dmg": 124.6
       },
       {
         "s": "Darkvale",
         "v": "Muffin",
         "t0": 112.15,
         "t1": 112.2,
-        "dmg": 177.7
-      },
-      {
-        "s": "Darkvale",
-        "v": "Cloaket",
-        "t0": 112.15,
-        "t1": 112.2,
-        "dmg": 82.6
+        "dmg": 83.9
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 113.3,
         "t1": 119.95,
-        "dmg": 3140.3
-      },
-      {
-        "s": "Nomad",
-        "v": "VTrider",
-        "t0": 114.85,
-        "t1": 115.5,
-        "dmg": 55.0
+        "dmg": 1482.0
       },
       {
         "s": "Vivify",
         "v": "Muffin",
         "t0": 116.1,
         "t1": 121.7,
-        "dmg": 1947.0
+        "dmg": 918.8
       },
       {
         "s": "VTrider",
         "v": "Domakus",
         "t0": 123.45,
         "t1": 125.05,
-        "dmg": 835.9
+        "dmg": 394.5
       },
       {
         "s": "Vivify",
         "v": "Nomad",
         "t0": 131.65,
         "t1": 132.7,
-        "dmg": 723.2
+        "dmg": 341.3
       },
       {
         "s": "Totokomo",
         "v": "VTrider",
         "t0": 137.4,
         "t1": 139.05,
-        "dmg": 429.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Totokomo",
-        "t0": 139.95,
-        "t1": 140.1,
-        "dmg": 66.0
+        "dmg": 202.5
       },
       {
         "s": "Domakus",
         "v": "Vivify",
         "t0": 143.6,
         "t1": 149.3,
-        "dmg": 1573.2
+        "dmg": 742.4
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 143.65,
         "t1": 150.2,
-        "dmg": 2575.2
+        "dmg": 1215.3
       },
       {
         "s": "Certified Bad Guy",
         "v": "Cloaket",
         "t0": 172.5,
         "t1": 173.95,
-        "dmg": 797.6
+        "dmg": 376.4
       },
       {
         "s": "Cloaket",
         "v": "Certified Bad Guy",
         "t0": 172.85,
         "t1": 176.35,
-        "dmg": 1408.0
+        "dmg": 664.5
       },
       {
         "s": "Totokomo",
         "v": "Certified Bad Guy",
         "t0": 173.65,
         "t1": 176.45,
-        "dmg": 495.0
+        "dmg": 233.6
       },
       {
         "s": "Domakus",
         "v": "Certified Bad Guy",
         "t0": 175.1,
         "t1": 178.9,
-        "dmg": 1265.0
+        "dmg": 597.0
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 179.55,
         "t1": 180.05,
-        "dmg": 242.0
+        "dmg": 114.2
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 181.8,
         "t1": 184.65,
-        "dmg": 599.8
+        "dmg": 283.1
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 184.85,
         "t1": 188.7,
-        "dmg": 1199.0
+        "dmg": 565.8
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 184.95,
         "t1": 188.1,
-        "dmg": 1210.1
+        "dmg": 571.1
       },
       {
         "s": "VTrider",
         "v": "Totokomo",
         "t0": 185.0,
         "t1": 187.6,
-        "dmg": 990.0
+        "dmg": 467.2
       },
       {
         "s": "Totokomo",
         "v": "VTrider",
         "t0": 189.1,
         "t1": 189.75,
-        "dmg": 231.0
+        "dmg": 109.0
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 202.85,
         "t1": 206.65,
-        "dmg": 819.6
+        "dmg": 386.8
       },
       {
         "s": "Lithium",
         "v": "Totokomo",
         "t0": 205.45,
         "t1": 206.75,
-        "dmg": 577.2
+        "dmg": 272.4
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 205.45,
         "t1": 208.4,
-        "dmg": 1676.2
+        "dmg": 791.0
       },
       {
         "s": "Totokomo",
         "v": "VTrider",
         "t0": 209.8,
         "t1": 211.25,
-        "dmg": 341.0
+        "dmg": 160.9
       },
       {
         "s": "VTrider",
         "v": "Totokomo",
         "t0": 210.5,
         "t1": 215.2,
-        "dmg": 2404.7
+        "dmg": 1134.9
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 213.3,
         "t1": 214.15,
-        "dmg": 396.0
+        "dmg": 186.9
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 215.2,
         "t1": 217.25,
-        "dmg": 330.0
+        "dmg": 155.7
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 218.25,
         "t1": 219.9,
-        "dmg": 528.0
+        "dmg": 249.2
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 219.6,
         "t1": 225.65,
-        "dmg": 565.0
+        "dmg": 266.6
       },
       {
         "s": "Muffin",
         "v": "Lithium",
         "t0": 220.85,
         "t1": 227.15,
-        "dmg": 3074.1
+        "dmg": 1450.8
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 221.45,
         "t1": 226.75,
-        "dmg": 826.1
+        "dmg": 389.8
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 225.4,
         "t1": 227.4,
-        "dmg": 429.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Domakus",
-        "t0": 226.15,
-        "t1": 226.3,
-        "dmg": 44.0
+        "dmg": 202.5
       },
       {
         "s": "Nomad",
         "v": "Muffin",
         "t0": 227.6,
         "t1": 227.95,
-        "dmg": 111.2
+        "dmg": 52.5
       },
       {
         "s": "Cloaket",
         "v": "Vivify",
         "t0": 230.15,
         "t1": 233.4,
-        "dmg": 308.0
+        "dmg": 145.4
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 230.8,
         "t1": 232.75,
-        "dmg": 125.0
+        "dmg": 59.0
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 231.2,
         "t1": 233.0,
-        "dmg": 657.0
+        "dmg": 310.0
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 232.6,
         "t1": 232.8,
-        "dmg": 287.8
-      },
-      {
-        "s": "Domakus",
-        "v": "VTrider",
-        "t0": 234.9,
-        "t1": 235.2,
-        "dmg": 44.0
+        "dmg": 135.8
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 235.35,
         "t1": 238.5,
-        "dmg": 649.0
+        "dmg": 306.3
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 236.1,
         "t1": 238.1,
-        "dmg": 1489.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "v": "Nomad",
-        "t0": 236.35,
-        "t1": 238.7,
-        "dmg": 40.0
+        "dmg": 702.7
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 237.65,
         "t1": 237.8,
-        "dmg": 297.3
+        "dmg": 140.3
       },
       {
         "s": "Totokomo",
         "v": "VTrider",
         "t0": 238.6,
         "t1": 244.5,
-        "dmg": 365.0
+        "dmg": 172.3
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 266.6,
         "t1": 269.45,
-        "dmg": 1210.0
+        "dmg": 571.0
       },
       {
         "s": "Domakus",
         "v": "Certified Bad Guy",
         "t0": 274.9,
         "t1": 282.65,
-        "dmg": 3788.6
+        "dmg": 1787.9
       },
       {
         "s": "Certified Bad Guy",
         "v": "Domakus",
         "t0": 276.1,
         "t1": 282.25,
-        "dmg": 2090.0
+        "dmg": 986.3
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 277.35,
         "t1": 278.55,
-        "dmg": 559.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "v": "Domakus",
-        "t0": 284.3,
-        "t1": 287.0,
-        "dmg": 70.0
+        "dmg": 263.8
       },
       {
         "s": "Totokomo",
         "v": "Vivify",
         "t0": 288.7,
         "t1": 306.8,
-        "dmg": 820.0
+        "dmg": 387.0
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 289.25,
         "t1": 293.2,
-        "dmg": 869.0
+        "dmg": 410.1
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 289.5,
         "t1": 294.0,
-        "dmg": 1100.0
+        "dmg": 519.1
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 294.4,
         "t1": 297.75,
-        "dmg": 704.0
+        "dmg": 332.2
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 294.6,
         "t1": 297.45,
-        "dmg": 902.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Cloaket",
-        "t0": 300.35,
-        "t1": 300.45,
-        "dmg": 81.4
+        "dmg": 425.7
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 307.9,
         "t1": 310.8,
-        "dmg": 1101.9
+        "dmg": 520.0
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 309.5,
         "t1": 316.65,
-        "dmg": 2310.0
+        "dmg": 1090.2
       },
       {
         "s": "Muffin",
         "v": "Vivify",
         "t0": 309.9,
         "t1": 314.1,
-        "dmg": 1309.0
+        "dmg": 617.8
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 316.25,
         "t1": 316.9,
-        "dmg": 253.0
+        "dmg": 119.4
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 323.45,
         "t1": 330.55,
-        "dmg": 490.0
+        "dmg": 231.2
       },
       {
         "s": "Muffin",
         "v": "VTrider",
         "t0": 324.8,
         "t1": 325.75,
-        "dmg": 440.0
+        "dmg": 207.6
       },
       {
         "s": "Nomad",
         "v": "Vivify",
         "t0": 325.75,
         "t1": 326.55,
-        "dmg": 297.0
+        "dmg": 140.2
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 326.3,
         "t1": 330.6,
-        "dmg": 1419.0
+        "dmg": 669.7
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 327.45,
         "t1": 330.6,
-        "dmg": 616.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "v": "Darkvale",
-        "t0": 327.9,
-        "t1": 328.3,
-        "dmg": 40.0
+        "dmg": 290.7
       },
       {
         "s": "Nomad",
         "v": "Darkvale",
         "t0": 329.6,
         "t1": 330.55,
-        "dmg": 407.0
+        "dmg": 192.1
       },
       {
         "s": "Nomad",
         "v": "Vivify",
         "t0": 339.9,
         "t1": 344.6,
-        "dmg": 365.0
+        "dmg": 172.3
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 341.7,
         "t1": 342.25,
-        "dmg": 220.0
+        "dmg": 103.8
       },
       {
         "s": "Certified Bad Guy",
         "v": "Domakus",
         "t0": 344.1,
         "t1": 347.1,
-        "dmg": 175.0
+        "dmg": 82.6
       },
       {
         "s": "Domakus",
         "v": "Vivify",
         "t0": 344.95,
         "t1": 346.05,
-        "dmg": 584.8
-      },
-      {
-        "s": "Certified Bad Guy",
-        "v": "Darkvale",
-        "t0": 345.2,
-        "t1": 345.95,
-        "dmg": 80.0
-      },
-      {
-        "s": "Vivify",
-        "v": "Domakus",
-        "t0": 346.05,
-        "t1": 346.1,
-        "dmg": 53.1
+        "dmg": 276.0
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 346.95,
         "t1": 354.6,
-        "dmg": 2860.0
-      },
-      {
-        "s": "Nomad",
-        "v": "VTrider",
-        "t0": 350.45,
-        "t1": 352.05,
-        "dmg": 65.0
+        "dmg": 1349.7
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 352.65,
         "t1": 353.5,
-        "dmg": 242.0
+        "dmg": 114.2
       },
       {
         "s": "VTrider",
         "v": "Muffin",
         "t0": 389.8,
         "t1": 391.0,
-        "dmg": 980.4
+        "dmg": 462.7
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 395.6,
         "t1": 398.7,
-        "dmg": 2887.6
+        "dmg": 1362.7
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 395.6,
         "t1": 397.55,
-        "dmg": 1710.3
+        "dmg": 807.2
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 400.05,
         "t1": 401.3,
-        "dmg": 742.2
+        "dmg": 350.3
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 401.1,
         "t1": 402.2,
-        "dmg": 417.8
+        "dmg": 197.2
       },
       {
         "s": "Darkvale",
         "v": "Domakus",
         "t0": 409.9,
         "t1": 414.15,
-        "dmg": 2096.0
+        "dmg": 989.2
       },
       {
         "s": "Domakus",
         "v": "Darkvale",
         "t0": 411.4,
         "t1": 414.5,
-        "dmg": 2068.4
+        "dmg": 976.1
       },
       {
         "s": "Muffin",
         "v": "Darkvale",
         "t0": 413.2,
         "t1": 414.45,
-        "dmg": 860.0
+        "dmg": 405.9
       },
       {
         "s": "Muffin",
         "v": "Vivify",
         "t0": 423.1,
         "t1": 423.95,
-        "dmg": 242.0
+        "dmg": 114.2
       },
       {
         "s": "Cloaket",
         "v": "Vivify",
         "t0": 429.8,
         "t1": 429.85,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Cloaket",
         "v": "Vivify",
         "t0": 431.95,
         "t1": 433.75,
-        "dmg": 2049.4
+        "dmg": 967.2
       },
       {
         "s": "Nomad",
         "v": "Vivify",
         "t0": 435.45,
         "t1": 438.2,
-        "dmg": 115.0
+        "dmg": 54.3
       },
       {
         "s": "Muffin",
         "v": "Vivify",
         "t0": 443.9,
         "t1": 444.25,
-        "dmg": 583.7
+        "dmg": 275.4
       },
       {
         "s": "Lithium",
         "v": "Totokomo",
         "t0": 452.45,
         "t1": 459.15,
-        "dmg": 2176.0
+        "dmg": 1026.9
       },
       {
         "s": "Darkvale",
         "v": "Totokomo",
         "t0": 455.85,
         "t1": 455.9,
-        "dmg": 189.9
+        "dmg": 89.6
       },
       {
         "s": "Darkvale",
         "v": "Lithium",
         "t0": 455.85,
         "t1": 455.9,
-        "dmg": 140.7
-      },
-      {
-        "s": "Vivify",
-        "v": "Muffin",
-        "t0": 458.25,
-        "t1": 459.0,
-        "dmg": 50.0
+        "dmg": 66.4
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 458.7,
         "t1": 466.15,
-        "dmg": 3343.1
+        "dmg": 1577.7
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 459.65,
         "t1": 465.75,
-        "dmg": 1904.0
+        "dmg": 898.6
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 464.8,
         "t1": 466.2,
-        "dmg": 308.0
-      },
-      {
-        "s": "Lithium",
-        "v": "Totokomo",
-        "t0": 467.85,
-        "t1": 469.1,
-        "dmg": 50.0
+        "dmg": 145.4
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 478.4,
         "t1": 479.45,
-        "dmg": 95.0
+        "dmg": 44.8
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 480.85,
         "t1": 482.2,
-        "dmg": 115.0
+        "dmg": 54.3
       },
       {
         "s": "VTrider",
         "v": "Muffin",
         "t0": 502.6,
         "t1": 507.05,
-        "dmg": 2090.0
+        "dmg": 986.3
       },
       {
         "s": "Cloaket",
         "v": "Certified Bad Guy",
         "t0": 508.15,
         "t1": 512.0,
-        "dmg": 3029.1
+        "dmg": 1429.5
       },
       {
         "s": "Certified Bad Guy",
         "v": "Cloaket",
         "t0": 512.55,
         "t1": 513.2,
-        "dmg": 448.0
+        "dmg": 211.4
       },
       {
         "s": "Domakus",
         "v": "Certified Bad Guy",
         "t0": 513.4,
         "t1": 513.45,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 540.95,
         "t1": 544.15,
-        "dmg": 121.0
+        "dmg": 57.1
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 541.7,
         "t1": 542.85,
-        "dmg": 110.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "v": "Cloaket",
-        "t0": 547.4,
-        "t1": 549.65,
-        "dmg": 50.0
+        "dmg": 51.9
       },
       {
         "s": "Certified Bad Guy",
         "v": "Muffin",
         "t0": 572.8,
         "t1": 578.2,
-        "dmg": 450.0
-      },
-      {
-        "s": "Lithium",
-        "v": "Nomad",
-        "t0": 577.45,
-        "t1": 577.55,
-        "dmg": 80.0
+        "dmg": 212.4
       },
       {
         "s": "Totokomo",
         "v": "Vivify",
         "t0": 577.85,
         "t1": 579.0,
-        "dmg": 272.0
+        "dmg": 128.4
       },
       {
         "s": "Certified Bad Guy",
         "v": "Muffin",
         "t0": 580.8,
         "t1": 582.6,
-        "dmg": 125.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Totokomo",
-        "t0": 585.7,
-        "t1": 585.75,
-        "dmg": 62.7
+        "dmg": 59.0
       },
       {
         "s": "VTrider",
         "v": "Nomad",
         "t0": 585.7,
         "t1": 585.75,
-        "dmg": 111.2
+        "dmg": 52.5
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 595.55,
         "t1": 599.55,
-        "dmg": 2658.7
+        "dmg": 1254.7
       },
       {
         "s": "Cloaket",
         "v": "VTrider",
         "t0": 597.45,
         "t1": 599.55,
-        "dmg": 2568.7
+        "dmg": 1212.3
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 597.45,
         "t1": 599.3,
-        "dmg": 608.0
+        "dmg": 286.9
       },
       {
         "s": "Lithium",
         "v": "Cloaket",
         "t0": 597.55,
         "t1": 599.55,
-        "dmg": 496.0
+        "dmg": 234.1
       },
       {
         "s": "Nomad",
         "v": "Vivify",
         "t0": 601.7,
         "t1": 606.95,
-        "dmg": 960.0
-      },
-      {
-        "s": "Cloaket",
-        "v": "VTrider",
-        "t0": 603.6,
-        "t1": 604.2,
-        "dmg": 60.0
+        "dmg": 453.1
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 603.8,
         "t1": 605.0,
-        "dmg": 1020.2
+        "dmg": 481.5
       },
       {
         "s": "Domakus",
         "v": "Vivify",
         "t0": 604.35,
         "t1": 604.45,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Vivify",
         "v": "Nomad",
         "t0": 605.1,
         "t1": 606.55,
-        "dmg": 240.0
+        "dmg": 113.3
       },
       {
         "s": "Domakus",
         "v": "Vivify",
         "t0": 606.7,
         "t1": 606.9,
-        "dmg": 1559.7
+        "dmg": 736.1
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 607.1,
         "t1": 612.95,
-        "dmg": 2224.8
+        "dmg": 1049.9
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 609.1,
         "t1": 609.85,
-        "dmg": 1775.0
+        "dmg": 837.7
       },
       {
         "s": "Nomad",
         "v": "Darkvale",
         "t0": 610.0,
         "t1": 613.2,
-        "dmg": 1680.0
+        "dmg": 792.8
       },
       {
         "s": "Totokomo",
         "v": "Darkvale",
         "t0": 610.65,
         "t1": 612.75,
-        "dmg": 1120.0
+        "dmg": 528.6
       },
       {
         "s": "Domakus",
         "v": "Darkvale",
         "t0": 611.5,
         "t1": 612.5,
-        "dmg": 1200.0
+        "dmg": 566.3
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 611.75,
         "t1": 612.35,
-        "dmg": 192.0
+        "dmg": 90.6
       },
       {
         "s": "Muffin",
         "v": "Lithium",
         "t0": 612.15,
         "t1": 612.4,
-        "dmg": 128.0
+        "dmg": 60.4
       },
       {
         "s": "Vivify",
         "v": "Nomad",
         "t0": 615.2,
         "t1": 618.15,
-        "dmg": 140.0
+        "dmg": 66.1
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 616.3,
         "t1": 619.25,
-        "dmg": 135.0
+        "dmg": 63.7
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 659.1,
         "t1": 659.5,
-        "dmg": 272.0
+        "dmg": 128.4
       },
       {
         "s": "Vivify",
         "v": "Nomad",
         "t0": 664.45,
         "t1": 669.9,
-        "dmg": 190.0
+        "dmg": 89.7
       },
       {
         "s": "Cloaket",
         "v": "Certified Bad Guy",
         "t0": 668.35,
         "t1": 668.4,
-        "dmg": 193.1
-      },
-      {
-        "s": "Lithium",
-        "v": "Nomad",
-        "t0": 668.8,
-        "t1": 671.0,
-        "dmg": 70.0
+        "dmg": 91.1
       },
       {
         "s": "Certified Bad Guy",
         "v": "Domakus",
         "t0": 669.95,
         "t1": 675.3,
-        "dmg": 1536.0
+        "dmg": 724.9
       },
       {
         "s": "Domakus",
         "v": "Certified Bad Guy",
         "t0": 670.4,
         "t1": 676.55,
-        "dmg": 3215.9
+        "dmg": 1517.7
       },
       {
         "s": "VTrider",
         "v": "Totokomo",
         "t0": 670.9,
         "t1": 671.15,
-        "dmg": 143.5
+        "dmg": 67.7
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 685.8,
         "t1": 687.85,
-        "dmg": 990.0
+        "dmg": 467.2
       },
       {
         "s": "VTrider",
         "v": "Nomad",
         "t0": 686.2,
         "t1": 687.9,
-        "dmg": 3104.5
+        "dmg": 1465.1
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 687.45,
         "t1": 687.85,
-        "dmg": 304.0
+        "dmg": 143.5
       },
       {
         "s": "Nomad",
         "v": "Darkvale",
         "t0": 708.9,
         "t1": 714.0,
-        "dmg": 160.0
-      },
-      {
-        "s": "Darkvale",
-        "v": "Nomad",
-        "t0": 708.9,
-        "t1": 709.8,
-        "dmg": 60.0
+        "dmg": 75.5
       },
       {
         "s": "VTrider",
         "v": "Muffin",
         "t0": 725.7,
         "t1": 732.05,
-        "dmg": 4732.3
-      },
-      {
-        "s": "Nomad",
-        "v": "Darkvale",
-        "t0": 728.25,
-        "t1": 728.4,
-        "dmg": 45.0
+        "dmg": 2233.3
       },
       {
         "s": "Muffin",
         "v": "VTrider",
         "t0": 731.1,
         "t1": 731.1,
-        "dmg": 500.0
+        "dmg": 236.0
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 731.45,
         "t1": 734.1,
-        "dmg": 265.0
+        "dmg": 125.1
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 740.35,
         "t1": 743.05,
-        "dmg": 280.0
+        "dmg": 132.1
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 740.55,
         "t1": 742.5,
-        "dmg": 1721.7
+        "dmg": 812.5
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 745.4,
         "t1": 750.2,
-        "dmg": 190.0
-      },
-      {
-        "s": "Muffin",
-        "v": "Certified Bad Guy",
-        "t0": 749.9,
-        "t1": 750.2,
-        "dmg": 70.0
+        "dmg": 89.7
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 751.35,
         "t1": 751.85,
-        "dmg": 384.0
-      },
-      {
-        "s": "Muffin",
-        "v": "Lithium",
-        "t0": 755.05,
-        "t1": 755.55,
-        "dmg": 55.0
+        "dmg": 181.2
       },
       {
         "s": "Cloaket",
         "v": "Vivify",
         "t0": 760.1,
         "t1": 760.15,
-        "dmg": 131.2
+        "dmg": 61.9
       },
       {
         "s": "Muffin",
         "v": "Darkvale",
         "t0": 764.8,
         "t1": 766.6,
-        "dmg": 225.0
+        "dmg": 106.2
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 766.35,
         "t1": 767.7,
-        "dmg": 1036.3
-      },
-      {
-        "s": "Lithium",
-        "v": "Muffin",
-        "t0": 770.6,
-        "t1": 770.7,
-        "dmg": 64.0
+        "dmg": 489.0
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 771.15,
         "t1": 773.15,
-        "dmg": 2153.4
-      },
-      {
-        "s": "Muffin",
-        "v": "Darkvale",
-        "t0": 774.9,
-        "t1": 775.75,
-        "dmg": 75.0
+        "dmg": 1016.3
       },
       {
         "s": "Darkvale",
         "v": "Muffin",
         "t0": 775.6,
         "t1": 778.25,
-        "dmg": 105.0
+        "dmg": 49.6
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 780.4,
         "t1": 780.55,
-        "dmg": 600.0
+        "dmg": 283.2
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 801.2,
         "t1": 805.3,
-        "dmg": 1888.0
+        "dmg": 891.0
       },
       {
         "s": "VTrider",
         "v": "Totokomo",
         "t0": 807.4,
         "t1": 815.05,
-        "dmg": 3947.7
+        "dmg": 1863.0
       },
       {
         "s": "Totokomo",
         "v": "VTrider",
         "t0": 810.05,
         "t1": 812.05,
-        "dmg": 480.0
+        "dmg": 226.5
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 812.15,
         "t1": 816.9,
-        "dmg": 1792.0
+        "dmg": 845.7
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 812.75,
         "t1": 814.85,
-        "dmg": 1250.0
+        "dmg": 589.9
       },
       {
         "s": "VTrider",
         "v": "Nomad",
         "t0": 813.1,
         "t1": 815.3,
-        "dmg": 2000.0
+        "dmg": 943.9
       },
       {
         "s": "Muffin",
         "v": "Darkvale",
         "t0": 814.7,
         "t1": 819.05,
-        "dmg": 4133.9
+        "dmg": 1950.9
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 815.75,
         "t1": 816.6,
-        "dmg": 2324.1
+        "dmg": 1096.8
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 816.55,
         "t1": 818.55,
-        "dmg": 1500.0
+        "dmg": 707.9
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 817.1,
         "t1": 820.9,
-        "dmg": 1024.0
+        "dmg": 483.3
       },
       {
         "s": "Domakus",
         "v": "Vivify",
         "t0": 819.1,
         "t1": 820.4,
-        "dmg": 1929.0
+        "dmg": 910.3
       },
       {
         "s": "Totokomo",
         "v": "Vivify",
         "t0": 820.6,
         "t1": 823.55,
-        "dmg": 130.0
+        "dmg": 61.4
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 820.8,
         "t1": 820.95,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Muffin",
         "v": "Vivify",
         "t0": 820.95,
         "t1": 823.9,
-        "dmg": 2680.0
-      },
-      {
-        "s": "Domakus",
-        "v": "Vivify",
-        "t0": 823.15,
-        "t1": 823.65,
-        "dmg": 40.0
+        "dmg": 1264.8
       },
       {
         "s": "Vivify",
         "v": "Muffin",
         "t0": 823.8,
         "t1": 823.85,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 823.85,
         "t1": 825.8,
-        "dmg": 200.0
+        "dmg": 94.4
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 825.1,
         "t1": 827.5,
-        "dmg": 688.0
+        "dmg": 324.7
       },
       {
         "s": "Muffin",
         "v": "Lithium",
         "t0": 825.95,
         "t1": 826.0,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Muffin",
         "v": "Lithium",
         "t0": 828.1,
         "t1": 828.15,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 831.45,
         "t1": 834.45,
-        "dmg": 130.0
+        "dmg": 61.4
       },
       {
         "s": "Certified Bad Guy",
         "v": "Muffin",
         "t0": 834.2,
         "t1": 837.0,
-        "dmg": 816.0
+        "dmg": 385.1
       },
       {
         "s": "Muffin",
         "v": "Certified Bad Guy",
         "t0": 835.4,
         "t1": 835.45,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 838.15,
         "t1": 839.65,
-        "dmg": 105.0
+        "dmg": 49.6
       },
       {
         "s": "Muffin",
         "v": "Certified Bad Guy",
         "t0": 838.35,
         "t1": 839.75,
-        "dmg": 706.6
+        "dmg": 333.5
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 844.7,
         "t1": 846.25,
-        "dmg": 85.0
+        "dmg": 40.1
       },
       {
         "s": "Nomad",
         "v": "VTrider",
         "t0": 880.55,
         "t1": 882.1,
-        "dmg": 195.0
+        "dmg": 92.0
       },
       {
         "s": "VTrider",
         "v": "Muffin",
         "t0": 887.9,
         "t1": 893.55,
-        "dmg": 4320.0
+        "dmg": 2038.7
       },
       {
         "s": "Muffin",
         "v": "VTrider",
         "t0": 889.6,
         "t1": 891.6,
-        "dmg": 3253.5
+        "dmg": 1535.4
       },
       {
         "s": "Domakus",
         "v": "VTrider",
         "t0": 893.55,
         "t1": 893.6,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 897.9,
         "t1": 899.35,
-        "dmg": 135.0
+        "dmg": 63.7
       },
       {
         "s": "Domakus",
         "v": "Certified Bad Guy",
         "t0": 898.55,
         "t1": 905.05,
-        "dmg": 4500.0
+        "dmg": 2123.7
       },
       {
         "s": "Certified Bad Guy",
         "v": "Domakus",
         "t0": 898.55,
         "t1": 904.9,
-        "dmg": 1536.0
+        "dmg": 724.9
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 900.6,
         "t1": 902.5,
-        "dmg": 185.0
+        "dmg": 87.3
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 902.75,
         "t1": 904.8,
-        "dmg": 105.0
-      },
-      {
-        "s": "VTrider",
-        "v": "Cloaket",
-        "t0": 931.8,
-        "t1": 932.65,
-        "dmg": 50.0
+        "dmg": 49.6
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 936.0,
         "t1": 937.8,
-        "dmg": 205.0
+        "dmg": 96.7
       },
       {
         "s": "VTrider",
         "v": "Cloaket",
         "t0": 949.95,
         "t1": 952.1,
-        "dmg": 250.0
+        "dmg": 118.0
       },
       {
         "s": "Domakus",
         "v": "Darkvale",
         "t0": 966.35,
         "t1": 968.4,
-        "dmg": 1500.0
+        "dmg": 707.9
       },
       {
         "s": "Darkvale",
         "v": "Domakus",
         "t0": 966.8,
         "t1": 970.9,
-        "dmg": 3000.0
+        "dmg": 1415.8
       },
       {
         "s": "Muffin",
         "v": "Darkvale",
         "t0": 969.55,
         "t1": 970.85,
-        "dmg": 864.0
+        "dmg": 407.7
       },
       {
         "s": "Totokomo",
         "v": "Darkvale",
         "t0": 970.7,
         "t1": 970.9,
-        "dmg": 192.0
+        "dmg": 90.6
       },
       {
         "s": "Domakus",
         "v": "Darkvale",
         "t0": 970.85,
         "t1": 970.9,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 970.9,
         "t1": 973.35,
-        "dmg": 1248.0
+        "dmg": 589.0
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 970.9,
         "t1": 975.15,
-        "dmg": 640.0
+        "dmg": 302.0
       },
       {
         "s": "Muffin",
         "v": "Lithium",
         "t0": 973.2,
         "t1": 977.15,
-        "dmg": 1792.0
+        "dmg": 845.7
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 973.35,
         "t1": 973.4,
-        "dmg": 1000.0
+        "dmg": 471.9
       },
       {
         "s": "Totokomo",
         "v": "Lithium",
         "t0": 974.05,
         "t1": 976.8,
-        "dmg": 832.0
-      },
-      {
-        "s": "Darkvale",
-        "v": "Domakus",
-        "t0": 975.1,
-        "t1": 975.6,
-        "dmg": 45.0
+        "dmg": 392.6
       },
       {
         "s": "Lithium",
         "v": "Totokomo",
         "t0": 977.05,
         "t1": 977.1,
-        "dmg": 96.0
+        "dmg": 45.3
       },
       {
         "s": "Vivify",
         "v": "Muffin",
         "t0": 982.85,
         "t1": 984.9,
-        "dmg": 608.0
+        "dmg": 286.9
       },
       {
         "s": "Certified Bad Guy",
         "v": "Cloaket",
         "t0": 998.9,
         "t1": 999.9,
-        "dmg": 304.0
-      },
-      {
-        "s": "Totokomo",
-        "v": "Muffin",
-        "t0": 1000.25,
-        "t1": 1000.35,
-        "dmg": 64.0
+        "dmg": 143.5
       },
       {
         "s": "Cloaket",
         "v": "Certified Bad Guy",
         "t0": 1000.85,
         "t1": 1004.5,
-        "dmg": 3450.0
+        "dmg": 1628.2
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 1001.6,
         "t1": 1004.4,
-        "dmg": 902.0
-      },
-      {
-        "s": "Nomad",
-        "v": "Totokomo",
-        "t0": 1001.65,
-        "t1": 1001.75,
-        "dmg": 44.0
+        "dmg": 425.7
       },
       {
         "s": "Certified Bad Guy",
         "v": "Cloaket",
         "t0": 1001.95,
         "t1": 1004.5,
-        "dmg": 880.0
+        "dmg": 415.3
       },
       {
         "s": "Totokomo",
         "v": "Cloaket",
         "t0": 1003.05,
         "t1": 1003.3,
-        "dmg": 192.0
-      },
-      {
-        "s": "Totokomo",
-        "v": "Certified Bad Guy",
-        "t0": 1004.4,
-        "t1": 1004.6,
-        "dmg": 64.0
+        "dmg": 90.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Totokomo",
         "t0": 1004.4,
         "t1": 1004.4,
-        "dmg": 88.0
-      },
-      {
-        "s": "Domakus",
-        "v": "Cloaket",
-        "t0": 1009.1,
-        "t1": 1010.95,
-        "dmg": 57.0
-      },
-      {
-        "s": "Totokomo",
-        "v": "Muffin",
-        "t0": 1009.7,
-        "t1": 1009.85,
-        "dmg": 48.0
+        "dmg": 41.5
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 1011.7,
         "t1": 1015.15,
-        "dmg": 1904.0
+        "dmg": 898.6
       },
       {
         "s": "Nomad",
         "v": "Cloaket",
         "t0": 1016.25,
         "t1": 1017.7,
-        "dmg": 200.0
-      },
-      {
-        "s": "Totokomo",
-        "v": "VTrider",
-        "t0": 1016.95,
-        "t1": 1017.05,
-        "dmg": 64.0
+        "dmg": 94.4
       },
       {
         "s": "Vivify",
         "v": "Cloaket",
         "t0": 1022.25,
         "t1": 1024.5,
-        "dmg": 592.0
-      },
-      {
-        "s": "Darkvale",
-        "v": "Domakus",
-        "t0": 1023.2,
-        "t1": 1024.75,
-        "dmg": 71.0
+        "dmg": 279.4
       },
       {
         "s": "Vivify",
         "v": "Domakus",
         "t0": 1023.95,
         "t1": 1027.7,
-        "dmg": 1776.0
+        "dmg": 838.1
       },
       {
         "s": "Lithium",
         "v": "Muffin",
         "t0": 1027.6,
         "t1": 1038.0,
-        "dmg": 455.0
+        "dmg": 214.7
       },
       {
         "s": "Darkvale",
         "v": "Totokomo",
         "t0": 1030.2,
         "t1": 1032.75,
-        "dmg": 245.0
+        "dmg": 115.6
       },
       {
         "s": "Vivify",
         "v": "Totokomo",
         "t0": 1030.85,
         "t1": 1031.45,
-        "dmg": 128.0
+        "dmg": 60.4
       },
       {
         "s": "Nomad",
         "v": "Totokomo",
         "t0": 1032.4,
         "t1": 1032.65,
-        "dmg": 99.0
+        "dmg": 46.7
       },
       {
         "s": "Vivify",
         "v": "Muffin",
         "t0": 1032.4,
         "t1": 1036.75,
-        "dmg": 1424.0
+        "dmg": 672.0
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 1032.55,
         "t1": 1037.0,
-        "dmg": 255.0
+        "dmg": 120.3
       },
       {
         "s": "Vivify",
         "v": "Totokomo",
         "t0": 1037.5,
         "t1": 1039.9,
-        "dmg": 944.0
-      },
-      {
-        "s": "Lithium",
-        "v": "Muffin",
-        "t0": 1040.55,
-        "t1": 1040.95,
-        "dmg": 45.0
+        "dmg": 445.5
       },
       {
         "s": "Nomad",
         "v": "Totokomo",
         "t0": 1042.9,
         "t1": 1043.35,
-        "dmg": 110.0
+        "dmg": 51.9
       },
       {
         "s": "Vivify",
         "v": "Totokomo",
         "t0": 1045.65,
         "t1": 1046.85,
-        "dmg": 864.0
+        "dmg": 407.7
       },
       {
         "s": "Lithium",
         "v": "Nomad",
         "t0": 1045.75,
         "t1": 1048.05,
-        "dmg": 135.0
+        "dmg": 63.7
       },
       {
         "s": "Nomad",
         "v": "Vivify",
         "t0": 1050.05,
         "t1": 1057.45,
-        "dmg": 2420.0
+        "dmg": 1142.1
       },
       {
         "s": "Lithium",
         "v": "Totokomo",
         "t0": 1050.7,
         "t1": 1054.85,
-        "dmg": 185.0
-      },
-      {
-        "s": "Domakus",
-        "v": "Lithium",
-        "t0": 1051.8,
-        "t1": 1052.85,
-        "dmg": 45.0
+        "dmg": 87.3
       },
       {
         "s": "Darkvale",
         "v": "Vivify",
         "t0": 1053.55,
         "t1": 1053.7,
-        "dmg": 157.1
-      },
-      {
-        "s": "Darkvale",
-        "v": "Totokomo",
-        "t0": 1054.85,
-        "t1": 1055.4,
-        "dmg": 50.0
-      },
-      {
-        "s": "Domakus",
-        "v": "Totokomo",
-        "t0": 1054.85,
-        "t1": 1055.4,
-        "dmg": 55.0
+        "dmg": 74.2
       }
     ],
     "structure_pairs": []
@@ -6431,54 +6520,54 @@
   "asset_damage": {
     "by_player": {
       "Cloaket": {
-        "dealt": 1295.0,
-        "received": 105257.2
+        "dealt": 611.1,
+        "received": 49673.8
       },
       "Domakus": {
         "dealt": 0,
-        "received": 2196.9
+        "received": 1036.8
       },
       "Nomad": {
         "dealt": 0,
-        "received": 491.0
+        "received": 231.7
       },
       "Totokomo": {
         "dealt": 0,
-        "received": 370.0
+        "received": 174.6
       },
       "Muffin": {
         "dealt": 0,
-        "received": 87.0
+        "received": 41.1
       },
       "Darkvale": {
         "dealt": 0,
-        "received": 123228.0
+        "received": 58154.7
       },
       "VTrider": {
         "dealt": 0,
-        "received": 8178.7
+        "received": 3859.8
       },
       "Lithium": {
         "dealt": 0,
-        "received": 128.0
+        "received": 60.4
       },
       "Certified Bad Guy": {
         "dealt": 0,
-        "received": 304.7
+        "received": 143.8
       },
       "Vivify": {
-        "dealt": 200.0,
-        "received": 1672.1
+        "dealt": 94.4,
+        "received": 789.1
       }
     },
     "by_faction": {
       "1": {
-        "dealt": 1295.0,
-        "received": 108402.1
+        "dealt": 611.1,
+        "received": 51158.0
       },
       "2": {
-        "dealt": 200.0,
-        "received": 133511.5
+        "dealt": 94.4,
+        "received": 63007.8
       }
     }
   },
@@ -138434,17 +138523,17 @@
           "name": "Domakus",
           "steam64": "76561198006115793"
         },
-        "value": 46055.4,
+        "value": 21734.8,
         "value_format": "damage",
         "runner_up": {
           "name": "VTrider",
-          "value": 42522.7
+          "value": 20067.7
         },
         "delta_pct": 0.083,
         "narrative": "close",
         "value_breakdown": {
           "top_victim": "Certified Bad Guy",
-          "top_victim_damage": 13769.5
+          "top_victim_damage": 6498.2
         }
       },
       {
@@ -138478,17 +138567,17 @@
           "name": "VTrider",
           "steam64": "76561197974548434"
         },
-        "value": 31640.0,
+        "value": 14931.8,
         "value_format": "damage",
         "runner_up": {
           "name": "Domakus",
-          "value": 31392.2
+          "value": 14814.9
         },
         "delta_pct": 0.008,
         "narrative": "close",
         "value_breakdown": {
           "top_tormentor": "Cloaket",
-          "top_tormentor_damage": 10125.1
+          "top_tormentor_damage": 4778.3
         }
       },
       {
@@ -138519,20 +138608,21 @@
         "icon": "bi-bullseye",
         "winner": {
           "type": "player",
-          "name": "VTrider",
-          "steam64": "76561197974548434"
+          "name": "Cloaket",
+          "steam64": "76561198025032941"
         },
-        "value": 0.41,
+        "value": 0.754,
         "value_format": "accuracy",
         "runner_up": {
-          "name": "Domakus",
-          "value": 0.367
+          "name": "Darkvale",
+          "value": 0.74
         },
-        "delta_pct": 0.117,
+        "delta_pct": 0.019,
         "narrative": "close",
         "value_breakdown": {
-          "shots_hit": 721,
-          "shots_fired": 1759
+          "shots_hit": 2323,
+          "shots_fired": 3081,
+          "estimated": true
         }
       },
       {
@@ -138553,7 +138643,8 @@
         "delta_pct": 0.183,
         "narrative": "clear",
         "value_breakdown": {
-          "accuracy": 0.097
+          "accuracy": 0.552,
+          "estimated": true
         }
       },
       {
@@ -138565,16 +138656,16 @@
           "name": "Cloaket",
           "steam64": "76561198025032941"
         },
-        "value": 1295.0,
+        "value": 611.1,
         "value_format": "damage",
         "runner_up": {
           "name": "Vivify",
-          "value": 200.0
+          "value": 94.4
         },
-        "delta_pct": 5.475,
+        "delta_pct": 5.474,
         "narrative": "dominant",
         "value_breakdown": {
-          "personal_dealt": 71476.2
+          "personal_dealt": 33731.6
         }
       },
       {
@@ -138586,15 +138677,15 @@
           "a": "Cloaket",
           "b": "VTrider"
         },
-        "value": 23532.8,
+        "value": 11105.8,
         "value_format": "damage",
         "value_breakdown": {
-          "a_to_b": 10125.1,
-          "b_to_a": 13407.7
+          "a_to_b": 4778.3,
+          "b_to_a": 6327.5
         },
         "runner_up": {
           "name": "Certified Bad Guy vs Domakus",
-          "value": 19231.5
+          "value": 9075.9
         },
         "delta_pct": 0.224,
         "narrative": "clear"

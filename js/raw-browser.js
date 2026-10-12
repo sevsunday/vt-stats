@@ -2915,6 +2915,7 @@
     }
     ensureEventsModel(); // reuse the events-mode row extraction
     renderReconcileSentinelBadge(computeSentinelSummary());
+    renderReconcileScalePill();
     const metrics = [];
     metrics.push(computeSnipes());
     // v4 builds/economy match-level reconcile rows. Blocks are attached
@@ -3061,6 +3062,38 @@
     return state.processed.leaderboard.find(p => p.steam64 === s64) || null;
   }
 
+  function reconcileDamageScale() {
+    const cal = state.processed && state.processed.match
+      && state.processed.match.event_calibration;
+    const s = cal && cal.damage_scale;
+    return (typeof s === 'number' && isFinite(s) && s > 0) ? s : 1;
+  }
+
+  function renderReconcileScalePill() {
+    const badge = document.getElementById('reconcile-sentinel-badge');
+    if (!badge || !badge.parentNode) return;
+    let el = document.getElementById('reconcile-scale-pill');
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'reconcile-scale-pill';
+      el.className = 'badge ms-2';
+      badge.parentNode.insertBefore(el, badge.nextSibling);
+    }
+    const cal = state.processed && state.processed.match
+      && state.processed.match.event_calibration;
+    if (!cal || !(cal.r_lobby > 0)) {
+      el.classList.add('d-none');
+      el.textContent = '';
+      return;
+    }
+    el.classList.remove('d-none');
+    const scale = reconcileDamageScale();
+    el.textContent = scale === 1
+      ? `r ${Number(cal.r_lobby).toFixed(2)}`
+      : `r ${Number(cal.r_lobby).toFixed(2)} · scale ${scale.toFixed(3)}`;
+    el.title = 'DamageDealt / BulletHit ratio. Pre-2026-08-30 recordings wrote each damage event once per game world; Reconcile applies damage_scale so the recount matches processed totals.';
+  }
+
   function computePersonalDealt(s64) {
     const entry = findLeaderboardEntry(s64);
     let sum = 0;
@@ -3070,7 +3103,7 @@
       if (!(r.team > 0)) continue;       // skip_shooter check
       if (!(r.amount > 0)) continue;     // ditto
       if (isSentinelDamage(r.amount)) continue; // sentinel filter — match processed tier
-      sum += r.amount;
+      sum += r.amount * reconcileDamageScale();
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.dealt`,
@@ -3101,7 +3134,7 @@
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
       if (isSentinelDamage(r.amount)) continue;
-      sum += r.amount;
+      sum += r.amount * reconcileDamageScale();
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.received`,
@@ -3148,7 +3181,7 @@
         if (!dr.victim) continue;
         if (dr.victim === dr.shooter) continue;
       }
-      sum += r.amount;
+      sum += r.amount * reconcileDamageScale();
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_dealt`,
@@ -3191,7 +3224,7 @@
         if (!dr.victim) continue;
         if (dr.victim !== dr.shooter) continue;
       }
-      sum += r.amount;
+      sum += r.amount * reconcileDamageScale();
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.self_dealt`,

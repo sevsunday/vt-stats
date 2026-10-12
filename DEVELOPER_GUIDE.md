@@ -2588,6 +2588,16 @@ Keying on the *canonical* rating (not the lifted one) is the load-bearing stabil
 
 **Measured drift (2026-10-06, 45 players).** Max |ΔVTSR-T| 3.6 (Darkvale 1529.3 → 1532.9), mean |Δ| 1.1, mean signed +1.0. Three adjacent leaderboard swaps: Nomad 1617.2 → 1616.4 with F9bomber 1616.1 → 1618.9; Lamper 1530.8 → 1531.1 with Darkvale; M.S 1456.0 → 1456.9 with The_Bylarge 1455.6 → 1457.5. Validator: Spearman ρ 0.496 → 0.492, self-consistency 0.917 → 0.916, clean-win mean accuracy unchanged.
 
+### 13.7.7 v2.12 — accuracy axis retired, hits reconstructed
+
+**Problem.** `record_bullet_hit` returns unless both the shooter and the victim are players. `BulletInit` still counts every round a player fires. A chain gun or Plasma Stream fired at an extractor is a fired round, a `DamageDealt` row, and not a `BulletHit`. `thug_accuracy` divided human hits by every round fired, so economy fire was a miss. Sign agreement on determined matches was 39.5%.
+
+**The rating change.** `thug_accuracy` leaves `THUG_WEIGHTS`. Five axes remain and the raw dict sums to **0.76**. Runtime renormalization still applies. `ELO_SCHEMA_VERSION 15 → 16`. **Pre-v16 `peak_vtsr` is no longer comparable.** `_thug_accuracy_lobby` stays in `scripts/elo.py` for the candidate in `critique/decisions/accuracy-recon-axis.md`. It is not called from `compute_performance_index`.
+
+**Damage normalization.** Before collector commit `103284d` (2026-08-30), each damage event was written once per game world. `r = DD_pvp / BH_pvp` is 1.0 on later v4 matches and about 2.15 before that. `match.event_calibration.damage_scale` is `1/r` when `r >= 1.5`. It is applied after the sentinel filter and in the timeline recompute. See `critique/decisions/damage-multiworld-dedup.md`.
+
+**Reconstructed hits.** `pve_hits_est = min(non-human damage events / r, shots − human hits − self hits)`. `accuracy_est` is that total over rounds fired. Human hits stay exact. The UI marks the estimate with `~`. `PIPELINE_VERSION 55 → 56`, `match.schema_version 31 → 32`.
+
 ### 13.8 Tier ladder
 
 Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to give the sub-1350 "training band" room without adding a sixth tier. Tier 1 is open above 1800 so we never need to retro-add tiers.

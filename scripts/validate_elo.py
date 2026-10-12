@@ -176,11 +176,13 @@ SYNTHETIC_WINNER_THRESHOLD = 0.85
 THUG_WEIGHTS_FALLBACK = {
     "net_damage_share":  0.20,
     "thug_kill_rate":    0.20,
-    "thug_accuracy":     0.15,
     "thug_efficiency":   0.16,
     "pve_share":         0.12,
     "mobility":          0.08,
 }
+# Weight the reconstructed-accuracy candidate would have if it were
+# re-admitted beside the five live axes (0.15 / 0.91).
+CANDIDATE_ACCURACY_WEIGHT = 0.15 / 0.91
 
 # Self-consistency floor: minimum matches per player to be included in
 # split-half analysis.
@@ -2022,6 +2024,176 @@ def metric_axis_outcome(
         "available": True,
         "n_matches_determined": n_determined,
         "axes": rows,
+    }
+
+
+def _candidate_accuracy_scores(lobby: list[dict]) -> list[float]:
+    """Weapon-normalized hit rate on reconstructed hits.
+
+    Mirrors ``elo._thug_accuracy_lobby`` with every reconstructed hit
+    counted at full weight (a hit is a hit; no ALPHA_PVE). ``hits_est``
+    is written into both ``hits`` and ``pvp_hits`` so the half-credit
+    term stays zero.
+    """
+    from collections import defaultdict as _dd
+    lobby_shots: dict[str, int] = _dd(int)
+    lobby_hits: dict[str, float] = _dd(float)
+    prepared = []
+    for p in lobby:
+        wb = {}
+        for name, wd in (p.get("weapon_breakdown") or {}).items():
+            shots = wd.get("shots", 0) or 0
+            hits = wd.get("hits_est")
+            if hits is None:
+                hits = wd.get("hits", 0) or 0
+            wb[name] = shots, float(hits)
+            lobby_shots[name] += shots
+            lobby_hits[name] += float(hits)
+        prepared.append(wb)
+    out = []
+    for wb in prepared:
+        total = sum(shots for shots, _ in wb.values())
+        if total <= 0:
+            out.append(0.0)
+            continue
+        num = 0.0
+        used = 0.0
+        for name, (shots, hits) in wb.items():
+            if shots <= 0:
+                continue
+            l_shots = lobby_shots.get(name, 0)
+            l_hits = lobby_hits.get(name, 0.0)
+            if l_shots <= 0 or l_hits <= 0:
+                continue
+            ratio = (hits / shots) / (l_hits / l_shots)
+            weight = shots / total
+            num += ratio * weight
+            used += weight
+        out.append(num / used if used > 0 else 0.0)
+    return out
+
+
+def _zclip(values: list[float]) -> list[float]:
+    n = len(values)
+    if n == 0:
+        return []
+    mu = sum(values) / n
+    var = sum((v - mu) ** 2 for v in values) / n
+    sigma = math.sqrt(var) if var > 0 else 0.0
+    if sigma < 1e-9:
+        return [0.0] * n
+    out = []
+    for v in values:
+        z = (v - mu) / sigma
+        z = max(-2.0, min(2.0, z)) / 2.0
+        out.append(z)
+    return out
+
+
+def metric_candidate_axes(
+    history: dict[str, Any], per_match: dict[str, Any]
+) -> dict[str, Any]:
+    """§21. Reconstructed-accuracy candidate. Does not change ratings.
+
+    Pre-registered in ``critique/decisions/accuracy-recon-axis.md``.
+    Sign agreement is winner-team mean z minus loser-team mean z on the
+    weapon-normalized ``hits_est`` score. The 0.15 ablation mixes that
+    z into the stored performance at weight ``0.15/0.91`` and reports
+    whether the blended team-mean still agrees with the winner. The
+    Spearman and clean-win clauses of the memo need a dedicated re-rate;
+    this section does not run one. Verdict stays HOLD unless the Wilson
+    lower bound on sign agreement clears 0.50.
+    """
+    n = 0
+    credit = 0.0
+    blend_credit = 0.0
+    diffs = []
+    skipped_no_est = 0
+    for match_id, _, deltas in iter_rated_history(history):
+        match_data = per_match.get(match_id)
+        if not match_data:
+            continue
+        winner_block = (match_data.get("match") or {}).get("winner") or {}
+        if winner_block.get("decided_by") not in AXIS_OUTCOME_DECIDED_BY:
+            continue
+        winner_team = winner_block.get("team")
+        if winner_team not in (1, 2):
+            continue
+        lobby = match_data.get("leaderboard") or []
+        if not any(
+            (wd.get("hits_est") is not None)
+            for p in lobby
+            for wd in (p.get("weapon_breakdown") or {}).values()
+        ):
+            skipped_no_est += 1
+            continue
+        scores = _candidate_accuracy_scores(lobby)
+        z = _zclip(scores)
+        by_name = {}
+        for p, zi in zip(lobby, z):
+            by_name[str(p.get("name") or "")] = zi
+            if p.get("steam64"):
+                by_name[str(p.get("steam64"))] = zi
+        lookup = faction_lookup_for_match(match_data)
+        sums = {1: 0.0, 2: 0.0}
+        counts = {1: 0, 2: 0}
+        blend = {1: 0.0, 2: 0.0}
+        blend_n = {1: 0, 2: 0}
+        for d in deltas:
+            faction = lookup.get(player_key_for_delta(d))
+            if faction not in (1, 2):
+                faction = lookup.get(str(d.get("name") or ""))
+            if faction not in (1, 2):
+                continue
+            zi = by_name.get(str(d.get("steam64") or ""))
+            if zi is None:
+                zi = by_name.get(str(d.get("name") or ""))
+            if zi is None:
+                continue
+            sums[faction] += zi
+            counts[faction] += 1
+            perf = d.get("performance")
+            if isinstance(perf, (int, float)):
+                mixed = (1.0 - CANDIDATE_ACCURACY_WEIGHT) * float(perf) + CANDIDATE_ACCURACY_WEIGHT * zi
+                blend[faction] += mixed
+                blend_n[faction] += 1
+        if counts[1] == 0 or counts[2] == 0:
+            continue
+        n += 1
+        diff = (sums[winner_team] / counts[winner_team]) - (sums[3 - winner_team] / counts[3 - winner_team])
+        diffs.append(diff)
+        if diff > 0:
+            credit += 1.0
+        elif diff == 0:
+            credit += 0.5
+        if blend_n[1] and blend_n[2]:
+            bdiff = (blend[winner_team] / blend_n[winner_team]) - (blend[3 - winner_team] / blend_n[3 - winner_team])
+            if bdiff > 0:
+                blend_credit += 1.0
+            elif bdiff == 0:
+                blend_credit += 0.5
+    agreement = (credit / n) if n else None
+    ci = list(wilson_ci(int(round(credit)), n)) if n else None
+    lower = ci[0] if ci else None
+    promote_sign = bool(lower is not None and lower > 0.50 and n >= 150)
+    return {
+        "available": n > 0,
+        "axis": "thug_accuracy_est",
+        "n_matches": n,
+        "skipped_no_est": skipped_no_est,
+        "sign_agreement": agreement,
+        "sign_agreement_ci": ci,
+        "mean_winner_minus_loser": (mean(diffs) if diffs else None),
+        "ablation_weight": CANDIDATE_ACCURACY_WEIGHT,
+        "ablation_sign_agreement": (blend_credit / n) if n else None,
+        "promote_sign_clause": promote_sign,
+        "verdict": "PROMOTE" if promote_sign else "HOLD",
+        "note": (
+            "Sign agreement is the first clause of "
+            "critique/decisions/accuracy-recon-axis.md. Spearman and "
+            "clean-win accuracy require a dedicated re-rate and are not "
+            "computed here. HOLD keeps the axis display-only."
+        ),
     }
 
 
@@ -5139,9 +5311,12 @@ def render_json_report(
     schema_version 9 (v1.8, format gate): adds top-level ``format_gate``
     (#20 -- excluded-match profile, small-vs-full dynamics, rating
     transfer test). Strictly additive; not in validation_summary.json.
+    schema_version 10 (v1.9, reconstructed accuracy): adds top-level
+    ``candidate_axes`` (#21). Strictly additive; not in
+    validation_summary.json.
     """
     return {
-        "schema_version":   9,
+        "schema_version":   10,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -5594,6 +5769,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[validate_elo] [20/20] format gate ({len(per_match_excluded)} excluded match files) ...")
     format_gate = metric_format_gate(history, per_match, per_match_excluded,
                                      manifest, cmdr_history, current)
+    print("[validate_elo] [21/21] reconstructed-accuracy candidate ...")
+    candidate_axes = metric_candidate_axes(history, per_match)
 
     # Player count totals (corpus-wide, for the report header).
     seen_keys: set[str] = set()
@@ -5656,6 +5833,9 @@ def main(argv: list[str] | None = None) -> int:
         "dirichlet_perturbation": dirichlet_perturbation,
         "vtsr_c":                 vtsr_c,
         "axis_outcome":           axis_outcome,
+        # v1.9: reconstructed-accuracy candidate (#21). Display-only
+        # until the memo's promote rule clears. Not in validation_summary.
+        "candidate_axes":         candidate_axes,
         # v1.3: VTSR-C v2 economy-composite proof sections.
         "vtsr_c_perf": {
             "econ_axes":      cmdr_econ_axes,

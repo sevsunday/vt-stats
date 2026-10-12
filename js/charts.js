@@ -659,7 +659,9 @@ function renderWeaponMeta(canvasId, weaponMeta, limit) {
               const w = data[item.dataIndex];
               const pct = values.reduce((s, v) => s + v, 0) > 0
                 ? ((item.raw / values.reduce((s, v) => s + v, 0)) * 100).toFixed(1) : '0';
-              return `${Math.round(item.raw).toLocaleString()} dmg (${pct}%) | acc: ${(w.accuracy * 100).toFixed(1)}%`;
+              const acc = w.accuracy_est != null ? w.accuracy_est : w.accuracy;
+              const mark = w.accuracy_est != null ? '~' : '';
+              return `${Math.round(item.raw).toLocaleString()} dmg (${pct}%) | acc: ${mark}${(acc * 100).toFixed(1)}%`;
             },
           },
         },
@@ -788,11 +790,11 @@ function renderWeaponAccuracy(canvasId, weaponMeta, emptyMsg) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const data = weaponMeta
     .filter(w => w.total_shots >= 10)
-    .sort((a, b) => b.accuracy - a.accuracy)
+    .sort((a, b) => (b.accuracy_est != null ? b.accuracy_est : b.accuracy) - (a.accuracy_est != null ? a.accuracy_est : a.accuracy))
     .slice(0, 12);
 
   const labels = data.map(w => w.weapon);
-  const values = data.map(w => w.accuracy * 100);
+  const values = data.map(w => ((w.accuracy_est != null ? w.accuracy_est : w.accuracy) || 0) * 100);
   const colors = values.map(v => {
     if (v >= 70) return t.success;
     if (v >= 40) return t.warning;

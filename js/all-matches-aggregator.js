@@ -59,6 +59,9 @@
       total_asset_dealt: 0,
       total_shots_fired: 0,
       total_shots_hit: 0,
+      total_shots_fired_est: 0,
+      total_shots_hit_est: 0,
+      total_pve_shots_hit_est: 0,
       // v2.3: PvP-only hit counter (subset of total_shots_hit). Drives
       // career-level pvp_accuracy display.
       total_pvp_shots_hit: 0,
@@ -187,7 +190,7 @@
   function bumpWeapon(weaponTotals, wname, wdata) {
     let acc = weaponTotals[wname];
     if (!acc) {
-      acc = { dealt: 0, shots: 0, hits: 0, pvp_hits: 0, self_hits: 0 };
+      acc = { dealt: 0, shots: 0, hits: 0, pvp_hits: 0, self_hits: 0, hits_est: 0, pve_hits_est: 0 };
       weaponTotals[wname] = acc;
     }
     acc.dealt    += wdata.dealt    || 0;
@@ -200,6 +203,8 @@
     // match.schema_version 8: per-weapon self-hit count (subset of
     // `hits`). Pre-v8 contributions default to 0.
     acc.self_hits += wdata.self_hits || 0;
+    acc.hits_est += (wdata.hits_est != null ? wdata.hits_est : (wdata.hits || 0));
+    acc.pve_hits_est += wdata.pve_hits_est || 0;
   }
 
   // Most-common element by Counter semantics: ties broken by first
@@ -605,6 +610,15 @@
           c.total_pvp_shots_hit  += p.pvp_shots_hit  || 0;
           c.matches_with_bullet_hit_data += 1;
         }
+        // schema 32: reconstructed hits. Gap matches (no BulletHit) still
+        // carry shots_hit_est, so the estimate denominator includes them.
+        if (hasBulletHit || p.shots_hit_est != null) {
+          c.total_shots_fired_est += p.shots_fired || 0;
+          c.total_shots_hit_est += (p.shots_hit_est != null
+            ? p.shots_hit_est
+            : (p.shots_hit || 0));
+          c.total_pve_shots_hit_est += p.pve_shots_hit_est || 0;
+        }
         c.total_pvp_kills      += p.pvp_kills      || 0;
         c.total_pve_kills      += p.pve_kills      || 0;
         c.total_pvp_deaths     += p.pvp_deaths     || 0;
@@ -805,10 +819,11 @@
 
       for (const wm of (m.weapon_meta || [])) {
         let g = globalWeapon.get(wm.weapon);
-        if (!g) { g = { total_damage: 0, total_shots: 0, total_hits: 0 }; globalWeapon.set(wm.weapon, g); }
+        if (!g) { g = { total_damage: 0, total_shots: 0, total_hits: 0, total_hits_est: 0 }; globalWeapon.set(wm.weapon, g); }
         g.total_damage += wm.total_damage || 0;
         g.total_shots  += wm.total_shots  || 0;
         g.total_hits   += wm.total_hits   || 0;
+        g.total_hits_est += (wm.total_hits_est != null ? wm.total_hits_est : (wm.total_hits || 0));
       }
 
       const rm = m.rivalry_matrix || {};
@@ -826,6 +841,8 @@
     const careerStats = [];
     for (const [pid, c] of career) {
       const acc = c.total_shots_fired > 0 ? c.total_shots_hit / c.total_shots_fired : 0;
+      const accEst = c.total_shots_fired_est > 0
+        ? c.total_shots_hit_est / c.total_shots_fired_est : 0;
 
       let favWeapon = '\u2014';
       let favMax = 0;
@@ -843,6 +860,7 @@
       for (const wn of sortedNames) {
         const wd = c.weapon_totals[wn];
         const wAcc = wd.shots > 0 ? wd.hits / wd.shots : 0;
+        const wAccEst = wd.shots > 0 ? (wd.hits_est || 0) / wd.shots : 0;
         // v2.3: per-weapon PvP accuracy = pvp_hits / shots (NOT
         // pvp_hits / hits — pwa axis math weights per-weapon shots).
         const wPvpAcc = wd.shots > 0 ? wd.pvp_hits / wd.shots : 0;
@@ -850,8 +868,11 @@
           dealt:        r1(wd.dealt),
           shots:        wd.shots,
           hits:         wd.hits,
+          hits_est:     wd.hits_est || 0,
+          pve_hits_est: wd.pve_hits_est || 0,
           pvp_hits:     wd.pvp_hits,
           accuracy:     r3(wAcc),
+          accuracy_est: r3(wAccEst),
           pvp_accuracy: r3(wPvpAcc),
         };
       }
@@ -1008,8 +1029,11 @@
         total_pve_received:  r1(c.total_pve_received),
         total_asset_dealt:   r1(c.total_asset_dealt),
         overall_accuracy:    r3(acc),
+        overall_accuracy_est: r3(accEst),
         total_shots_fired:   c.total_shots_fired,
         total_shots_hit:     c.total_shots_hit,
+        total_shots_hit_est: c.total_shots_hit_est,
+        total_pve_shots_hit_est: c.total_pve_shots_hit_est,
         // v15: how many of this player's matches carried BulletHit data
         // (the denominator behind the accuracy sums above).
         matches_with_bullet_hit_data: c.matches_with_bullet_hit_data,
@@ -1082,12 +1106,15 @@
     const gwm = [];
     for (const [wname, wd] of globalWeapon) {
       const acc = wd.total_shots > 0 ? wd.total_hits / wd.total_shots : 0;
+      const accEst = wd.total_shots > 0 ? (wd.total_hits_est || 0) / wd.total_shots : 0;
       gwm.push({
         weapon:       wname,
         total_damage: r1(wd.total_damage),
         total_shots:  wd.total_shots,
         total_hits:   wd.total_hits,
+        total_hits_est: wd.total_hits_est || 0,
         accuracy:     r3(acc),
+        accuracy_est: r3(accEst),
       });
     }
     gwm.sort((a, b) => {
@@ -1384,8 +1411,8 @@
       .filter(c => (c.total_shots_fired || 0) >= 1000)
       .map(c => ({
         row: c,
-        accuracy: c.overall_accuracy || 0,
-        shots_hit: c.total_shots_hit || 0,
+        accuracy: (c.overall_accuracy_est != null ? c.overall_accuracy_est : c.overall_accuracy) || 0,
+        shots_hit: c.total_shots_hit_est || c.total_shots_hit || 0,
         shots_fired: c.total_shots_fired || 0,
       }))
       .sort((a, b) => b.accuracy - a.accuracy);

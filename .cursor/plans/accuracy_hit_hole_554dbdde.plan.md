@@ -4,37 +4,37 @@ overview: BulletHit has never recorded shots into non-humans on any proto versio
 todos:
   - id: p1-retire-axis
     content: "Phase 1: remove thug_accuracy from THUG_WEIGHTS in scripts/elo.py (keep _thug_accuracy_lobby for the Phase 3 candidate), drop the has_bullet_hit unavailable-axis branch, ELO_SCHEMA_VERSION 15 -> 16, update the COMMANDER_AXIS_PRIOR role-blind comment"
-    status: pending
+    status: completed
   - id: p1-frontend
     content: "Phase 1: grep thug_accuracy across js/ and update vtsr-explainers.js axes board + weights copy, player.js + match-elo.js axis lists / coaching exclusions, elo.js detail panels"
-    status: pending
+    status: completed
   - id: p2-prepass
     content: "Phase 2: add _calibrate_damage_events() pre-pass + match.event_calibration (r_by_weapon, r_lobby BH-weighted median, ref_hits, source, damage_scale, dup_era); measure all 132 pre-fix matches to pin DAMAGE_DUP_FALLBACK_R; override list for the 3 contaminated 2026-04-16 matches"
-    status: pending
+    status: completed
   - id: p2-damage-scale
     content: "Phase 2: apply damage_scale to de_amount / de_victim_amount right after the sentinel check and in the timeline recompute loop; WARN on any v4 match with r > 1.05"
-    status: pending
+    status: completed
   - id: p2-est-fields
     content: "Phase 2: emit pve_hits_est / hits_est / accuracy_est on weapon_breakdown, personal, weapon_meta, faction_totals + hits_est_source; reconstruct pvp_hits_est on the 7 no-BulletHit matches; PIPELINE_VERSION 53 -> 54, match.schema_version 31 -> 32"
-    status: pending
+    status: completed
   - id: p2-contrib-agg
     content: "Phase 2: add the est fields to _extract_contribution and sum them in VTAggregate.build() with identical rounding; career overall_accuracy_est"
-    status: pending
+    status: completed
   - id: p2-ui
     content: "Phase 2: Acc column -> accuracy_est with ~ marker + tooltip (PvP Acc stays exact) in app.js / player.js / elo.js; accuracy chart, radar, career Acc, Sharpshooter + Gunner breakdown on the estimate; fmtAccPct em-dash only when neither exists; raw-browser Reconcile applies damage_scale + shows an r pill"
-    status: pending
+    status: completed
   - id: p3-memo
     content: "Phase 3: write critique/decisions/accuracy-recon-axis.md (pre-registered promote rule) and critique/decisions/damage-multiworld-dedup.md (DD/BH evidence) BEFORE running the candidate section"
-    status: pending
+    status: completed
   - id: p3-validator
     content: "Phase 3: add validate_elo.py section 21 candidate_axes (weapon-normalized hits_est axis: sign agreement + ablation at 0.15), report.json schema 9 -> 10, validation_summary.json unchanged"
-    status: pending
+    status: completed
   - id: p4-gates
     content: "Phase 4: add _investigation/check_dd_bh_ratio.py, golden_accuracy_recon_inert.py, golden_damage_scale_drift.py; run existing golden gates + run_all_gates.py; full reprocess and record VTSR drift"
-    status: pending
+    status: completed
   - id: p4-docs
     content: "Phase 4: update docs/DATA_DICTIONARY.md, DEVELOPER_GUIDE.md section 13.7.7 + damage normalization, .cursor/rules/data-schema.mdc (fix the two stale claims), .cursor/rules/project-overview.mdc"
-    status: pending
+    status: completed
 isProject: false
 ---
 

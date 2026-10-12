@@ -1692,8 +1692,9 @@ Alphabetical reference of every statistic displayed in the dashboard.
 
 | Datapoint | Definition | Source Events | Formula |
 |---|---|---|---|
-| **Accuracy (Player)** | Percentage of shots that connected | `BulletInit`, `BulletHit` | `shots_hit / shots_fired` |
-| **Accuracy (Weapon)** | Per-weapon hit rate across all users | `BulletInit`, `BulletHit` | `total_hits / total_shots` per ODF |
+| **Accuracy (Player)** | Human hit rate. `BulletHit` is written only when both shooter and victim are players, so rounds into extractors are not hits. | `BulletInit`, `BulletHit` | `shots_hit / shots_fired` |
+| **Accuracy (estimated)** | Human hits plus non-human hits reconstructed from damage events. Marked `~` in the UI. | `BulletInit`, `BulletHit`, `DamageDealt` | `shots_hit_est / shots_fired`, with `pve_hits_est = min(DD_nonhuman / r, shots − pvp_hits − self_hits)` and `r = DD_pvp / BH_pvp` |
+| **Accuracy (Weapon)** | Per-weapon human hit rate across all users | `BulletInit`, `BulletHit` | `total_hits / total_shots` per ODF |
 | **Asset Damage Dealt** | Damage credited to a player's AI units or structures | `DamageDealt` where `shooter = 0` | Sum of `amount` grouped by owning slot (`team` field) |
 | **Asset Damage Received** | Damage taken by a player's AI units or structures | `DamageReceived` where `victim = 0` | Sum of `amount` grouped by owning slot (`team` field) |
 | **Base-to-Base Distance** | Raw horizontal distance between Team 1 and Team 2 spawn centroids (no floor applied) | `UpdateTick.players[].position` (first 3 kept samples per player) | Median of first-3 samples per player → per-team centroid of (x, z) → `sqrt(dx² + dz²)`. `null` if either team empty. See `positioning.base_to_base_distance` and the mirrored `match.base_to_base_distance`. Hero banner shows empirical as primary with a tooltip comparing to the canonical value |

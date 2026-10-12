@@ -246,7 +246,7 @@ function _playerToAxes(player, positioning, norms) {
   const received = ps.received || 0;
   const pvpDealt = ps.pvp_dealt || 0;
   const pveDealt = ps.pve_dealt || 0;
-  const accuracy = ps.accuracy || 0;
+  const accuracy = (ps.accuracy_est != null ? ps.accuracy_est : ps.accuracy) || 0;
   const kills = player.kills || 0;
   const deaths = player.deaths || 0;
   const weaponsUsed = ps.weapons_used || 0;
@@ -486,7 +486,7 @@ function _careerToAxes(entry, norms, mode) {
   const received = entry.total_received || 0;
   const pvpDealt = entry.total_pvp_dealt || 0;
   const pveDealt = entry.total_pve_dealt || 0;
-  const accuracy = entry.overall_accuracy || 0;
+  const accuracy = (entry.overall_accuracy_est != null ? entry.overall_accuracy_est : entry.overall_accuracy) || 0;
   const kills = entry.total_kills || 0;
   const deaths = entry.total_deaths || 0;
   const matches = entry.matches_played || 0;

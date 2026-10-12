@@ -145,7 +145,35 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # puts the mine down (build_mine_weapon_owners): the Flame Mine's fireball
 # was "Fireball" / "Wasp", the Snare Field's "Snare Trap", the Spore mine's
 # "Wasp". Display names only; ratings unmoved.
-PIPELINE_VERSION = 55
+# 55 -> 56: non-human hit reconstruction + pre-2026-08-30 damage
+# de-duplication. BulletHit never recorded a non-player victim, so
+# accuracy was a human hit rate. DamageDealt is 1:1 with BulletHit on
+# post-fix v4 and ~2.15x on earlier recordings (one event per game
+# world). match.schema_version 32.
+PIPELINE_VERSION = 56
+
+# Damage-event / BulletHit calibration (match.schema_version 32).
+# A weapon joins the in-match ratio only with this many PvP BulletHits
+# and at least one BulletInit. Below that, the lobby ratio is used.
+CALIB_MIN_REF_HITS = 30
+# r = DD_pvp / BH_pvp. At or above this, damage is treated as duplicated
+# and scaled by 1/r. Post-fix v4 measures r = 1.0 and is not scaled.
+DAMAGE_DUP_MIN_R = 1.5
+# Pre-fix corpus median of the BH-weighted per-weapon ratio, used when a
+# match has no usable reference (zero BulletHits, or the three
+# 2026-04-16 recordings whose victim attribution is contaminated).
+DAMAGE_DUP_FALLBACK_R = 2.15
+# A v4 match measuring above this is a collector regression. WARN only;
+# the measured r is still what gets applied.
+DAMAGE_DUP_V4_WARN_R = 1.05
+# d72eb40 DLL: non-human hits were recorded, but the missing IsPlayer
+# guard attributed AI craft to their owning player. Do not trust those
+# BulletHit victim ids; reconstruct from damage events at the fallback r.
+ACCURACY_RECON_CONTAMINATED = frozenset({
+    "2026-04-16T01-27-48",
+    "2026-04-16T01-49-33",
+    "2026-04-16T02-11-20",
+})
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -1226,23 +1254,32 @@ def compute_highlights(match_data):
     # breakdown so it doesn't caption a misleading 0.0%.
     has_bullet_hit = (match_data.get("match") or {}).get("has_bullet_hit_data", True)
 
-    # ---- Sharpshooter: max accuracy; breakdown = shots_hit / shots_fired.
+    # ---- Sharpshooter: max accuracy. schema 32 ranks on accuracy_est
+    # (human hits exact, non-human hits reconstructed). Falls back to the
+    # exact human rate when the estimate is absent.
+    def _sharp_acc(p):
+        personal = p.get("personal") or {}
+        if personal.get("accuracy_est") is not None:
+            return personal.get("accuracy_est", 0)
+        return personal.get("accuracy", 0)
     sharp = _player_card(
         "sharpshooter", leaderboard,
-        value_fn=lambda p: (p.get("personal") or {}).get("accuracy", 0),
+        value_fn=_sharp_acc,
         floor=lambda p, v: (p.get("personal") or {}).get("shots_fired", 0) >= 100,
         tiebreak=lambda p: (
-            -(p.get("personal") or {}).get("shots_hit", 0),
+            -((p.get("personal") or {}).get("shots_hit_est")
+              or (p.get("personal") or {}).get("shots_hit", 0)),
             (p.get("name") or "").lower(),
         ),
         value_format="accuracy",
         round_value=3,
-    ) if has_bullet_hit else None
+    )
     if sharp is not None:
         winner_p = (leaderboard_by_name.get(sharp["winner"]["name"]) or {}).get("personal") or {}
         sharp["value_breakdown"] = {
-            "shots_hit": int(winner_p.get("shots_hit", 0)),
+            "shots_hit": int(winner_p.get("shots_hit_est", winner_p.get("shots_hit", 0))),
             "shots_fired": int(winner_p.get("shots_fired", 0)),
+            "estimated": winner_p.get("accuracy_est") is not None,
         }
         emit(sharp)
 
@@ -1251,7 +1288,9 @@ def compute_highlights(match_data):
         "gunner", leaderboard,
         value_fn=lambda p: (p.get("personal") or {}).get("shots_fired", 0),
         tiebreak=lambda p: (
-            -(p.get("personal") or {}).get("accuracy", 0),
+            -((p.get("personal") or {}).get("accuracy_est")
+              if (p.get("personal") or {}).get("accuracy_est") is not None
+              else (p.get("personal") or {}).get("accuracy", 0)),
             (p.get("name") or "").lower(),
         ),
         value_format="count",
@@ -1259,9 +1298,15 @@ def compute_highlights(match_data):
     )
     if gunner is not None:
         winner_p = (leaderboard_by_name.get(gunner["winner"]["name"]) or {}).get("personal") or {}
+        gunner_acc = winner_p.get("accuracy_est")
+        if gunner_acc is None and has_bullet_hit:
+            gunner_acc = winner_p.get("accuracy", 0)
         gunner["value_breakdown"] = (
-            {"accuracy": round(winner_p.get("accuracy", 0), 3)}
-            if has_bullet_hit else {}
+            {
+                "accuracy": round(gunner_acc, 3),
+                "estimated": winner_p.get("accuracy_est") is not None,
+            }
+            if gunner_acc is not None else {}
         )
         emit(gunner)
 
@@ -5516,6 +5561,180 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None):
     }
 
 
+def _bh_weighted_median(pairs):
+    """BH-weighted median of (ratio, bullet_hit_count) pairs."""
+    ordered = sorted((r, w) for r, w in pairs if w > 0)
+    total = sum(w for _, w in ordered)
+    if total <= 0:
+        return 0.0
+    half = total / 2.0
+    acc = 0
+    for ratio, weight in ordered:
+        acc += weight
+        if acc >= half:
+            return ratio
+    return ordered[-1][0]
+
+
+def _calibrate_damage_events(events, schema, match_id):
+    """Per-ordnance DamageDealt / BulletHit ratio and the damage scale.
+
+    Returns a dict whose public keys are stamped on ``match.event_calibration``.
+    Per-player damage-event counts stay on the object for hit reconstruction
+    and are not serialized.
+
+    ``r = DD_pvp / BH_pvp`` on weapons with at least ``CALIB_MIN_REF_HITS``
+    PvP bullet hits and one BulletInit. ``r_lobby`` is the BH-weighted
+    median of those ratios. Post-2026-08-30 v4 measures 1.0 (one damage
+    event per hit). Earlier recordings measure ~2.15 (one event per game
+    world). ``damage_scale`` is ``1 / r_lobby`` when that ratio is at least
+    ``DAMAGE_DUP_MIN_R``, else 1.
+    """
+    bh_pvp = defaultdict(int)
+    dd_pvp = defaultdict(int)
+    inits = defaultdict(int)
+    # (steam64, ordnance lower) -> event count
+    player_dd_pvp = defaultdict(int)
+    player_dd_nonhuman = defaultdict(int)
+    bullet_hits_seen = 0
+    nonhuman_hits = 0
+
+    def _okey(odf):
+        return (odf or "").strip().lower()
+
+    i = 0
+    n = len(events)
+    while i < n:
+        evt = events[i]
+        et = evt.WhichOneof("event_type")
+        if et == "bullet_init":
+            bi = evt.bullet_init
+            key = _okey(bi.ordnance_odf)
+            if bi.shooter > 0 and key:
+                inits[key] += 1
+            i += 1
+            continue
+        if et == "bullet_hit":
+            bh = evt.bullet_hit
+            bullet_hits_seen += 1
+            key = _okey(bh.ordnance_odf)
+            if bh.shooter > 0 and bh.victim > 0 and bh.shooter != bh.victim and key:
+                bh_pvp[key] += 1
+            elif bh.shooter > 0 and bh.victim == 0 and key:
+                nonhuman_hits += 1
+            i += 1
+            continue
+        if et != "damage_dealt":
+            i += 1
+            continue
+        dd = evt.damage_dealt
+        if schema != PROTO_SCHEMA_V1:
+            shooter = dd.shooter
+            victim = dd.victim
+            amount = dd.amount
+            key = _okey(dd.ordnance_odf)
+            i += 1
+        else:
+            shooter = dd.shooter
+            amount = dd.amount
+            key = _okey(dd.ordnance_odf)
+            if (
+                i + 1 < n
+                and events[i + 1].WhichOneof("event_type") == "damage_received"
+            ):
+                victim = events[i + 1].damage_received.victim
+                i += 2
+            else:
+                victim = 0
+                i += 1
+        if _is_sentinel_damage(amount) or not key or shooter <= 0 or amount == 0.0:
+            continue
+        if victim > 0 and victim != shooter:
+            dd_pvp[key] += 1
+            player_dd_pvp[(shooter, key)] += 1
+        elif victim == 0:
+            player_dd_nonhuman[(shooter, key)] += 1
+
+    r_by_weapon = {}
+    weighted = []
+    for key, hits in bh_pvp.items():
+        if hits < CALIB_MIN_REF_HITS or inits.get(key, 0) <= 0:
+            continue
+        dealt_n = dd_pvp.get(key, 0)
+        if dealt_n <= 0:
+            continue
+        ratio = dealt_n / hits
+        r_by_weapon[key] = round(ratio, 4)
+        weighted.append((ratio, hits))
+
+    contaminated = match_id in ACCURACY_RECON_CONTAMINATED
+    if weighted and not contaminated:
+        r_lobby = _bh_weighted_median(weighted)
+        source = "in_match"
+        ref_hits = int(sum(w for _, w in weighted))
+    else:
+        r_lobby = 1.0 if schema == PROTO_SCHEMA_V4 else DAMAGE_DUP_FALLBACK_R
+        source = "fallback"
+        ref_hits = 0
+
+    if (
+        schema == PROTO_SCHEMA_V4
+        and source == "in_match"
+        and r_lobby > DAMAGE_DUP_V4_WARN_R
+    ):
+        print(
+            f"  WARN event_calibration: v4 match {match_id} "
+            f"r_lobby={r_lobby:.3f} > {DAMAGE_DUP_V4_WARN_R} "
+            f"(collector damage/hit ratio regressed)"
+        )
+
+    damage_scale = (1.0 / r_lobby) if r_lobby >= DAMAGE_DUP_MIN_R else 1.0
+    # Clean non-human BulletHits (a future collector, or a match the
+    # override list does not condemn) are preferred over reconstruction.
+    if nonhuman_hits > 0 and not contaminated and bullet_hits_seen > 0:
+        hits_est_source = "wire"
+    elif source == "fallback":
+        hits_est_source = "fallback"
+    else:
+        hits_est_source = "damage_events"
+
+    return {
+        "r_by_weapon": r_by_weapon,
+        "r_lobby": round(r_lobby, 4),
+        "ref_hits": ref_hits,
+        "source": source,
+        "damage_scale": round(damage_scale, 6),
+        "dup_era": bool(r_lobby >= DAMAGE_DUP_MIN_R),
+        "hits_est_source": hits_est_source,
+        "has_bullet_hit": bullet_hits_seen > 0,
+        "player_dd_pvp": player_dd_pvp,
+        "player_dd_nonhuman": player_dd_nonhuman,
+    }
+
+
+def _estimate_weapon_hits(calib, s64, odf, shots, pvp_hits, self_hits):
+    """Reconstructed hit counts for one player-weapon.
+
+    Returns ``(pve_hits_est, pvp_hits_est or None)``. ``pvp_hits_est`` is
+    set only when the match recorded no BulletHit at all. Wire-sourced
+    matches do not call this: their non-human hits are already on the
+    BulletHit stream.
+    """
+    key = (odf or "").strip().lower()
+    r_w = calib["r_by_weapon"].get(key) or calib["r_lobby"] or 0.0
+    cap_room = max(0, int(shots) - int(pvp_hits) - int(self_hits))
+    if r_w <= 0 or not s64:
+        return 0, (0 if not calib["has_bullet_hit"] else None)
+    dd_nh = calib["player_dd_nonhuman"].get((s64, key), 0)
+    pve_est = int(round(min(dd_nh / r_w, cap_room)))
+    if calib["has_bullet_hit"]:
+        return pve_est, None
+    dd_pvp = calib["player_dd_pvp"].get((s64, key), 0)
+    pvp_room = max(0, int(shots) - int(self_hits) - pve_est)
+    pvp_est = int(round(min(dd_pvp / r_w, pvp_room)))
+    return pve_est, pvp_est
+
+
 def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, turret_odfs=None, no_prompt=False):
     """Process a single match session into pre-computed stats.
 
@@ -6223,6 +6442,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         2: {"built": 0, "cancelled": 0, "structures": 0},
     }
 
+    # Damage/hit calibration runs before any accumulator sees an amount.
+    # match id matches the stamp written later from header.start_time.
+    _start_ts = header.start_time
+    _match_id_early = datetime.fromtimestamp(
+        _start_ts.seconds + _start_ts.nanos / 1e9, tz=timezone.utc
+    ).strftime("%Y-%m-%dT%H-%M-%S")
+    event_calibration = _calibrate_damage_events(events, schema, _match_id_early)
+    damage_scale = event_calibration["damage_scale"]
+
     i = 0
     n = len(events)
     while i < n:
@@ -6493,6 +6721,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         f"amount={de_amount} odf='{de_ordnance or ''}'"
                     )
                 continue
+
+            # Pre-2026-08-30 recordings wrote each damage event once per
+            # game world. Scale both sides before any accumulator. 1.0 on
+            # post-fix v4, so those matches are unchanged.
+            if damage_scale != 1.0:
+                de_amount *= damage_scale
+                de_victim_amount *= damage_scale
 
             # Combat engagement capture (schema 27): coalesce player->player
             # damage into per-pair intervals for the replay attack-line overlay.
@@ -7570,19 +7805,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             dd_shooter_team = dd.shooter_team if schema != PROTO_SCHEMA_V1 else dd.team
             if _is_sentinel_damage(dd.amount):
                 continue
-            if dd_shooter_team == 0 or dd.amount == 0.0:
+            dd_amount_scaled = dd.amount * damage_scale
+            if dd_shooter_team == 0 or dd_amount_scaled == 0.0:
                 continue
             shooter = dd.shooter
             bucket_idx = (dd.tick - min_tick) // bucket_size
             shooter_faction = slot_to_faction(dd_shooter_team)
 
             if shooter > 0:
-                timeline_player[shooter][bucket_idx] += dd.amount
+                timeline_player[shooter][bucket_idx] += dd_amount_scaled
             else:
                 pass  # asset only goes to faction timeline below
 
             if shooter_faction:
-                timeline_faction[shooter_faction][bucket_idx] += dd.amount
+                timeline_faction[shooter_faction][bucket_idx] += dd_amount_scaled
 
     # Build weapon and unit name maps. Both are scoped to the ODFs the match
     # actually used so disambiguation suffixes only appear when there is a
@@ -7807,6 +8043,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     # Build leaderboard
     leaderboard = []
+    # Reconstructed hits per ordnance, summed across players for weapon_meta.
+    weapon_hits_est = defaultdict(int)
     # Per-slot lookup for the identity-reroute provenance field on each
     # leaderboard row. Empty dict when no reroutes apply to this match.
     reroute_by_slot = {r["slot"]: r for r in match_reroutes}
@@ -7876,6 +8114,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         # no-distance matches; the emit below detects that and omits the field.
         dist_total_pvp = [0] * _DIST_NBINS
         dist_total_pve = [0] * _DIST_NBINS
+        pve_est_sum = 0
+        pvp_est_sum = 0
+        hits_est_sum = 0
         # Sort by display name for deterministic output across pipeline reruns
         # (set iteration order over all_wpn_odfs is non-deterministic).
         for odf in sorted(all_wpn_odfs, key=lambda o: wpn_name(o).lower()):
@@ -7890,6 +8131,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # (where `pve_hits` is the implicit remainder).
             w_self_hits = player_self_shots_hit[s64].get(odf, 0) if s64 else 0
             w_acc = w_hits / w_shots if w_shots > 0 else 0
+            if event_calibration["hits_est_source"] == "wire":
+                w_pve_est = max(0, w_hits - w_pvp_hits - w_self_hits)
+                w_pvp_est = None
+            else:
+                w_pve_est, w_pvp_est = _estimate_weapon_hits(
+                    event_calibration, s64, odf, w_shots, w_pvp_hits, w_self_hits,
+                )
+            if w_pvp_est is None:
+                w_hits_est = w_pvp_hits + w_self_hits + w_pve_est
+            else:
+                w_hits_est = w_pvp_est + w_self_hits + w_pve_est
+            w_acc_est = w_hits_est / w_shots if w_shots > 0 else 0
             entry = {
                 "dealt": round(w_dealt, 1),
                 "received": round(w_recv, 1),
@@ -7898,7 +8151,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pvp_hits": w_pvp_hits,
                 "self_hits": w_self_hits,
                 "accuracy": round(w_acc, 3),
+                "pve_hits_est": w_pve_est,
+                "hits_est": w_hits_est,
+                "accuracy_est": round(w_acc_est, 3),
             }
+            if w_pvp_est is not None:
+                entry["pvp_hits_est"] = w_pvp_est
+            pve_est_sum += w_pve_est
+            hits_est_sum += w_hits_est
+            if w_pvp_est is not None:
+                pvp_est_sum += w_pvp_est
+            weapon_hits_est[odf] += w_hits_est
             # match.schema_version 11: engagement-range histogram per channel.
             # Emit a channel only when it has any hits; omit `range_hist`
             # entirely when neither channel recorded distance data (v1 / no
@@ -8124,6 +8387,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pvp_shots_hit": total_pvp_hit,
                 "pvp_accuracy": round(pvp_accuracy, 3),
                 "accuracy": round(accuracy, 3),
+                # schema 32: human hits stay exact. Non-human hits are
+                # reconstructed from damage events (or taken from the wire
+                # when a match actually recorded them).
+                "pve_shots_hit_est": pve_est_sum,
+                "shots_hit_est": hits_est_sum,
+                "accuracy_est": round(hits_est_sum / total_fired, 3) if total_fired > 0 else 0,
+                "hits_est_source": event_calibration["hits_est_source"],
+                **(
+                    {"pvp_shots_hit_est": pvp_est_sum}
+                    if not event_calibration["has_bullet_hit"] else {}
+                ),
                 # v2.3: PvP/PvE kill + death split. Drives the dashboard's
                 # compact `TOTAL (PvP/PvE)` chips on Kills/Deaths cells
                 # and the thug_kill_rate ELO axis (alpha-blended).
@@ -8225,6 +8499,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         f_shots = faction_shots.get(f_num, 0)
         f_hits = faction_hits.get(f_num, 0)
         f_acc = f_hits / f_shots if f_shots > 0 else 0
+        f_hits_est = sum(
+            (row.get("personal") or {}).get("shots_hit_est", 0)
+            for row in leaderboard
+            if row.get("faction") == f_num
+        )
+        f_acc_est = f_hits_est / f_shots if f_shots > 0 else 0
 
         faction_totals[str(f_num)] = {
             "player_dealt": round(f_player_dealt, 1),
@@ -8240,6 +8520,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "shots": f_shots,
             "hits": f_hits,
             "accuracy": round(f_acc, 3),
+            "hits_est": f_hits_est,
+            "accuracy_est": round(f_acc_est, 3),
         }
 
     # Rivalry matrix (use display names)
@@ -8285,6 +8567,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         shots = weapon_total_shots.get(odf, 0)
         hits = weapon_total_hits.get(odf, 0)
         acc = hits / shots if shots > 0 else 0
+        hits_est = weapon_hits_est.get(odf, hits)
+        acc_est = hits_est / shots if shots > 0 else 0
         users = len(weapon_users.get(odf, set()))
         if dmg > 0 or shots > 0:
             weapon_meta.append({
@@ -8294,6 +8578,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "total_shots": shots,
                 "total_hits": hits,
                 "accuracy": round(acc, 3),
+                "total_hits_est": hits_est,
+                "accuracy_est": round(acc_est, 3),
                 "users": users,
             })
     # Secondary sort by weapon name to break ties deterministically
@@ -9003,12 +9289,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # == 0 is omitted from VTSR-T and career when the match recorded
             # some personal damage. Commanders are never flagged. Pre-v30
             # rows lack the field; consumers default it to false.
-            # v31 (this version): optional match.bench plus
+            # v31: optional match.bench plus
             # leaderboard[].bench_prefix. A connected player who stops
             # fighting after a sticky leave stays rated; VTSR-T uses the
             # prefix. Absent when the pattern does not fire. Not in
             # contributions. Career stats stay the full match.
-            "schema_version": 31,
+            # v32 (this version): event_calibration + reconstructed hits
+            # (pve_hits_est / hits_est / accuracy_est) and a damage_scale
+            # that undoes the pre-2026-08-30 per-world damage duplication.
+            "schema_version": 32,
+            "event_calibration": {
+                "r_by_weapon": event_calibration["r_by_weapon"],
+                "r_lobby": event_calibration["r_lobby"],
+                "ref_hits": event_calibration["ref_hits"],
+                "source": event_calibration["source"],
+                "damage_scale": event_calibration["damage_scale"],
+                "dup_era": event_calibration["dup_era"],
+                "hits_est_source": event_calibration["hits_est_source"],
+            },
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -9570,6 +9868,8 @@ def _extract_contribution(match_data):
             "structure_dealt": round(personal.get("structure_dealt", 0), 1),
             "shots_fired":    personal.get("shots_fired", 0),
             "shots_hit":      personal.get("shots_hit", 0),
+            "shots_hit_est":  personal.get("shots_hit_est", personal.get("shots_hit", 0)),
+            "pve_shots_hit_est": personal.get("pve_shots_hit_est", 0),
             # v2.3: PvP-only hit count (subset of shots_hit). Drives the
             # career thug_accuracy axis at the per-weapon level (via
             # weapon_breakdown[w].pvp_hits) and the per-match thug
@@ -9614,6 +9914,8 @@ def _extract_contribution(match_data):
                     # match.schema_version 8: per-weapon self-hit count
                     # (subset of `hits`). Pre-v8 contributions default to 0.
                     "self_hits": wdata.get("self_hits", 0),
+                    "pve_hits_est": wdata.get("pve_hits_est", 0),
+                    "hits_est": wdata.get("hits_est", wdata.get("hits", 0)),
                 }
                 for wname, wdata in (p.get("weapon_breakdown") or {}).items()
             },
@@ -9634,6 +9936,7 @@ def _extract_contribution(match_data):
             "total_damage": round(wm.get("total_damage", 0), 1),
             "total_shots":  wm.get("total_shots", 0),
             "total_hits":   wm.get("total_hits", 0),
+            "total_hits_est": wm.get("total_hits_est", wm.get("total_hits", 0)),
         }
         for wm in (match_data.get("weapon_meta") or [])
     ]

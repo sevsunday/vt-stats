@@ -3,7 +3,7 @@
     "id": "2026-05-24T01-49-53",
     "source_file": "2026-05-24-01-49-53.binpb.gz",
     "source_size_bytes": 1892374,
-    "pipeline_version": 55,
+    "pipeline_version": 56,
     "submitter": "Nomad",
     "map": "STvsrexcav.bzn",
     "date": "2026-05-24T01:49:53.737240+00:00",
@@ -116,7 +116,21 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 31,
+    "schema_version": 32,
+    "event_calibration": {
+      "r_by_weapon": {
+        "cphcg_c.odf": 2.1329,
+        "epulse.odf": 2.1886,
+        "slicer_c.odf": 2.023,
+        "eburst_c.odf": 2.0632
+      },
+      "r_lobby": 2.1329,
+      "ref_hits": 3137,
+      "source": "in_match",
+      "damage_scale": 0.468839,
+      "dup_era": true,
+      "hits_est_source": "damage_events"
+    },
     "proto_schema_version": "v2",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -207,28 +221,32 @@
       "deaths": 2,
       "kd_ratio": 3.5,
       "personal": {
-        "dealt": 83893.7,
-        "received": 20181.6,
-        "pvp_dealt": 25198.4,
-        "pve_dealt": 58437.8,
-        "pvp_received": 17799.6,
-        "pve_received": 2124.5,
-        "structure_dealt": 35905.0,
-        "net": 63712.1,
+        "dealt": 39332.6,
+        "received": 9461.9,
+        "pvp_dealt": 11814.0,
+        "pve_dealt": 27397.9,
+        "pvp_received": 8345.1,
+        "pve_received": 996.1,
+        "structure_dealt": 16833.7,
+        "net": 29870.7,
         "ratio": 4.16,
         "shots_fired": 3338,
         "shots_hit": 593,
         "pvp_shots_hit": 593,
         "pvp_accuracy": 0.178,
         "accuracy": 0.178,
+        "pve_shots_hit_est": 1865,
+        "shots_hit_est": 2458,
+        "accuracy_est": 0.736,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 5,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 3.51,
         "pvp_assists": 4,
-        "self_dealt": 257.5,
-        "self_received": 257.5,
+        "self_dealt": 120.7,
+        "self_received": 120.7,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -250,21 +268,24 @@
         },
         "time_low_health_pct": 0.026,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 8.92
+        "hp_efficiency": 4.18
       },
       "assets": {
         "dealt": 0,
-        "received": 74512.4
+        "received": 34934.3
       },
       "weapon_breakdown": {
         "Burst Gun": {
-          "dealt": 33454.0,
+          "dealt": 15684.5,
           "received": 0,
           "shots": 1180,
           "hits": 190,
           "pvp_hits": 190,
           "self_hits": 0,
           "accuracy": 0.161,
+          "pve_hits_est": 865,
+          "hits_est": 1055,
+          "accuracy_est": 0.894,
           "range_hist": {
             "pvp": [
               0,
@@ -302,13 +323,16 @@
           }
         },
         "Combat Laser (cphlas_c)": {
-          "dealt": 8085.0,
-          "received": 4680.0,
+          "dealt": 3790.6,
+          "received": 2194.2,
           "shots": 50,
           "hits": 2,
           "pvp_hits": 2,
           "self_hits": 0,
           "accuracy": 0.04,
+          "pve_hits_est": 32,
+          "hits_est": 34,
+          "accuracy_est": 0.68,
           "range_hist": {
             "pvp": [
               0,
@@ -346,49 +370,64 @@
           }
         },
         "Combat Laser (xcplasbld)": {
-          "dealt": 368.3,
-          "received": 63.3,
+          "dealt": 172.7,
+          "received": 29.7,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Combat Laser (xcplascar)": {
-          "dealt": 18.6,
-          "received": 152.0,
+          "dealt": 8.7,
+          "received": 71.3,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Combat Laser (xcplasgnd)": {
-          "dealt": 15.0,
+          "dealt": 7.0,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion (Hadean)": {
-          "dealt": 411.5,
-          "received": 194.2,
+          "dealt": 192.9,
+          "received": 91.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Dragon Blast": {
-          "dealt": 21480.0,
+          "dealt": 10070.7,
           "received": 0,
           "shots": 184,
           "hits": 27,
           "pvp_hits": 27,
           "self_hits": 0,
           "accuracy": 0.147,
+          "pve_hits_est": 113,
+          "hits_est": 140,
+          "accuracy_est": 0.761,
           "range_hist": {
             "pvp": [
               0,
@@ -426,22 +465,28 @@
           }
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 373.4,
-          "received": 47.6,
+          "dealt": 175.1,
+          "received": 22.3,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 18046.0,
-          "received": 12579.0,
+          "dealt": 8460.7,
+          "received": 5897.5,
           "shots": 1924,
           "hits": 374,
           "pvp_hits": 374,
           "self_hits": 0,
           "accuracy": 0.194,
+          "pve_hits_est": 855,
+          "hits_est": 1229,
+          "accuracy_est": 0.639,
           "range_hist": {
             "pvp": [
               0,
@@ -479,13 +524,16 @@
           }
         },
         "Vehicle Explosion (Hadean)": {
-          "dealt": 1642.0,
+          "dealt": 769.8,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -540,13 +588,13 @@
           "pvp_deaths": 0,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 14449.6,
+          "dealt": 6774.5,
           "shots": 1388,
           "hits": 236,
           "pvp_hits": 236,
           "accuracy": 0.17,
           "pvp_accuracy": 0.17,
-          "dpm": 3489.5,
+          "dpm": 1636.0,
           "kd": null
         },
         {
@@ -559,13 +607,13 @@
           "pvp_deaths": 1,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 36097.3,
+          "dealt": 16923.8,
           "shots": 1109,
           "hits": 218,
           "pvp_hits": 218,
           "accuracy": 0.197,
           "pvp_accuracy": 0.197,
-          "dpm": 9797.9,
+          "dpm": 4593.7,
           "kd": 1.0
         },
         {
@@ -578,13 +626,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1331.0,
+          "dealt": 624.0,
           "shots": 86,
           "hits": 56,
           "pvp_hits": 56,
           "accuracy": 0.651,
           "pvp_accuracy": 0.651,
-          "dpm": 721.4,
+          "dpm": 338.2,
           "kd": 0.0
         },
         {
@@ -597,13 +645,13 @@
           "pvp_deaths": 0,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 31231.0,
+          "dealt": 14642.3,
           "shots": 755,
           "hits": 83,
           "pvp_hits": 83,
           "accuracy": 0.11,
           "pvp_accuracy": 0.11,
-          "dpm": 19966.5,
+          "dpm": 9361.1,
           "kd": null
         },
         {
@@ -616,32 +664,32 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 784.9,
+          "dealt": 368.0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
-          "dpm": 554.7,
+          "dpm": 260.1,
           "kd": null
         }
       ],
       "hit_targets": {
         "Herp McDerperson": {
           "hits": 258,
-          "damage": 10040.4
+          "damage": 4707.4
         },
         "Nomad": {
           "hits": 252,
-          "damage": 13244.0
+          "damage": 6209.3
         },
         "econchump": {
           "hits": 77,
-          "damage": 1793.0
+          "damage": 840.6
         },
         "Monkey": {
           "hits": 6,
-          "damage": 121.0
+          "damage": 56.7
         }
       }
     },
@@ -663,28 +711,32 @@
       "deaths": 2,
       "kd_ratio": 3.0,
       "personal": {
-        "dealt": 45794.4,
-        "received": 22745.7,
-        "pvp_dealt": 20293.9,
-        "pve_dealt": 25226.8,
-        "pvp_received": 21162.8,
-        "pve_received": 1309.2,
-        "structure_dealt": 12581.9,
-        "net": 23048.8,
+        "dealt": 21470.2,
+        "received": 10664.0,
+        "pvp_dealt": 9514.6,
+        "pve_dealt": 11827.3,
+        "pvp_received": 9921.9,
+        "pve_received": 613.8,
+        "structure_dealt": 5898.9,
+        "net": 10806.2,
         "ratio": 2.01,
         "shots_fired": 1765,
         "shots_hit": 639,
         "pvp_shots_hit": 639,
         "pvp_accuracy": 0.362,
         "accuracy": 0.362,
+        "pve_shots_hit_est": 532,
+        "shots_hit_est": 1171,
+        "accuracy_est": 0.663,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 4,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 2.66,
         "pvp_assists": 5,
-        "self_dealt": 273.7,
-        "self_received": 273.7,
+        "self_dealt": 128.3,
+        "self_received": 128.3,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -706,21 +758,24 @@
         },
         "time_low_health_pct": 0.018,
         "ammo_out_episodes": 4,
-        "hp_efficiency": 4.2
+        "hp_efficiency": 1.97
       },
       "assets": {
-        "dealt": 20292.0,
-        "received": 84837.9
+        "dealt": 9513.7,
+        "received": 39775.3
       },
       "weapon_breakdown": {
         "Combat Laser (cphlas_c)": {
-          "dealt": 19435.0,
+          "dealt": 9111.9,
           "received": 0,
           "shots": 95,
           "hits": 16,
           "pvp_hits": 16,
           "self_hits": 0,
           "accuracy": 0.168,
+          "pve_hits_est": 67,
+          "hits_est": 83,
+          "accuracy_est": 0.874,
           "range_hist": {
             "pvp": [
               0,
@@ -758,49 +813,64 @@
           }
         },
         "Combat Laser (xcplasbld)": {
-          "dealt": 535.0,
+          "dealt": 250.8,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Combat Laser (xcplascar)": {
-          "dealt": 322.3,
+          "dealt": 151.1,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion (Hadean)": {
-          "dealt": 1335.4,
-          "received": 199.5,
+          "dealt": 626.1,
+          "received": 93.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 256.8,
-          "received": 49.8,
+          "dealt": 120.4,
+          "received": 23.3,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 19112.0,
-          "received": 5683.0,
+          "dealt": 8960.5,
+          "received": 2664.4,
           "shots": 1568,
           "hits": 603,
           "pvp_hits": 603,
           "self_hits": 0,
           "accuracy": 0.385,
+          "pve_hits_est": 465,
+          "hits_est": 1068,
+          "accuracy_est": 0.681,
           "range_hist": {
             "pvp": [
               0,
@@ -838,22 +908,28 @@
           }
         },
         "Prox Mine": {
-          "dealt": 1262.0,
+          "dealt": 591.7,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Pulse": {
-          "dealt": 171.0,
-          "received": 135.0,
+          "dealt": 80.2,
+          "received": 63.3,
           "shots": 102,
           "hits": 20,
           "pvp_hits": 20,
           "self_hits": 0,
           "accuracy": 0.196,
+          "pve_hits_est": 0,
+          "hits_est": 20,
+          "accuracy_est": 0.196,
           "range_hist": {
             "pvp": [
               0,
@@ -891,13 +967,16 @@
           }
         },
         "Vehicle Explosion (Hadean)": {
-          "dealt": 3364.9,
-          "received": 110.2,
+          "dealt": 1577.6,
+          "received": 51.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -947,13 +1026,13 @@
           "pvp_deaths": 0,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 15617.2,
+          "dealt": 7321.9,
           "shots": 1194,
           "hits": 418,
           "pvp_hits": 418,
           "accuracy": 0.35,
           "pvp_accuracy": 0.35,
-          "dpm": 2363.6,
+          "dpm": 1108.1,
           "kd": null
         },
         {
@@ -966,13 +1045,13 @@
           "pvp_deaths": 1,
           "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 24887.3,
+          "dealt": 11668.2,
           "shots": 173,
           "hits": 80,
           "pvp_hits": 80,
           "accuracy": 0.462,
           "pvp_accuracy": 0.462,
-          "dpm": 7377.7,
+          "dpm": 3458.9,
           "kd": 0.0
         },
         {
@@ -985,13 +1064,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1566.8,
+          "dealt": 734.6,
           "shots": 102,
           "hits": 20,
           "pvp_hits": 20,
           "accuracy": 0.196,
           "pvp_accuracy": 0.196,
-          "dpm": 915.4,
+          "dpm": 429.2,
           "kd": null
         },
         {
@@ -1004,28 +1083,28 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 3723.1,
+          "dealt": 1745.6,
           "shots": 296,
           "hits": 121,
           "pvp_hits": 121,
           "accuracy": 0.409,
           "pvp_accuracy": 0.409,
-          "dpm": 3891.8,
+          "dpm": 1824.6,
           "kd": 1.0
         }
       ],
       "hit_targets": {
         "Monkey": {
           "hits": 293,
-          "damage": 7401.8
+          "damage": 3470.3
         },
         "blue": {
           "hits": 203,
-          "damage": 8339.0
+          "damage": 3909.7
         },
         "Certified Bad Guy": {
           "hits": 143,
-          "damage": 4274.2
+          "damage": 2003.9
         }
       }
     },
@@ -1047,28 +1126,32 @@
       "deaths": 3,
       "kd_ratio": 1.67,
       "personal": {
-        "dealt": 34976.6,
-        "received": 15548.4,
-        "pvp_dealt": 15292.0,
-        "pve_dealt": 19385.6,
-        "pvp_received": 11754.2,
-        "pve_received": 3495.2,
-        "structure_dealt": 9300.0,
-        "net": 19428.3,
+        "dealt": 16398.4,
+        "received": 7289.7,
+        "pvp_dealt": 7169.5,
+        "pve_dealt": 9088.7,
+        "pvp_received": 5510.8,
+        "pve_received": 1638.7,
+        "structure_dealt": 4360.2,
+        "net": 9108.7,
         "ratio": 2.25,
         "shots_fired": 2490,
         "shots_hit": 532,
         "pvp_shots_hit": 532,
         "pvp_accuracy": 0.214,
         "accuracy": 0.214,
+        "pve_shots_hit_est": 1339,
+        "shots_hit_est": 1871,
+        "accuracy_est": 0.751,
+        "hits_est_source": "damage_events",
         "pvp_kills": 3,
         "pve_kills": 2,
         "pvp_deaths": 3,
         "pve_deaths": 0,
         "effective_pvp_kills": 2.38,
         "pvp_assists": 2,
-        "self_dealt": 299.0,
-        "self_received": 299.0,
+        "self_dealt": 140.2,
+        "self_received": 140.2,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1090,39 +1173,48 @@
         },
         "time_low_health_pct": 0.045,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 5.14
+        "hp_efficiency": 2.41
       },
       "assets": {
-        "dealt": 400.0,
-        "received": 591.1
+        "dealt": 187.5,
+        "received": 277.1
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 592.5,
-          "received": 299.0,
+          "dealt": 277.8,
+          "received": 140.2,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 102.1,
-          "received": 45.0,
+          "dealt": 47.9,
+          "received": 21.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 15224.0,
-          "received": 9482.0,
+          "dealt": 7137.6,
+          "received": 4445.5,
           "shots": 1434,
           "hits": 241,
           "pvp_hits": 241,
           "self_hits": 0,
           "accuracy": 0.168,
+          "pve_hits_est": 808,
+          "hits_est": 1049,
+          "accuracy_est": 0.732,
           "range_hist": {
             "pvp": [
               0,
@@ -1160,13 +1252,16 @@
           }
         },
         "Pulse": {
-          "dealt": 435.0,
-          "received": 1190.0,
+          "dealt": 203.9,
+          "received": 557.9,
           "shots": 122,
           "hits": 22,
           "pvp_hits": 22,
           "self_hits": 0,
           "accuracy": 0.18,
+          "pve_hits_est": 17,
+          "hits_est": 39,
+          "accuracy_est": 0.32,
           "range_hist": {
             "pvp": [
               0,
@@ -1204,13 +1299,16 @@
           }
         },
         "Slicer": {
-          "dealt": 18623.0,
-          "received": 54.0,
+          "dealt": 8731.2,
+          "received": 25.3,
           "shots": 934,
           "hits": 269,
           "pvp_hits": 269,
           "self_hits": 0,
           "accuracy": 0.288,
+          "pve_hits_est": 514,
+          "hits_est": 783,
+          "accuracy_est": 0.838,
           "range_hist": {
             "pvp": [
               5,
@@ -1290,13 +1388,13 @@
           "pvp_deaths": 2,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 31845.0,
+          "dealt": 14930.2,
           "shots": 2188,
           "hits": 424,
           "pvp_hits": 424,
           "accuracy": 0.194,
           "pvp_accuracy": 0.194,
-          "dpm": 3952.6,
+          "dpm": 1853.1,
           "kd": 1.5
         },
         {
@@ -1309,13 +1407,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 2104.1,
+          "dealt": 986.5,
           "shots": 180,
           "hits": 86,
           "pvp_hits": 86,
           "accuracy": 0.478,
           "pvp_accuracy": 0.478,
-          "dpm": 809.5,
+          "dpm": 379.5,
           "kd": 0.0
         },
         {
@@ -1328,28 +1426,28 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1027.5,
+          "dealt": 481.7,
           "shots": 122,
           "hits": 22,
           "pvp_hits": 22,
           "accuracy": 0.18,
           "pvp_accuracy": 0.18,
-          "dpm": 515.5,
+          "dpm": 241.7,
           "kd": null
         }
       ],
       "hit_targets": {
         "Herp McDerperson": {
           "hits": 230,
-          "damage": 7032.0
+          "damage": 3296.9
         },
         "Nomad": {
           "hits": 188,
-          "damage": 4775.0
+          "damage": 2238.7
         },
         "econchump": {
           "hits": 114,
-          "damage": 3474.0
+          "damage": 1628.7
         }
       }
     },
@@ -1371,28 +1469,32 @@
       "deaths": 4,
       "kd_ratio": 0.75,
       "personal": {
-        "dealt": 25301.6,
-        "received": 21622.5,
-        "pvp_dealt": 14136.3,
-        "pve_dealt": 10782.1,
-        "pvp_received": 21162.3,
-        "pve_received": 77.0,
-        "structure_dealt": 6700.0,
-        "net": 3679.1,
+        "dealt": 11862.4,
+        "received": 10137.5,
+        "pvp_dealt": 6627.6,
+        "pve_dealt": 5055.1,
+        "pvp_received": 9921.7,
+        "pve_received": 36.1,
+        "structure_dealt": 3141.2,
+        "net": 1724.9,
         "ratio": 1.17,
         "shots_fired": 2573,
         "shots_hit": 812,
         "pvp_shots_hit": 812,
         "pvp_accuracy": 0.316,
         "accuracy": 0.316,
+        "pve_shots_hit_est": 979,
+        "shots_hit_est": 1791,
+        "accuracy_est": 0.696,
+        "hits_est_source": "damage_events",
         "pvp_kills": 3,
         "pve_kills": 0,
         "pvp_deaths": 4,
         "pve_deaths": 0,
         "effective_pvp_kills": 2.94,
         "pvp_assists": 3,
-        "self_dealt": 383.2,
-        "self_received": 383.2,
+        "self_dealt": 179.7,
+        "self_received": 179.7,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1414,39 +1516,48 @@
         },
         "time_low_health_pct": 0.025,
         "ammo_out_episodes": 84,
-        "hp_efficiency": 2.56
+        "hp_efficiency": 1.2
       },
       "assets": {
-        "dealt": 576.0,
-        "received": 1025.9
+        "dealt": 270.1,
+        "received": 481.0
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 643.0,
-          "received": 383.2,
+          "dealt": 301.5,
+          "received": 179.7,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 150.6,
-          "received": 15.9,
+          "dealt": 70.6,
+          "received": 7.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 22334.0,
-          "received": 8426.0,
+          "dealt": 10471.1,
+          "received": 3950.4,
           "shots": 2148,
           "hits": 576,
           "pvp_hits": 576,
           "self_hits": 0,
           "accuracy": 0.268,
+          "pve_hits_est": 977,
+          "hits_est": 1553,
+          "accuracy_est": 0.723,
           "range_hist": {
             "pvp": [
               0,
@@ -1484,13 +1595,16 @@
           }
         },
         "Pulse": {
-          "dealt": 2174.0,
-          "received": 155.0,
+          "dealt": 1019.3,
+          "received": 72.7,
           "shots": 425,
           "hits": 236,
           "pvp_hits": 236,
           "self_hits": 0,
           "accuracy": 0.555,
+          "pve_hits_est": 2,
+          "hits_est": 238,
+          "accuracy_est": 0.56,
           "range_hist": {
             "pvp": [
               2,
@@ -1570,13 +1684,13 @@
           "pvp_deaths": 2,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 17531.6,
+          "dealt": 8219.5,
           "shots": 1698,
           "hits": 321,
           "pvp_hits": 321,
           "accuracy": 0.189,
           "pvp_accuracy": 0.189,
-          "dpm": 2537.4,
+          "dpm": 1189.7,
           "kd": 1.0
         },
         {
@@ -1589,13 +1703,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 2817.0,
+          "dealt": 1320.7,
           "shots": 425,
           "hits": 236,
           "pvp_hits": 236,
           "accuracy": 0.555,
           "pvp_accuracy": 0.555,
-          "dpm": 645.1,
+          "dpm": 302.5,
           "kd": null
         },
         {
@@ -1608,32 +1722,32 @@
           "pvp_deaths": 2,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 4953.0,
+          "dealt": 2322.2,
           "shots": 450,
           "hits": 255,
           "pvp_hits": 255,
           "accuracy": 0.567,
           "pvp_accuracy": 0.567,
-          "dpm": 3606.6,
+          "dpm": 1690.9,
           "kd": 0.5
         }
       ],
       "hit_targets": {
         "blue": {
           "hits": 488,
-          "damage": 8358.5
+          "damage": 3918.8
         },
         "Certified Bad Guy": {
           "hits": 262,
-          "damage": 4896.0
+          "damage": 2295.4
         },
         "Monkey": {
           "hits": 56,
-          "damage": 775.0
+          "damage": 363.4
         },
         "Nomad": {
           "hits": 6,
-          "damage": 106.0
+          "damage": 49.7
         }
       }
     },
@@ -1655,28 +1769,32 @@
       "deaths": 2,
       "kd_ratio": 1.5,
       "personal": {
-        "dealt": 23925.8,
-        "received": 11110.2,
-        "pvp_dealt": 4880.6,
-        "pve_dealt": 18854.8,
-        "pvp_received": 10019.8,
-        "pve_received": 900.0,
-        "structure_dealt": 12593.1,
-        "net": 12815.6,
+        "dealt": 11217.3,
+        "received": 5208.9,
+        "pvp_dealt": 2288.2,
+        "pve_dealt": 8839.9,
+        "pvp_received": 4697.7,
+        "pve_received": 422.0,
+        "structure_dealt": 5904.1,
+        "net": 6008.4,
         "ratio": 2.15,
         "shots_fired": 2727,
         "shots_hit": 219,
         "pvp_shots_hit": 219,
         "pvp_accuracy": 0.08,
         "accuracy": 0.08,
+        "pve_shots_hit_est": 1744,
+        "shots_hit_est": 1963,
+        "accuracy_est": 0.72,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 1,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 1.41,
         "pvp_assists": 1,
-        "self_dealt": 190.4,
-        "self_received": 190.4,
+        "self_dealt": 89.3,
+        "self_received": 89.3,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1698,39 +1816,48 @@
         },
         "time_low_health_pct": 0.004,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 4.45
+        "hp_efficiency": 2.09
       },
       "assets": {
-        "dealt": 745.0,
-        "received": 202.8
+        "dealt": 349.3,
+        "received": 95.1
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 384.2,
-          "received": 190.4,
+          "dealt": 180.1,
+          "received": 89.3,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 96.6,
-          "received": 0.8,
+          "dealt": 45.3,
+          "received": 0.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 23445.0,
-          "received": 2981.0,
+          "dealt": 10991.9,
+          "received": 1397.6,
           "shots": 2710,
           "hits": 219,
           "pvp_hits": 219,
           "self_hits": 0,
           "accuracy": 0.081,
+          "pve_hits_est": 1744,
+          "hits_est": 1963,
+          "accuracy_est": 0.724,
           "range_hist": {
             "pvp": [
               0,
@@ -1774,7 +1901,10 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         }
       },
       "loadout": {
@@ -1819,13 +1949,13 @@
           "pvp_deaths": 1,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 21638.6,
+          "dealt": 10145.0,
           "shots": 2458,
           "hits": 203,
           "pvp_hits": 203,
           "accuracy": 0.083,
           "pvp_accuracy": 0.083,
-          "dpm": 2706.8,
+          "dpm": 1269.1,
           "kd": 2.0
         },
         {
@@ -1838,13 +1968,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 384.2,
+          "dealt": 180.1,
           "shots": 17,
           "hits": 0,
           "pvp_hits": 0,
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
-          "dpm": 127.9,
+          "dpm": 60.0,
           "kd": null
         },
         {
@@ -1857,28 +1987,28 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1903.0,
+          "dealt": 892.2,
           "shots": 252,
           "hits": 16,
           "pvp_hits": 16,
           "accuracy": 0.063,
           "pvp_accuracy": 0.063,
-          "dpm": 1152.2,
+          "dpm": 540.2,
           "kd": 0.0
         }
       ],
       "hit_targets": {
         "Certified Bad Guy": {
           "hits": 102,
-          "damage": 2376.0
+          "damage": 1114.0
         },
         "Monkey": {
           "hits": 71,
-          "damage": 1623.5
+          "damage": 761.2
         },
         "blue": {
           "hits": 46,
-          "damage": 881.1
+          "damage": 413.1
         }
       }
     },
@@ -1900,28 +2030,32 @@
       "deaths": 2,
       "kd_ratio": 2.5,
       "personal": {
-        "dealt": 22454.7,
-        "received": 12491.0,
-        "pvp_dealt": 12029.8,
-        "pve_dealt": 10233.8,
-        "pvp_received": 9932.3,
-        "pve_received": 2367.5,
-        "structure_dealt": 60.0,
-        "net": 9963.7,
+        "dealt": 10527.6,
+        "received": 5856.2,
+        "pvp_dealt": 5640.0,
+        "pve_dealt": 4798.0,
+        "pvp_received": 4656.7,
+        "pve_received": 1110.0,
+        "structure_dealt": 28.1,
+        "net": 4671.4,
         "ratio": 1.8,
         "shots_fired": 2243,
         "shots_hit": 387,
         "pvp_shots_hit": 387,
         "pvp_accuracy": 0.173,
         "accuracy": 0.173,
+        "pve_shots_hit_est": 696,
+        "shots_hit_est": 1083,
+        "accuracy_est": 0.483,
+        "hits_est_source": "damage_events",
         "pvp_kills": 3,
         "pve_kills": 2,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 2.11,
         "pvp_assists": 2,
-        "self_dealt": 191.1,
-        "self_received": 191.1,
+        "self_dealt": 89.6,
+        "self_received": 89.6,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1943,39 +2077,48 @@
         },
         "time_low_health_pct": 0.005,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 4.01
+        "hp_efficiency": 1.88
       },
       "assets": {
-        "dealt": 160.0,
-        "received": 403.6
+        "dealt": 75.0,
+        "received": 189.2
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 388.4,
-          "received": 191.1,
+          "dealt": 182.1,
+          "received": 89.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 426.3,
-          "received": 23.7,
+          "dealt": 199.9,
+          "received": 11.1,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 10657.0,
-          "received": 9185.0,
+          "dealt": 4996.4,
+          "received": 4306.3,
           "shots": 1396,
           "hits": 131,
           "pvp_hits": 131,
           "self_hits": 0,
           "accuracy": 0.094,
+          "pve_hits_est": 615,
+          "hits_est": 746,
+          "accuracy_est": 0.534,
           "range_hist": {
             "pvp": [
               0,
@@ -2013,13 +2156,16 @@
           }
         },
         "Pulse": {
-          "dealt": 40.0,
-          "received": 445.0,
+          "dealt": 18.8,
+          "received": 208.6,
           "shots": 47,
           "hits": 3,
           "pvp_hits": 3,
           "self_hits": 0,
           "accuracy": 0.064,
+          "pve_hits_est": 0,
+          "hits_est": 3,
+          "accuracy_est": 0.064,
           "range_hist": {
             "pvp": [
               0,
@@ -2057,13 +2203,16 @@
           }
         },
         "Slicer": {
-          "dealt": 10943.0,
+          "dealt": 5130.5,
           "received": 0,
           "shots": 800,
           "hits": 253,
           "pvp_hits": 253,
           "self_hits": 0,
           "accuracy": 0.316,
+          "pve_hits_est": 81,
+          "hits_est": 334,
+          "accuracy_est": 0.417,
           "range_hist": {
             "pvp": [
               0,
@@ -2148,13 +2297,13 @@
           "pvp_deaths": 1,
           "pve_kills": 2,
           "pve_deaths": 0,
-          "dealt": 20973.0,
+          "dealt": 9833.0,
           "shots": 2030,
           "hits": 357,
           "pvp_hits": 357,
           "accuracy": 0.176,
           "pvp_accuracy": 0.176,
-          "dpm": 2621.1,
+          "dpm": 1228.9,
           "kd": 3.0
         },
         {
@@ -2167,13 +2316,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 854.7,
+          "dealt": 400.7,
           "shots": 47,
           "hits": 3,
           "pvp_hits": 3,
           "accuracy": 0.064,
           "pvp_accuracy": 0.064,
-          "dpm": 430.2,
+          "dpm": 201.7,
           "kd": null
         },
         {
@@ -2186,13 +2335,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 627.0,
+          "dealt": 294.0,
           "shots": 166,
           "hits": 27,
           "pvp_hits": 27,
           "accuracy": 0.163,
           "pvp_accuracy": 0.163,
-          "dpm": 322.4,
+          "dpm": 151.1,
           "kd": 0.0
         },
         {
@@ -2218,251 +2367,281 @@
       "hit_targets": {
         "econchump": {
           "hits": 131,
-          "damage": 4752.0
+          "damage": 2227.9
         },
         "Herp McDerperson": {
           "hits": 128,
-          "damage": 3811.0
+          "damage": 1786.7
         },
         "Nomad": {
           "hits": 111,
-          "damage": 3037.8
+          "damage": 1424.2
         },
         "Certified Bad Guy": {
           "hits": 9,
-          "damage": 208.0
+          "damage": 97.5
         },
         "blue": {
           "hits": 8,
-          "damage": 221.0
+          "damage": 103.6
         }
       }
     }
   ],
   "faction_totals": {
     "1": {
-      "player_dealt": 95021.8,
-      "pvp_dealt": 39310.8,
-      "pve_dealt": 55711.1,
-      "asset_dealt": 21613.0,
-      "total_dealt": 116634.8,
-      "player_received": 55478.3,
-      "pvp_received": 52344.8,
-      "pve_received": 3133.5,
-      "asset_received": 86066.6,
-      "total_received": 141544.9,
+      "player_dealt": 44549.9,
+      "pvp_dealt": 18430.4,
+      "pve_dealt": 26119.5,
+      "asset_dealt": 10133.0,
+      "total_dealt": 54683.0,
+      "player_received": 26010.4,
+      "pvp_received": 24541.3,
+      "pve_received": 1469.1,
+      "asset_received": 40351.4,
+      "total_received": 66361.8,
       "shots": 7065,
       "hits": 1670,
-      "accuracy": 0.236
+      "accuracy": 0.236,
+      "hits_est": 4925,
+      "accuracy_est": 0.697
     },
     "2": {
-      "player_dealt": 141325.0,
-      "pvp_dealt": 52520.2,
-      "pve_dealt": 88804.8,
-      "asset_dealt": 560.0,
-      "total_dealt": 141885.0,
-      "player_received": 48220.9,
-      "pvp_received": 39486.1,
-      "pve_received": 8734.8,
-      "asset_received": 75507.1,
-      "total_received": 123728.0,
+      "player_dealt": 66258.7,
+      "pvp_dealt": 24623.5,
+      "pve_dealt": 41635.2,
+      "asset_dealt": 262.5,
+      "total_dealt": 66521.2,
+      "player_received": 22607.9,
+      "pvp_received": 18512.6,
+      "pve_received": 4095.2,
+      "asset_received": 35400.7,
+      "total_received": 58008.5,
       "shots": 8071,
       "hits": 1512,
-      "accuracy": 0.187
+      "accuracy": 0.187,
+      "hits_est": 5412,
+      "accuracy_est": 0.671
     }
   },
   "rivalry_matrix": {
     "econchump": {
-      "Certified Bad Guy": 2376.0,
-      "blue": 881.1,
-      "Monkey": 1623.5
+      "Certified Bad Guy": 1114.0,
+      "blue": 413.1,
+      "Monkey": 761.2
     },
     "Certified Bad Guy": {
-      "econchump": 3474.0,
-      "Nomad": 4775.0,
-      "Herp McDerperson": 7032.0,
-      "Monkey": 11.0
+      "econchump": 1628.7,
+      "Nomad": 2238.7,
+      "Herp McDerperson": 3296.9,
+      "Monkey": 5.2
     },
     "Herp McDerperson": {
-      "blue": 8358.5,
-      "Nomad": 106.0,
-      "econchump": 0.8,
-      "Certified Bad Guy": 4896.0,
-      "Monkey": 775.0
+      "blue": 3918.8,
+      "Nomad": 49.7,
+      "econchump": 0.4,
+      "Certified Bad Guy": 2295.4,
+      "Monkey": 363.4
     },
     "blue": {
-      "Herp McDerperson": 10040.4,
-      "Nomad": 13244.0,
-      "Monkey": 121.0,
-      "econchump": 1793.0
+      "Herp McDerperson": 4707.4,
+      "Nomad": 6209.3,
+      "Monkey": 56.7,
+      "econchump": 840.6
     },
     "Nomad": {
-      "Monkey": 7401.8,
-      "blue": 8339.0,
-      "Certified Bad Guy": 4274.2,
-      "Herp McDerperson": 278.8
+      "Monkey": 3470.3,
+      "blue": 3909.7,
+      "Certified Bad Guy": 2003.9,
+      "Herp McDerperson": 130.7
     },
     "Monkey": {
-      "Herp McDerperson": 3811.0,
-      "Nomad": 3037.8,
-      "blue": 221.0,
-      "Certified Bad Guy": 208.0,
-      "econchump": 4752.0
+      "Herp McDerperson": 1786.7,
+      "Nomad": 1424.2,
+      "blue": 103.6,
+      "Certified Bad Guy": 97.5,
+      "econchump": 2227.9
     }
   },
   "top_rivalries": [
     {
       "a": "Nomad",
       "b": "blue",
-      "a_to_b": 8339.0,
-      "b_to_a": 13244.0,
-      "total": 21583.0
+      "a_to_b": 3909.7,
+      "b_to_a": 6209.3,
+      "total": 10119.0
     },
     {
       "a": "Herp McDerperson",
       "b": "blue",
-      "a_to_b": 8358.5,
-      "b_to_a": 10040.4,
-      "total": 18398.9
+      "a_to_b": 3918.8,
+      "b_to_a": 4707.4,
+      "total": 8626.2
     },
     {
       "a": "Certified Bad Guy",
       "b": "Herp McDerperson",
-      "a_to_b": 7032.0,
-      "b_to_a": 4896.0,
-      "total": 11928.0
+      "a_to_b": 3296.9,
+      "b_to_a": 2295.4,
+      "total": 5592.3
     },
     {
       "a": "Monkey",
       "b": "Nomad",
-      "a_to_b": 3037.8,
-      "b_to_a": 7401.8,
-      "total": 10439.6
+      "a_to_b": 1424.2,
+      "b_to_a": 3470.3,
+      "total": 4894.5
     },
     {
       "a": "Certified Bad Guy",
       "b": "Nomad",
-      "a_to_b": 4775.0,
-      "b_to_a": 4274.2,
-      "total": 9049.2
+      "a_to_b": 2238.7,
+      "b_to_a": 2003.9,
+      "total": 4242.6
     }
   ],
   "weapon_meta": [
     {
       "weapon": "Particle Gun",
       "odf": "cphcg_c.odf",
-      "total_damage": 108818.0,
+      "total_damage": 51018.1,
       "total_shots": 11180,
       "total_hits": 2144,
       "accuracy": 0.192,
+      "total_hits_est": 7608,
+      "accuracy_est": 0.681,
       "users": 6
     },
     {
       "weapon": "Burst Gun",
       "odf": "eburst_c.odf",
-      "total_damage": 33454.0,
+      "total_damage": 15684.5,
       "total_shots": 1180,
       "total_hits": 190,
       "accuracy": 0.161,
+      "total_hits_est": 1055,
+      "accuracy_est": 0.894,
       "users": 1
     },
     {
       "weapon": "Slicer",
       "odf": "slicer_c.odf",
-      "total_damage": 29566.0,
+      "total_damage": 13861.7,
       "total_shots": 1734,
       "total_hits": 522,
       "accuracy": 0.301,
+      "total_hits_est": 1117,
+      "accuracy_est": 0.644,
       "users": 2
     },
     {
       "weapon": "Combat Laser (cphlas_c)",
       "odf": "cphlas_c.odf",
-      "total_damage": 27520.0,
+      "total_damage": 12902.4,
       "total_shots": 145,
       "total_hits": 18,
       "accuracy": 0.124,
+      "total_hits_est": 117,
+      "accuracy_est": 0.807,
       "users": 2
     },
     {
       "weapon": "Dragon Blast",
       "odf": "dragb_c.odf",
-      "total_damage": 21480.0,
+      "total_damage": 10070.7,
       "total_shots": 184,
       "total_hits": 27,
       "accuracy": 0.147,
+      "total_hits_est": 140,
+      "accuracy_est": 0.761,
       "users": 1
     },
     {
       "weapon": "Vehicle Explosion (Hadean)",
       "odf": "xvehxpl_e.odf",
-      "total_damage": 5006.9,
+      "total_damage": 2347.4,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Craft Explosion (Hadean)",
       "odf": "xcarxpl_e.odf",
-      "total_damage": 3755.0,
+      "total_damage": 1760.5,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 6
     },
     {
       "weapon": "Pulse",
       "odf": "epulse.odf",
-      "total_damage": 2820.0,
+      "total_damage": 1322.1,
       "total_shots": 713,
       "total_hits": 281,
       "accuracy": 0.394,
+      "total_hits_est": 300,
+      "accuracy_est": 0.421,
       "users": 4
     },
     {
       "weapon": "Flame Mine (xfbseeke)",
       "odf": "xfbseeke.odf",
-      "total_damage": 1405.8,
+      "total_damage": 659.1,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 6
     },
     {
       "weapon": "Prox Mine",
       "odf": "xminxplvsr.odf",
-      "total_damage": 1262.0,
+      "total_damage": 591.7,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Combat Laser (xcplasbld)",
       "odf": "xcplasbld.odf",
-      "total_damage": 903.3,
+      "total_damage": 423.5,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Combat Laser (xcplascar)",
       "odf": "xcplascar.odf",
-      "total_damage": 340.9,
+      "total_damage": 159.8,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Combat Laser (xcplasgnd)",
       "odf": "xcplasgnd.odf",
-      "total_damage": 15.0,
+      "total_damage": 7.0,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     }
   ],
@@ -2597,59 +2776,59 @@
         0,
         0,
         0,
-        1276.0,
-        308.0,
-        1859.5,
-        430.5,
-        1010.0,
+        598.2,
+        144.4,
+        871.8,
+        201.8,
+        473.5,
         0,
-        176.0,
-        515.0,
-        2090.0,
-        760.0,
-        90.0,
-        2075.0,
-        940.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1035.0,
-        1955.0,
-        2185.0,
-        60.0,
-        0,
-        860.0,
-        0,
-        0,
-        520.0,
-        17.5,
-        0,
-        0,
-        0,
-        826.0,
-        85.1,
-        0,
-        1695.0,
-        0,
-        100.0,
-        884.1,
-        0,
-        0,
-        0,
-        0,
-        363.0,
+        82.5,
+        241.5,
+        979.9,
+        356.3,
+        42.2,
+        972.8,
+        440.7,
         0,
         0,
         0,
         0,
         0,
         0,
+        485.2,
+        916.6,
+        1024.4,
+        28.1,
         0,
-        1250.0,
-        560.1,
+        403.2,
+        0,
+        0,
+        243.8,
+        8.2,
+        0,
+        0,
+        0,
+        387.3,
+        39.9,
+        0,
+        794.7,
+        0,
+        46.9,
+        414.5,
+        0,
+        0,
+        0,
+        0,
+        170.2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        586.0,
+        262.6,
         0,
         0,
         0,
@@ -2675,73 +2854,73 @@
         0,
         0,
         0,
-        1188.0,
+        557.0,
         0,
-        814.0,
-        75.7,
-        26.4,
+        381.6,
+        35.5,
+        12.4,
         0,
-        100.0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1552.0,
-        504.0,
-        0,
-        0,
-        0,
-        924.0,
-        726.0,
-        30.0,
-        380.0,
-        0,
-        0,
-        2195.4,
-        0,
-        0,
-        300.0,
-        202.0,
-        770.0,
-        2240.0,
-        856.0,
-        1935.0,
-        1156.0,
-        0,
-        0,
-        0,
-        0,
-        990.0,
-        0,
-        0,
-        0,
-        2028.0,
+        46.9,
         0,
         0,
         0,
         0,
         0,
         0,
-        0,
-        0,
-        882.0,
-        414.0,
-        828.0,
-        1521.0,
-        2978.0,
-        1411.1,
-        30.0,
+        727.6,
+        236.3,
         0,
         0,
         0,
+        433.2,
+        340.4,
+        14.1,
+        178.2,
         0,
-        1785.0,
-        897.0,
-        1507.5,
-        1740.0,
-        1990.5
+        0,
+        1029.3,
+        0,
+        0,
+        140.7,
+        94.7,
+        361.0,
+        1050.2,
+        401.3,
+        907.2,
+        542.0,
+        0,
+        0,
+        0,
+        0,
+        464.2,
+        0,
+        0,
+        0,
+        950.8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        413.5,
+        194.1,
+        388.2,
+        713.1,
+        1396.2,
+        661.6,
+        14.1,
+        0,
+        0,
+        0,
+        0,
+        836.9,
+        420.5,
+        706.8,
+        815.8,
+        933.2
       ],
       "Herp McDerperson": [
         0,
@@ -2754,72 +2933,72 @@
         0,
         0,
         0,
-        2288.0,
-        301.0,
+        1072.7,
+        141.1,
         0,
-        525.0,
-        0,
-        0,
-        715.0,
-        1880.0,
-        1715.0,
-        725.0,
-        0,
-        484.0,
-        0,
-        132.0,
-        682.0,
+        246.1,
         0,
         0,
-        772.5,
-        43.2,
+        335.2,
+        881.4,
+        804.1,
+        339.9,
+        0,
+        226.9,
+        0,
+        61.9,
+        319.7,
+        0,
+        0,
+        362.2,
+        20.2,
         0,
         0,
         0,
-        1755.0,
-        2513.0,
-        515.0,
-        30.0,
-        1032.0,
-        1120.4,
-        0,
-        0,
+        822.8,
+        1178.2,
+        241.5,
+        14.1,
+        483.8,
+        525.3,
         0,
         0,
         0,
         0,
         0,
-        480.0,
-        260.1,
         0,
         0,
-        410.0,
-        255.0,
-        83.0,
-        157.0,
-        190.0,
+        225.0,
+        122.0,
+        0,
+        0,
+        192.2,
+        119.6,
+        38.9,
+        73.6,
+        89.1,
         0,
         0,
         0,
         0,
         0,
-        416.0,
-        2640.0,
+        195.0,
+        1237.7,
         0,
-        400.0,
+        187.5,
         0,
-        528.0,
-        820.2,
-        70.0,
+        247.5,
+        384.5,
+        32.8,
         0,
-        48.0,
-        390.0,
-        30.0,
-        474.0,
-        96.3,
+        22.5,
+        182.8,
+        14.1,
+        222.2,
+        45.1,
         0,
-        66.0,
-        260.0
+        30.9,
+        121.9
       ],
       "blue": [
         0,
@@ -2832,57 +3011,57 @@
         0,
         0,
         0,
-        1331.0,
-        361.0,
-        134.6,
+        624.0,
+        169.3,
+        63.1,
         0,
-        120.0,
-        2280.0,
-        650.0,
+        56.3,
+        1069.0,
+        304.7,
         0,
-        1926.9,
-        430.0,
-        560.0,
-        430.0,
+        903.4,
+        201.6,
+        262.5,
+        201.6,
         0,
-        858.0,
-        0,
-        0,
-        956.0,
-        2154.0,
-        0,
-        430.0,
-        805.7,
+        402.3,
         0,
         0,
+        448.2,
+        1009.9,
         0,
-        0,
-        0,
-        1430.0,
-        1419.0,
-        0,
-        2400.0,
-        1263.0,
-        0,
-        0,
-        10.0,
-        0,
-        2392.6,
-        0,
-        231.0,
-        0,
-        0,
-        1860.0,
-        9258.3,
+        201.6,
+        377.7,
         0,
         0,
         0,
         0,
         0,
-        979.4,
-        2992.0,
-        8224.0,
-        6776.3,
+        670.4,
+        665.3,
+        0,
+        1125.2,
+        592.1,
+        0,
+        0,
+        4.7,
+        0,
+        1121.7,
+        0,
+        108.3,
+        0,
+        0,
+        872.0,
+        4340.7,
+        0,
+        0,
+        0,
+        0,
+        0,
+        459.2,
+        1402.8,
+        3855.7,
+        3177.0,
         0,
         0,
         0,
@@ -2890,13 +3069,13 @@
         0,
         0,
         0,
-        507.0,
-        5208.0,
-        2150.0,
-        8316.0,
-        3580.0,
-        8515.0,
-        2955.0,
+        237.7,
+        2441.7,
+        1008.0,
+        3898.9,
+        1678.4,
+        3992.2,
+        1385.4,
         0
       ],
       "Nomad": [
@@ -2910,68 +3089,68 @@
         0,
         0,
         0,
-        824.9,
-        2076.3,
-        1166.0,
-        396.0,
+        386.8,
+        973.5,
+        546.7,
+        185.7,
         0,
-        154.0,
-        0,
-        0,
-        0,
-        1766.4,
+        72.2,
         0,
         0,
         0,
-        596.5,
-        644.0,
-        0,
-        98.0,
-        0,
-        20.5,
-        0,
-        837.9,
-        0,
-        0,
-        1683.0,
-        1870.0,
-        558.6,
-        2100.0,
-        825.0,
+        828.2,
         0,
         0,
         0,
-        1870.0,
-        3626.2,
+        279.7,
+        301.9,
         0,
-        3410.0,
-        4060.0,
+        45.9,
         0,
+        9.6,
         0,
-        0,
-        0,
-        2413.8,
+        392.8,
         0,
         0,
-        0,
-        2714.0,
-        0,
-        0,
-        864.2,
-        0,
-        3501.3,
-        2868.1,
+        789.1,
+        876.7,
+        261.9,
+        984.6,
+        386.8,
         0,
         0,
         0,
-        295.1,
-        924.0,
+        876.7,
+        1700.1,
+        0,
+        1598.7,
+        1903.5,
         0,
         0,
-        1472.0,
-        1358.5,
-        710.0,
-        90.0,
+        0,
+        0,
+        1131.7,
+        0,
+        0,
+        0,
+        1272.4,
+        0,
+        0,
+        405.2,
+        0,
+        1641.5,
+        1344.7,
+        0,
+        0,
+        0,
+        138.4,
+        433.2,
+        0,
+        0,
+        690.1,
+        636.9,
+        332.9,
+        42.2,
         0,
         0,
         0,
@@ -2988,9 +3167,9 @@
         0,
         0,
         0,
-        407.0,
-        500.8,
-        336.0,
+        190.8,
+        234.8,
+        157.5,
         0,
         0,
         0,
@@ -3000,51 +3179,51 @@
         0,
         0,
         0,
-        1496.0,
-        1088.0,
+        701.4,
+        510.1,
         0,
         0,
         0,
-        652.0,
-        704.0,
-        650.0,
-        374.0,
+        305.7,
+        330.1,
+        304.7,
+        175.3,
         0,
         0,
-        704.0,
-        825.0,
+        330.1,
+        386.8,
         0,
-        40.0,
-        0,
-        0,
-        0,
-        414.0,
-        2175.0,
-        1146.0,
-        0,
-        0,
-        234.0,
-        432.0,
-        2178.0,
+        18.8,
         0,
         0,
         0,
-        0,
-        756.0,
-        0,
-        156.0,
-        324.0,
-        0,
-        864.0,
+        194.1,
+        1019.7,
+        537.3,
         0,
         0,
-        360.0,
-        384.0,
+        109.7,
+        202.5,
+        1021.1,
         0,
-        338.0,
-        3027.0,
-        1818.0,
-        72.0,
+        0,
+        0,
+        0,
+        354.4,
+        0,
+        73.1,
+        151.9,
+        0,
+        405.1,
+        0,
+        0,
+        168.8,
+        180.0,
+        0,
+        158.5,
+        1419.2,
+        852.3,
+        33.8,
         0,
         0,
         0,
@@ -3067,73 +3246,73 @@
         0,
         0,
         0,
-        1276.0,
-        3420.9,
-        4236.8,
-        1596.5,
-        2123.0,
+        598.2,
+        1603.9,
+        1986.4,
+        748.5,
+        995.3,
         0,
-        330.0,
-        1230.0,
-        4162.0,
-        2475.0,
-        3709.4,
-        5867.0,
-        5312.0,
-        2388.0,
-        1772.5,
-        1326.0,
+        154.7,
+        576.7,
+        1951.3,
+        1160.4,
+        1739.1,
+        2750.7,
+        2490.5,
+        1119.6,
+        831.0,
+        621.7,
         0,
-        98.0,
-        964.5,
-        1098.7,
-        2700.0,
-        3022.9,
-        60.0,
-        1755.0,
-        5056.0,
-        2385.0,
-        588.6,
-        3844.0,
-        1962.9,
-        0,
-        0,
-        0,
-        2696.0,
-        3711.4,
-        0,
-        5105.0,
-        4540.0,
-        360.1,
-        884.1,
-        0,
-        410.0,
-        2668.8,
-        83.0,
-        4360.0,
-        2314.0,
-        4610.0,
+        45.9,
+        452.2,
+        515.1,
+        1265.9,
+        1417.2,
+        28.1,
+        822.8,
+        2370.4,
+        1118.2,
+        276.0,
+        1802.2,
+        920.3,
         0,
         0,
-        864.2,
         0,
-        3917.3,
-        6758.1,
-        560.1,
-        400.0,
+        1264.0,
+        1740.0,
         0,
-        823.1,
-        1744.2,
-        70.0,
+        2393.4,
+        2128.5,
+        168.8,
+        414.5,
         0,
-        1520.0,
-        1748.5,
-        740.0,
-        564.0,
-        96.3,
+        192.2,
+        1251.3,
+        38.9,
+        2044.1,
+        1084.9,
+        2161.4,
         0,
-        66.0,
-        260.0
+        0,
+        405.2,
+        0,
+        1836.6,
+        3168.5,
+        262.6,
+        187.5,
+        0,
+        385.9,
+        817.7,
+        32.8,
+        0,
+        712.6,
+        819.7,
+        346.9,
+        264.4,
+        45.1,
+        0,
+        30.9,
+        121.9
       ],
       "2": [
         0,
@@ -3145,73 +3324,73 @@
         0,
         0,
         0,
-        1188.0,
-        1738.0,
-        1675.8,
-        946.2,
-        26.4,
-        120.0,
-        2380.0,
-        650.0,
+        557.0,
+        814.8,
+        785.7,
+        443.6,
+        12.4,
+        56.3,
+        1115.8,
+        304.7,
         0,
+        903.4,
+        201.6,
+        262.5,
+        201.6,
+        1429.0,
+        1148.7,
+        0,
+        0,
+        448.2,
+        1748.8,
+        670.4,
+        520.4,
+        731.2,
+        0,
+        0,
+        1359.4,
+        386.8,
+        0,
+        829.8,
+        760.0,
+        361.0,
+        2175.4,
+        1187.6,
         1926.9,
-        430.0,
-        560.0,
-        430.0,
-        3048.0,
-        2450.0,
+        1079.3,
+        4.7,
+        0,
+        1231.4,
+        202.5,
+        1593.6,
         0,
         0,
-        956.0,
-        3730.0,
-        1430.0,
-        1110.0,
-        1559.7,
+        872.0,
+        5291.5,
+        354.4,
         0,
+        73.1,
+        151.9,
         0,
-        2899.4,
-        825.0,
+        864.2,
+        1402.8,
+        3855.7,
+        3759.3,
+        374.1,
+        388.2,
+        871.6,
+        2815.4,
+        1513.9,
+        47.8,
         0,
-        1770.0,
-        1621.0,
-        770.0,
-        4640.0,
-        2533.0,
-        4110.0,
-        2302.0,
-        10.0,
-        0,
-        2626.6,
-        432.0,
-        3399.0,
-        0,
-        0,
-        1860.0,
-        11286.3,
-        756.0,
-        0,
-        156.0,
-        324.0,
-        0,
-        1843.4,
-        2992.0,
-        8224.0,
-        8018.3,
-        798.0,
-        828.0,
-        1859.0,
-        6005.0,
-        3229.1,
-        102.0,
-        0,
-        507.0,
-        5208.0,
-        2150.0,
-        10261.0,
-        4477.0,
-        10022.5,
-        4695.0,
-        1990.5
+        237.7,
+        2441.7,
+        1008.0,
+        4810.8,
+        2099.0,
+        4698.9,
+        2201.2,
+        933.2
       ]
     }
   },
@@ -3224,742 +3403,651 @@
         "v": "Certified Bad Guy",
         "t0": 94.2,
         "t1": 97.2,
-        "dmg": 1276.0
+        "dmg": 598.2
       },
       {
         "s": "Certified Bad Guy",
         "v": "econchump",
         "t0": 94.8,
         "t1": 97.45,
-        "dmg": 1188.0
+        "dmg": 557.0
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 102.3,
         "t1": 106.05,
-        "dmg": 1331.0
+        "dmg": 624.0
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 102.3,
         "t1": 110.6,
-        "dmg": 2365.0
+        "dmg": 1108.8
       },
       {
         "s": "econchump",
         "v": "blue",
         "t0": 105.9,
         "t1": 106.85,
-        "dmg": 308.0
+        "dmg": 144.4
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 106.1,
         "t1": 108.05,
-        "dmg": 814.0
+        "dmg": 381.6
       },
       {
         "s": "Monkey",
         "v": "Herp McDerperson",
         "t0": 107.75,
         "t1": 110.7,
-        "dmg": 583.0
-      },
-      {
-        "s": "Herp McDerperson",
-        "v": "Nomad",
-        "t0": 108.1,
-        "t1": 108.6,
-        "dmg": 66.0
+        "dmg": 273.3
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 110.2,
         "t1": 110.65,
-        "dmg": 176.0
-      },
-      {
-        "s": "Monkey",
-        "v": "Nomad",
-        "t0": 111.3,
-        "t1": 111.55,
-        "dmg": 44.0
+        "dmg": 82.5
       },
       {
         "s": "econchump",
         "v": "Monkey",
         "t0": 112.1,
         "t1": 116.65,
-        "dmg": 1606.0
+        "dmg": 753.0
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 112.95,
         "t1": 116.6,
-        "dmg": 1447.2
+        "dmg": 678.5
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 115.1,
         "t1": 117.35,
-        "dmg": 814.0
+        "dmg": 381.6
       },
       {
         "s": "econchump",
         "v": "Certified Bad Guy",
         "t0": 118.3,
         "t1": 121.85,
-        "dmg": 561.0
+        "dmg": 263.0
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 118.8,
         "t1": 120.5,
-        "dmg": 550.0
+        "dmg": 257.9
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 128.1,
         "t1": 132.3,
-        "dmg": 1342.0
+        "dmg": 629.2
       },
       {
         "s": "econchump",
         "v": "Certified Bad Guy",
         "t0": 155.55,
         "t1": 155.9,
-        "dmg": 176.0
+        "dmg": 82.5
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 155.8,
         "t1": 156.4,
-        "dmg": 154.0
+        "dmg": 72.2
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 190.35,
         "t1": 196.85,
-        "dmg": 1749.0
+        "dmg": 820.0
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 210.5,
         "t1": 213.65,
-        "dmg": 484.0
+        "dmg": 226.9
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 236.1,
         "t1": 236.3,
-        "dmg": 88.0
+        "dmg": 41.3
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 238.95,
         "t1": 239.3,
-        "dmg": 154.0
+        "dmg": 72.2
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 239.75,
         "t1": 241.65,
-        "dmg": 814.0
+        "dmg": 381.6
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 265.4,
         "t1": 266.35,
-        "dmg": 462.0
+        "dmg": 216.6
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 268.0,
         "t1": 269.55,
-        "dmg": 88.0
+        "dmg": 41.3
       },
       {
         "s": "blue",
         "v": "Nomad",
         "t0": 269.4,
         "t1": 276.5,
-        "dmg": 1859.0
-      },
-      {
-        "s": "Monkey",
-        "v": "Nomad",
-        "t0": 271.65,
-        "t1": 271.85,
-        "dmg": 66.0
+        "dmg": 871.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 273.45,
         "t1": 275.8,
-        "dmg": 814.0
+        "dmg": 381.6
       },
       {
         "s": "Monkey",
         "v": "blue",
         "t0": 274.5,
         "t1": 274.95,
-        "dmg": 165.0
-      },
-      {
-        "s": "Monkey",
-        "v": "Certified Bad Guy",
-        "t0": 275.1,
-        "t1": 276.15,
-        "dmg": 66.0
+        "dmg": 77.4
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 276.9,
         "t1": 278.95,
-        "dmg": 606.5
+        "dmg": 284.3
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 278.1,
         "t1": 278.9,
-        "dmg": 154.0
+        "dmg": 72.2
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 278.45,
         "t1": 278.85,
-        "dmg": 166.0
+        "dmg": 77.8
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 279.75,
         "t1": 281.55,
-        "dmg": 836.0
+        "dmg": 391.9
       },
       {
         "s": "Monkey",
         "v": "Herp McDerperson",
         "t0": 280.45,
         "t1": 283.3,
-        "dmg": 704.0
+        "dmg": 330.1
       },
       {
         "s": "blue",
         "v": "Monkey",
         "t0": 301.45,
         "t1": 301.75,
-        "dmg": 110.0
-      },
-      {
-        "s": "Nomad",
-        "v": "Monkey",
-        "t0": 301.6,
-        "t1": 301.65,
-        "dmg": 83.2
+        "dmg": 51.6
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 330.2,
         "t1": 332.7,
-        "dmg": 605.0
+        "dmg": 283.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 330.45,
         "t1": 332.95,
-        "dmg": 660.0
+        "dmg": 309.4
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 333.45,
         "t1": 339.5,
-        "dmg": 2453.0
+        "dmg": 1150.1
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 334.7,
         "t1": 339.4,
-        "dmg": 1287.0
+        "dmg": 603.4
       },
       {
         "s": "Monkey",
         "v": "Nomad",
         "t0": 336.9,
         "t1": 345.9,
-        "dmg": 1320.0
+        "dmg": 618.9
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 337.3,
         "t1": 346.6,
-        "dmg": 2948.0
+        "dmg": 1382.1
       },
       {
         "s": "Herp McDerperson",
         "v": "Monkey",
         "t0": 345.9,
         "t1": 346.65,
-        "dmg": 330.0
+        "dmg": 154.7
       },
       {
         "s": "blue",
         "v": "econchump",
         "t0": 361.35,
         "t1": 364.55,
-        "dmg": 1430.0
+        "dmg": 670.4
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 365.2,
         "t1": 367.05,
-        "dmg": 100.0
-      },
-      {
-        "s": "Monkey",
-        "v": "Herp McDerperson",
-        "t0": 368.8,
-        "t1": 369.8,
-        "dmg": 40.0
+        "dmg": 46.9
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 372.15,
         "t1": 375.75,
-        "dmg": 1408.0
+        "dmg": 660.1
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 374.1,
         "t1": 374.5,
-        "dmg": 154.0
+        "dmg": 72.2
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 375.0,
         "t1": 375.85,
-        "dmg": 132.0
-      },
-      {
-        "s": "Monkey",
-        "v": "blue",
-        "t0": 402.1,
-        "t1": 402.65,
-        "dmg": 56.0
+        "dmg": 61.9
       },
       {
         "s": "Monkey",
         "v": "Certified Bad Guy",
         "t0": 402.75,
         "t1": 402.95,
-        "dmg": 88.0
+        "dmg": 41.3
       },
       {
         "s": "econchump",
         "v": "blue",
         "t0": 418.5,
         "t1": 420.2,
-        "dmg": 560.0
+        "dmg": 262.5
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 425.0,
         "t1": 425.05,
-        "dmg": 195.4
+        "dmg": 91.6
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 451.55,
         "t1": 457.55,
-        "dmg": 2190.6
+        "dmg": 1027.0
       },
       {
         "s": "blue",
         "v": "econchump",
         "t0": 458.9,
         "t1": 459.7,
-        "dmg": 132.0
+        "dmg": 61.9
       },
       {
         "s": "Monkey",
         "v": "Herp McDerperson",
         "t0": 459.4,
         "t1": 461.75,
-        "dmg": 666.0
+        "dmg": 312.2
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 471.55,
         "t1": 474.4,
-        "dmg": 1242.0
+        "dmg": 582.3
       },
       {
         "s": "blue",
         "v": "econchump",
         "t0": 472.8,
         "t1": 474.15,
-        "dmg": 231.0
+        "dmg": 108.3
       },
       {
         "s": "Certified Bad Guy",
         "v": "econchump",
         "t0": 476.65,
         "t1": 479.0,
-        "dmg": 990.0
+        "dmg": 464.2
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 476.95,
         "t1": 479.6,
-        "dmg": 936.0
+        "dmg": 438.8
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 495.8,
         "t1": 502.5,
-        "dmg": 550.0
+        "dmg": 257.9
       },
       {
         "s": "Herp McDerperson",
         "v": "Monkey",
         "t0": 506.9,
         "t1": 512.9,
-        "dmg": 135.0
+        "dmg": 63.3
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 511.65,
         "t1": 517.05,
-        "dmg": 2028.0
-      },
-      {
-        "s": "Herp McDerperson",
-        "v": "blue",
-        "t0": 519.9,
-        "t1": 521.05,
-        "dmg": 51.0
+        "dmg": 950.8
       },
       {
         "s": "econchump",
         "v": "Certified Bad Guy",
         "t0": 520.45,
         "t1": 521.8,
-        "dmg": 363.0
+        "dmg": 170.2
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 521.15,
         "t1": 524.7,
-        "dmg": 756.0
-      },
-      {
-        "s": "Herp McDerperson",
-        "v": "Certified Bad Guy",
-        "t0": 525.25,
-        "t1": 526.7,
-        "dmg": 85.0
+        "dmg": 354.4
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 532.3,
         "t1": 539.15,
-        "dmg": 190.0
+        "dmg": 89.1
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 540.3,
         "t1": 540.45,
-        "dmg": 983.2
+        "dmg": 461.0
       },
       {
         "s": "Nomad",
         "v": "Herp McDerperson",
         "t0": 540.3,
         "t1": 540.45,
-        "dmg": 278.8
+        "dmg": 130.7
       },
       {
         "s": "Monkey",
         "v": "Nomad",
         "t0": 540.45,
         "t1": 540.85,
-        "dmg": 156.0
+        "dmg": 73.1
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 543.1,
         "t1": 546.55,
-        "dmg": 1452.0
+        "dmg": 680.8
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 555.35,
         "t1": 556.35,
-        "dmg": 324.0
+        "dmg": 151.9
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 571.5,
         "t1": 571.75,
-        "dmg": 180.0
+        "dmg": 84.4
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 578.35,
         "t1": 579.75,
-        "dmg": 684.0
+        "dmg": 320.7
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 595.1,
         "t1": 604.25,
-        "dmg": 4627.0
+        "dmg": 2169.3
       },
       {
         "s": "blue",
         "v": "Nomad",
         "t0": 596.2,
         "t1": 605.1,
-        "dmg": 7384.0
+        "dmg": 3461.9
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 598.8,
         "t1": 609.1,
-        "dmg": 3016.0
-      },
-      {
-        "s": "Herp McDerperson",
-        "v": "Nomad",
-        "t0": 601.2,
-        "t1": 601.45,
-        "dmg": 40.0
+        "dmg": 1414.0
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 606.55,
         "t1": 609.1,
-        "dmg": 2733.0
-      },
-      {
-        "s": "Nomad",
-        "v": "blue",
-        "t0": 607.1,
-        "t1": 609.05,
-        "dmg": 81.0
+        "dmg": 1281.3
       },
       {
         "s": "Certified Bad Guy",
         "v": "econchump",
         "t0": 607.25,
         "t1": 611.45,
-        "dmg": 1296.0
+        "dmg": 607.6
       },
       {
         "s": "Monkey",
         "v": "econchump",
         "t0": 608.8,
         "t1": 610.65,
-        "dmg": 630.0
-      },
-      {
-        "s": "Monkey",
-        "v": "Certified Bad Guy",
-        "t0": 611.2,
-        "t1": 611.45,
-        "dmg": 54.0
+        "dmg": 295.4
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 625.8,
         "t1": 627.85,
-        "dmg": 828.0
+        "dmg": 388.2
       },
       {
         "s": "Monkey",
         "v": "Herp McDerperson",
         "t0": 646.55,
         "t1": 651.75,
-        "dmg": 1818.0
+        "dmg": 852.3
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 646.9,
         "t1": 651.7,
-        "dmg": 1818.0
+        "dmg": 852.3
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 648.55,
         "t1": 651.45,
-        "dmg": 1023.0
+        "dmg": 479.6
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 653.15,
         "t1": 654.3,
-        "dmg": 462.0
+        "dmg": 216.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 653.6,
         "t1": 657.4,
-        "dmg": 369.0
+        "dmg": 173.0
       },
       {
         "s": "Monkey",
         "v": "Nomad",
         "t0": 654.3,
         "t1": 661.4,
-        "dmg": 1422.0
+        "dmg": 666.7
       },
       {
         "s": "Herp McDerperson",
         "v": "Monkey",
         "t0": 655.7,
         "t1": 661.1,
-        "dmg": 280.0
+        "dmg": 131.3
       },
       {
         "s": "Nomad",
         "v": "Monkey",
         "t0": 655.75,
         "t1": 657.55,
-        "dmg": 462.0
+        "dmg": 216.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Nomad",
         "t0": 659.45,
         "t1": 660.3,
-        "dmg": 90.0
+        "dmg": 42.2
       },
       {
         "s": "Nomad",
         "v": "blue",
         "t0": 688.45,
         "t1": 693.35,
-        "dmg": 1464.0
+        "dmg": 686.4
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 689.1,
         "t1": 701.65,
-        "dmg": 468.0
+        "dmg": 219.4
       },
       {
         "s": "blue",
         "v": "Nomad",
         "t0": 689.8,
         "t1": 693.4,
-        "dmg": 3945.0
+        "dmg": 1849.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 713.15,
         "t1": 716.7,
-        "dmg": 1602.0
+        "dmg": 751.1
       },
       {
         "s": "Nomad",
         "v": "Certified Bad Guy",
         "t0": 715.1,
         "t1": 716.3,
-        "dmg": 90.0
+        "dmg": 42.2
       },
       {
         "s": "Herp McDerperson",
         "v": "blue",
         "t0": 716.35,
         "t1": 719.95,
-        "dmg": 464.0
+        "dmg": 217.5
       },
       {
         "s": "blue",
         "v": "Herp McDerperson",
         "t0": 717.5,
         "t1": 720.0,
-        "dmg": 1746.0
+        "dmg": 818.6
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 719.8,
         "t1": 720.2,
-        "dmg": 216.0
-      },
-      {
-        "s": "Herp McDerperson",
-        "v": "blue",
-        "t0": 745.4,
-        "t1": 747.6,
-        "dmg": 66.0
+        "dmg": 101.3
       },
       {
         "s": "Herp McDerperson",
         "v": "Certified Bad Guy",
         "t0": 753.05,
         "t1": 758.8,
-        "dmg": 260.0
+        "dmg": 121.9
       },
       {
         "s": "Certified Bad Guy",
         "v": "Herp McDerperson",
         "t0": 758.0,
         "t1": 758.85,
-        "dmg": 198.0
+        "dmg": 92.8
       }
     ],
     "structure_pairs": [
@@ -3970,7 +4058,7 @@
         "vname": "Resourcer",
         "t0": 129.7,
         "t1": 135.25,
-        "dmg": 1075.0
+        "dmg": 504.0
       },
       {
         "s": "Herp McDerperson",
@@ -3979,7 +4067,7 @@
         "vname": "Resourcer",
         "t0": 170.95,
         "t1": 193.2,
-        "dmg": 4180.0
+        "dmg": 1959.7
       },
       {
         "s": "econchump",
@@ -3988,7 +4076,7 @@
         "vname": "Resourcer",
         "t0": 199.7,
         "t1": 214.2,
-        "dmg": 3105.0
+        "dmg": 1455.7
       },
       {
         "s": "blue",
@@ -3997,25 +4085,7 @@
         "vname": "Refinery+",
         "t0": 206.2,
         "t1": 207.4,
-        "dmg": 150.0
-      },
-      {
-        "s": "blue",
-        "vteam": 1,
-        "vodf": "ebscup_vsr",
-        "vname": "Refinery+",
-        "t0": 212.85,
-        "t1": 213.15,
-        "dmg": 60.0
-      },
-      {
-        "s": "blue",
-        "vteam": 6,
-        "vodf": "ebscav_vsr",
-        "vname": "Resourcer",
-        "t0": 230.7,
-        "t1": 230.9,
-        "dmg": 50.0
+        "dmg": 70.3
       },
       {
         "s": "Nomad",
@@ -4024,16 +4094,7 @@
         "vname": "Resourcer",
         "t0": 244.25,
         "t1": 245.95,
-        "dmg": 380.0
-      },
-      {
-        "s": "econchump",
-        "vteam": 6,
-        "vodf": "ebpgen_vsr",
-        "vname": "Battery Tray",
-        "t0": 285.1,
-        "t1": 288.4,
-        "dmg": 70.0
+        "dmg": 178.2
       },
       {
         "s": "econchump",
@@ -4042,7 +4103,7 @@
         "vname": "Refinery+",
         "t0": 298.6,
         "t1": 310.4,
-        "dmg": 2495.0
+        "dmg": 1169.8
       },
       {
         "s": "Herp McDerperson",
@@ -4051,7 +4112,7 @@
         "vname": "Resourcer",
         "t0": 321.1,
         "t1": 330.3,
-        "dmg": 1815.0
+        "dmg": 850.9
       },
       {
         "s": "econchump",
@@ -4060,7 +4121,7 @@
         "vname": "Refinery+",
         "t0": 334.9,
         "t1": 339.2,
-        "dmg": 860.0
+        "dmg": 403.2
       },
       {
         "s": "Herp McDerperson",
@@ -4069,7 +4130,7 @@
         "vname": "Resourcer",
         "t0": 349.15,
         "t1": 350.1,
-        "dmg": 215.0
+        "dmg": 100.8
       },
       {
         "s": "econchump",
@@ -4078,16 +4139,7 @@
         "vname": "Refinery+",
         "t0": 360.65,
         "t1": 363.05,
-        "dmg": 520.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "vteam": 6,
-        "vodf": "ebrecym_vsr",
-        "vname": "Procreator",
-        "t0": 372.2,
-        "t1": 373.05,
-        "dmg": 70.0
+        "dmg": 243.8
       },
       {
         "s": "Certified Bad Guy",
@@ -4096,7 +4148,7 @@
         "vname": "Resourcer",
         "t0": 386.95,
         "t1": 402.1,
-        "dmg": 3470.0
+        "dmg": 1626.9
       },
       {
         "s": "blue",
@@ -4105,7 +4157,7 @@
         "vname": "Resourcer",
         "t0": 395.85,
         "t1": 402.1,
-        "dmg": 3575.0
+        "dmg": 1676.1
       },
       {
         "s": "econchump",
@@ -4114,7 +4166,7 @@
         "vname": "Refinery+",
         "t0": 412.1,
         "t1": 414.05,
-        "dmg": 170.0
+        "dmg": 79.7
       },
       {
         "s": "Nomad",
@@ -4123,7 +4175,7 @@
         "vname": "Resourcer",
         "t0": 416.15,
         "t1": 425.05,
-        "dmg": 4720.0
+        "dmg": 2212.9
       },
       {
         "s": "econchump",
@@ -4132,7 +4184,7 @@
         "vname": "Refinery+",
         "t0": 416.55,
         "t1": 417.55,
-        "dmg": 160.0
+        "dmg": 75.0
       },
       {
         "s": "econchump",
@@ -4141,7 +4193,7 @@
         "vname": "Refinery+",
         "t0": 441.55,
         "t1": 449.25,
-        "dmg": 1695.0
+        "dmg": 794.7
       },
       {
         "s": "Nomad",
@@ -4150,7 +4202,7 @@
         "vname": "Resourcer",
         "t0": 444.0,
         "t1": 459.15,
-        "dmg": 7470.0
+        "dmg": 3502.2
       },
       {
         "s": "Herp McDerperson",
@@ -4159,16 +4211,7 @@
         "vname": "Refinery+",
         "t0": 452.9,
         "t1": 455.15,
-        "dmg": 480.0
-      },
-      {
-        "s": "blue",
-        "vteam": 6,
-        "vodf": "ebscup_vsr",
-        "vname": "Refinery+",
-        "t0": 455.6,
-        "t1": 456.55,
-        "dmg": 70.0
+        "dmg": 225.0
       },
       {
         "s": "econchump",
@@ -4177,7 +4220,7 @@
         "vname": "Refinery+",
         "t0": 469.5,
         "t1": 473.5,
-        "dmg": 870.0
+        "dmg": 407.9
       },
       {
         "s": "blue",
@@ -4186,7 +4229,7 @@
         "vname": "Resourcer",
         "t0": 508.5,
         "t1": 518.7,
-        "dmg": 10500.0
+        "dmg": 4922.8
       },
       {
         "s": "econchump",
@@ -4195,16 +4238,7 @@
         "vname": "Refinery+",
         "t0": 604.6,
         "t1": 611.5,
-        "dmg": 1560.0
-      },
-      {
-        "s": "Monkey",
-        "vteam": 6,
-        "vodf": "ebscup_vsr",
-        "vname": "Refinery+",
-        "t0": 610.6,
-        "t1": 610.95,
-        "dmg": 60.0
+        "dmg": 731.4
       },
       {
         "s": "blue",
@@ -4213,16 +4247,7 @@
         "vname": "Refinery+",
         "t0": 709.65,
         "t1": 717.15,
-        "dmg": 6770.0
-      },
-      {
-        "s": "Certified Bad Guy",
-        "vteam": 1,
-        "vodf": "ebpgen_vsr",
-        "vname": "Battery Tray",
-        "t0": 713.0,
-        "t1": 713.1,
-        "dmg": 45.0
+        "dmg": 3174.0
       },
       {
         "s": "blue",
@@ -4231,7 +4256,7 @@
         "vname": "Refinery+",
         "t0": 720.2,
         "t1": 724.2,
-        "dmg": 3250.0
+        "dmg": 1523.7
       },
       {
         "s": "Certified Bad Guy",
@@ -4240,7 +4265,7 @@
         "vname": "Refinery+",
         "t0": 721.2,
         "t1": 724.15,
-        "dmg": 645.0
+        "dmg": 302.4
       },
       {
         "s": "blue",
@@ -4249,7 +4274,7 @@
         "vname": "Xenomator",
         "t0": 730.65,
         "t1": 743.4,
-        "dmg": 11470.0
+        "dmg": 5377.6
       },
       {
         "s": "Certified Bad Guy",
@@ -4258,7 +4283,7 @@
         "vname": "Xenomator",
         "t0": 732.8,
         "t1": 743.4,
-        "dmg": 1777.5
+        "dmg": 833.4
       },
       {
         "s": "Certified Bad Guy",
@@ -4267,7 +4292,7 @@
         "vname": "Eyes of Xyr",
         "t0": 739.2,
         "t1": 742.65,
-        "dmg": 450.0
+        "dmg": 211.0
       },
       {
         "s": "Certified Bad Guy",
@@ -4276,45 +4301,45 @@
         "vname": "Procreator",
         "t0": 745.1,
         "t1": 758.9,
-        "dmg": 2782.5
+        "dmg": 1304.5
       }
     ]
   },
   "asset_damage": {
     "by_player": {
       "Nomad": {
-        "dealt": 20292.0,
-        "received": 84837.9
+        "dealt": 9513.7,
+        "received": 39775.3
       },
       "econchump": {
-        "dealt": 745.0,
-        "received": 202.8
+        "dealt": 349.3,
+        "received": 95.1
       },
       "Herp McDerperson": {
-        "dealt": 576.0,
-        "received": 1025.9
+        "dealt": 270.1,
+        "received": 481.0
       },
       "blue": {
         "dealt": 0,
-        "received": 74512.4
+        "received": 34934.3
       },
       "Monkey": {
-        "dealt": 160.0,
-        "received": 403.6
+        "dealt": 75.0,
+        "received": 189.2
       },
       "Certified Bad Guy": {
-        "dealt": 400.0,
-        "received": 591.1
+        "dealt": 187.5,
+        "received": 277.1
       }
     },
     "by_faction": {
       "1": {
-        "dealt": 21613.0,
-        "received": 86066.6
+        "dealt": 10133.0,
+        "received": 40351.4
       },
       "2": {
-        "dealt": 560.0,
-        "received": 75507.1
+        "dealt": 262.5,
+        "received": 35400.7
       }
     }
   },
@@ -68920,17 +68945,17 @@
           "name": "blue",
           "steam64": "76561198043392032"
         },
-        "value": 25198.4,
+        "value": 11814.0,
         "value_format": "damage",
         "runner_up": {
           "name": "Nomad",
-          "value": 20293.9
+          "value": 9514.6
         },
         "delta_pct": 0.242,
         "narrative": "clear",
         "value_breakdown": {
           "top_victim": "Nomad",
-          "top_victim_damage": 13244.0
+          "top_victim_damage": 6209.3
         }
       },
       {
@@ -68964,17 +68989,17 @@
           "name": "Nomad",
           "steam64": "76561199066952713"
         },
-        "value": 22745.7,
+        "value": 10664.0,
         "value_format": "damage",
         "runner_up": {
           "name": "Herp McDerperson",
-          "value": 21622.5
+          "value": 10137.5
         },
         "delta_pct": 0.052,
         "narrative": "close",
         "value_breakdown": {
           "top_tormentor": "blue",
-          "top_tormentor_damage": 13244.0
+          "top_tormentor_damage": 6209.3
         }
       },
       {
@@ -69005,20 +69030,21 @@
         "icon": "bi-bullseye",
         "winner": {
           "type": "player",
-          "name": "Nomad",
-          "steam64": "76561199066952713"
+          "name": "Certified Bad Guy",
+          "steam64": "76561198284800778"
         },
-        "value": 0.362,
+        "value": 0.751,
         "value_format": "accuracy",
         "runner_up": {
-          "name": "Herp McDerperson",
-          "value": 0.316
+          "name": "blue",
+          "value": 0.736
         },
-        "delta_pct": 0.146,
+        "delta_pct": 0.02,
         "narrative": "close",
         "value_breakdown": {
-          "shots_hit": 639,
-          "shots_fired": 1765
+          "shots_hit": 1871,
+          "shots_fired": 2490,
+          "estimated": true
         }
       },
       {
@@ -69039,7 +69065,8 @@
         "delta_pct": 0.224,
         "narrative": "clear",
         "value_breakdown": {
-          "accuracy": 0.178
+          "accuracy": 0.736,
+          "estimated": true
         }
       },
       {
@@ -69051,16 +69078,16 @@
           "name": "Nomad",
           "steam64": "76561199066952713"
         },
-        "value": 20292.0,
+        "value": 9513.7,
         "value_format": "damage",
         "runner_up": {
           "name": "econchump",
-          "value": 745.0
+          "value": 349.3
         },
-        "delta_pct": 26.238,
+        "delta_pct": 26.236,
         "narrative": "dominant",
         "value_breakdown": {
-          "personal_dealt": 45794.4
+          "personal_dealt": 21470.2
         }
       },
       {
@@ -69072,15 +69099,15 @@
           "a": "Nomad",
           "b": "blue"
         },
-        "value": 21583.0,
+        "value": 10119.0,
         "value_format": "damage",
         "value_breakdown": {
-          "a_to_b": 8339.0,
-          "b_to_a": 13244.0
+          "a_to_b": 3909.7,
+          "b_to_a": 6209.3
         },
         "runner_up": {
           "name": "Herp McDerperson vs blue",
-          "value": 18398.9
+          "value": 8626.2
         },
         "delta_pct": 0.173,
         "narrative": "clear"

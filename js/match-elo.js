@@ -3,7 +3,7 @@
 // Joins the currently loaded match against elo_history.json (already
 // fetched on dashboard boot into window.__vtEloHistory) and explains
 // how this lobby moved VTSR-T: a full-lobby Δ list, a selected-player
-// verdict + 6-axis breakdown, and a P-vs-E scatter. When
+// verdict + 5-axis breakdown, and a P-vs-E scatter. When
 // elo_commander_history.json has a duel for this match, a compact
 // VTSR-C two-row strip is appended (hidden on the historical
 // undetermined corpus — no empty card).
@@ -34,7 +34,7 @@
 
   const EXPECTED_TIP_HTML =
     '<div><strong>Played vs expected</strong></div>' +
-    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 6-axis composite versus everyone here. Above the dashed line means you outperformed that prediction \u2014 that is what moved the number, win or lose.</div>';
+    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 5-axis composite versus everyone here. Above the dashed line means you outperformed that prediction \u2014 that is what moved the number, win or lose.</div>';
 
   const VTSR_AXIS_META = {
     net_damage_share: {
@@ -44,10 +44,6 @@
     thug_kill_rate: {
       label: 'Thug kill rate',
       desc: 'Kills per minute (PvE kills count at half). How often you converted fights.',
-    },
-    thug_accuracy: {
-      label: 'Thug accuracy',
-      desc: 'Hit rate compared to the lobby baseline for each weapon you used.',
     },
     thug_efficiency: {
       label: 'Thug efficiency',
@@ -66,7 +62,6 @@
   const MATCH_ELO_COPY = {
     net_damage_share: { noun: 'net damage' },
     thug_kill_rate: { noun: 'kill rate' },
-    thug_accuracy: { noun: 'accuracy' },
     thug_efficiency: { noun: 'fight efficiency' },
     pve_share: { noun: 'PvE work' },
     mobility: { noun: 'mobility' },

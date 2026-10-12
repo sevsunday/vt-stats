@@ -65,7 +65,7 @@
 
   const DELTA_R_STEPS = [
     { term: 'eq-perf', title: 'Your match score', x: 8, y: 63,
-      body: 'Your 8 stats &mdash; kill rate, accuracy, damage share &amp; more &mdash; measured against everyone in the lobby and blended into one number.' },
+      body: 'Your 5 stats &mdash; kill rate, damage share, efficiency &amp; more &mdash; measured against everyone in the lobby and blended into one number.' },
     { term: 'eq-exp', title: 'The expected bar', x: 63, y: 63,
       body: 'What a player at your current rating was predicted to score against this exact lobby. The higher your rating, the higher the bar.' },
     { term: 'eq-gap', title: 'The surprise', x: 70, y: 5,
@@ -81,7 +81,7 @@
   // 13.1 final equation: the published rating is a blend of two dials.
   const BLEND_STEPS = [
     { term: 'eq-rt', title: 'The Performance dial', x: 63, y: 63,
-      body: 'Thug ELO &mdash; everything on this page: the 6-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
+      body: 'Thug ELO &mdash; everything on this page: the 5-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
       body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
@@ -93,10 +93,12 @@
     + '\\htmlId{eq-alpha}{\\alpha} \\cdot \\htmlId{eq-rw}{R^{W}} \\;+\\; '
     + '(1 - \\alpha) \\cdot \\htmlId{eq-rt}{R^{T}}';
 
-  // The 6 axes (v2.11). Single source for the mixing board, the
+  // The 5 axes (v2.12). Single source for the mixing board, the
   // weights table, and the methodology modal table. Raw weights sum to
-  // 0.91; the pipeline renormalizes over present axes at runtime.
-  // Snipes and T-key usage are display stats, not axes.
+  // 0.76; the pipeline renormalizes over present axes at runtime.
+  // Snipes, T-key usage, and the accuracy column are display stats.
+  // thug_accuracy left the composite: BulletHit never recorded
+  // non-human targets, so the axis scored economy fire as misses.
   const AXES = [
     { key: 'net_damage_share', label: 'Net damage share', weight: 0.20,
       blurb: 'Damage you dealt minus took, vs the lobby total.' },
@@ -104,8 +106,6 @@
       blurb: 'Kills per minute (PvE kills count for half).' },
     { key: 'thug_efficiency', label: 'Thug efficiency', weight: 0.16,
       blurb: 'What % of your non-base damage hit live targets.' },
-    { key: 'thug_accuracy', label: 'Thug accuracy', weight: 0.15,
-      blurb: 'Your hit-rate vs the lobby&rsquo;s, per weapon.' },
     { key: 'pve_share', label: 'PvE share', weight: 0.12,
       blurb: 'Damage on enemy bases, scavs, AI tanks.' },
     { key: 'mobility', label: 'Mobility', weight: 0.08,
@@ -364,7 +364,7 @@
       { hint: 'Press <strong>Next</strong> to meet the two dials.' });
   }
 
-  // The 6-axes mixing board: a horizontal weight bar whose segments are
+  // The 5-axes mixing board: a horizontal weight bar whose segments are
   // the step anchors (solo mode — one spotlight at a time). No KaTeX.
   function axesBoardHtml() {
     const totalW = AXES.reduce((s, a) => s + a.weight, 0);
@@ -376,7 +376,7 @@
         title="${esc(a.label)} \u00b7 weight ${a.weight}">${label}</span>`;
     }).join('');
     const board = `<div class="vt-axesboard" role="img"
-      aria-label="The 6 scoring axes sized by weight">${segs}</div>`;
+      aria-label="The 5 scoring axes sized by weight">${segs}</div>`;
     return buildStageBlock('axes', AXES_STEPS, board,
       { mode: 'solo', hint: 'Press <strong>Next</strong> to spotlight each axis.' });
   }
@@ -482,9 +482,9 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The 6 axes</h6>
+        <h6>The 5 axes</h6>
         ${weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
+        <div class="vt-katex-caveat">PvE kills and AI damage count at half-weight in the two &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters. Shot accuracy is a display stat, not a rating input: the collector never recorded hits on non-human targets, so that axis scored economy fire as misses.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">

@@ -772,7 +772,7 @@
     window.location.href = u.pathname + (u.search || '') + (u.hash || '');
   }
 
-  // ---- VTSR-T axes (the eight composite axes the rating is built on) ---
+  // ---- VTSR-T axes (the five composite axes the rating is built on) ---
   //
   // Distinct from RADAR_AXIS_LABELS in charts-radar.js: those are the
   // career_stats-derived visualization axes (All Matches / per-match
@@ -785,7 +785,6 @@
     { key: 'net_damage_share', label: 'Net Damage Share', icon: 'bi-fire' },
     { key: 'thug_kill_rate',   label: 'Thug Kill Rate',   icon: 'bi-crosshair' },
     { key: 'thug_efficiency',  label: 'Thug Efficiency',  icon: 'bi-speedometer' },
-    { key: 'thug_accuracy',    label: 'Thug Accuracy',    icon: 'bi-bullseye' },
     { key: 'pve_share',        label: 'PvE Share',        icon: 'bi-building' },
     { key: 'mobility',         label: 'Mobility',         icon: 'bi-arrows-move' },
   ];
@@ -939,10 +938,6 @@
     thug_efficiency: {
       head: 'Your shots aren\u2019t landing on mobile units.',
       body: 'This is the share of your damage that landed on humans or mobile AI. Structure damage (hitting recyclers, factories, turrets, etc.) is excluded from both sides \u2014 that work is rewarded on PvE Share instead, not here. You climb this axis by missing fewer shots, fleeing fights without dying, and focusing fire on one target rather than spreading damage across multiple enemies that all escape. If you aren\u2019t a big dogfighter, focus on PvE Share and Net Damage Share rather than this one.',
-    },
-    thug_accuracy: {
-      head: 'Your accuracy trails the lobby on the weapons you actually fire.',
-      body: 'This is your per-weapon hit-rate compared to the lobby\u2019s hit-rate on the same weapon, weighted by your shot share. Make sure you know weapon ranges, use the target key, and practice your aim (play with friends in a DM, or join the dedicated DM server and practice on bots).',
     },
     pve_share: {
       head: 'You\u2019re not doing a lot of damage to non-human stuff.',
@@ -3886,7 +3881,7 @@
     // matches. Two-column at lg+; single-column on phones.
     const html = `
       <div class="row g-3">
-        <!-- 6-axis radar overlay (top-left) -->
+        <!-- 5-axis radar overlay (top-left) -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">

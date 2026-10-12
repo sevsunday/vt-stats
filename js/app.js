@@ -5488,10 +5488,10 @@
       }
       case 'sharpshooter':
         if (b.shots_hit == null || b.shots_fired == null) return '';
-        return `${formatHighlightInt(b.shots_hit)} / ${formatHighlightInt(b.shots_fired)} shots`;
+        return `${formatHighlightInt(b.shots_hit)} / ${formatHighlightInt(b.shots_fired)} shots${b.estimated ? ' (est.)' : ''}`;
       case 'gunner':
         if (b.accuracy == null) return '';
-        return `@ ${(Number(b.accuracy) * 100).toFixed(1)}% accuracy`;
+        return `@ ${(Number(b.accuracy) * 100).toFixed(1)}% accuracy${b.estimated ? ' (est.)' : ''}`;
       case 'puppeteer':
         if (b.personal_dealt == null) return '';
         return `vs ${formatHighlightInt(b.personal_dealt)} personal dmg`;
@@ -6220,7 +6220,7 @@
           <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
           <div class="stat-card"><div class="stat-value">${fmt(ps.received)}</div><div class="stat-label">Received</div></div>
           <div class="stat-card"><div class="stat-value">${ratioStr}</div><div class="stat-label">Ratio</div></div>
-          <div class="stat-card"><div class="stat-value">${fmtAccPct(ps.accuracy)}</div><div class="stat-label">Accuracy</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtAccPct(accOf(ps).value, { est: accOf(ps).est })}</div><div class="stat-label">Accuracy</div></div>
           <div class="stat-card"><div class="stat-value">${player.kills || 0}${killsChip}</div><div class="stat-label">Kills <span class="text-muted">(PvP/PvE)</span></div></div>
           <div class="stat-card"><div class="stat-value">${player.deaths || 0}${deathsChip}</div><div class="stat-label">Deaths <span class="text-muted">(PvP/PvE)</span></div></div>
           <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
@@ -6413,8 +6413,13 @@
       const shots = w.shots || 0;
       const hits = w.hits || 0;
       const pvpHits = w.pvp_hits || 0;
-      const acc = (hasHitsData && shots > 0) ? (hits / shots * 100).toFixed(1) + '%' : '—';
-      // PvP Acc = pvp_hits / shots (matches the thug_accuracy axis math
+      const est = w.accuracy_est != null;
+      const hitsShown = est ? (w.hits_est != null ? w.hits_est : hits) : hits;
+      const accRate = est ? w.accuracy_est : (shots > 0 ? hits / shots : null);
+      const acc = (accRate != null && (hasHitsData || est))
+        ? `${est ? '~' : ''}${(accRate * 100).toFixed(1)}%`
+        : '—';
+      // PvP Acc = pvp_hits / shots (human hits only; not a VTSR-T axis)
       // at the per-weapon level, NOT pvp_hits / hits which would always
       // be ≤100% and conflate weapon-mix with on-target rate).
       const pvpAcc = (hasHitsData && shots > 0) ? (pvpHits / shots * 100).toFixed(1) + '%' : '—';
@@ -6422,10 +6427,10 @@
         <td>${esc(wname)}</td>
         <td class="text-end">${fmt(w.dealt || 0)}</td>
         <td class="text-end">${shots}</td>
-        <td class="text-end">${hasHitsData ? hits : gapDash}</td>
+        <td class="text-end"${est ? ` title="${ACC_EST_TITLE}"` : ''}>${(hasHitsData || est) ? `${est ? '~' : ''}${hitsShown}` : gapDash}</td>
         <td class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player (subset of Hits).">${hasHitsData ? pvpHits : gapDash}</td>
         <td class="text-end">${acc}</td>
-        <td class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — the per-weapon ratio used by the thug_accuracy ELO axis.">${pvpAcc}</td>
+        <td class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — human hits only. Not a VTSR-T input.">${pvpAcc}</td>
       </tr>`;
     }).join('');
     return `
@@ -6441,7 +6446,7 @@
                 <th class="text-end">Hits</th>
                 <th class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player.">PvP Hits</th>
                 <th class="text-end">Acc</th>
-                <th class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — feeds the thug_accuracy ELO axis.">PvP Acc</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — human hits only. Not a VTSR-T input.">PvP Acc</th>
               </tr>
             </thead>
             <tbody>${body}</tbody>
@@ -6643,7 +6648,10 @@
           <div class="vt-faction-stats">
             ${compactStat('Dealt', fmt(f.total_dealt || 0), dealtTitle(f))}
             ${compactStat('Rec', fmt(f.total_received || 0), 'Damage received by this team.')}
-            ${compactStat('Acc', fmtAccPct(f.accuracy), 'Team shot accuracy.')}
+            ${compactStat('Acc', fmtAccPct(
+              f.accuracy_est != null ? f.accuracy_est : f.accuracy,
+              { est: f.accuracy_est != null }
+            ), 'Team shot accuracy. A tilde means non-human hits were reconstructed from damage events.')}
           </div>`;
 
     // Economy stats are match-global / always-unfiltered (same passthrough
@@ -6884,7 +6892,7 @@
         <td class="text-end">${fmt(ps.received)}</td>
         <td class="text-end" style="${netClass}">${ps.net > 0 ? '+' : ''}${fmt(ps.net)}</td>
         <td class="text-end">${ratioStr}</td>
-        <td class="text-end">${fmtAccPct(ps.accuracy)}</td>
+        <td class="text-end">${fmtAccPct(accOf(ps).value, { est: accOf(ps).est })}</td>
         ${kCell}
         ${dCell}
         ${eloCell}
@@ -6923,7 +6931,7 @@
           va = a.personal.ratio === null ? 1e9 : Number(a.personal.ratio);
           vb = b.personal.ratio === null ? 1e9 : Number(b.personal.ratio);
           break;
-        case 'accuracy': va = a.personal.accuracy; vb = b.personal.accuracy; break;
+        case 'accuracy': va = accOf(a.personal).value || 0; vb = accOf(b.personal).value || 0; break;
         case 'kills': va = a.kills || 0; vb = b.kills || 0; break;
         case 'deaths': va = a.deaths || 0; vb = b.deaths || 0; break;
         case 'elo_delta': {
@@ -7234,14 +7242,33 @@
   }
 
   const ACC_GAP_TITLE = 'No hit data — the collector recorded no bullet hits for this match';
+  const ACC_EST_TITLE = 'Estimated. Human hits are exact. Non-human hits are reconstructed from damage events divided by this match\u2019s damage-to-hit ratio.';
 
-  // Accuracy formatter honoring the collector-gap flag: em-dash (with an
-  // explanatory title on the wrapping span) instead of 0.0% on gap matches.
-  function fmtAccPct(acc) {
-    if (!matchHasBulletHitData()) {
+  // Accuracy formatter. Em-dash only when neither an exact rate nor an
+  // estimate exists (collector gap with no reconstruction). opts.est
+  // prefixes a tilde and explains the reconstruction.
+  function fmtAccPct(acc, opts) {
+    const est = !!(opts && opts.est);
+    const hasNumber = acc != null && Number.isFinite(+acc);
+    if (!hasNumber && !est && !matchHasBulletHitData()) {
       return `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
     }
-    return ((acc || 0) * 100).toFixed(1) + '%';
+    const text = ((+acc || 0) * 100).toFixed(1) + '%';
+    if (est) {
+      return `<span title="${ACC_EST_TITLE}">~${text}</span>`;
+    }
+    return text;
+  }
+
+  function accOf(ps) {
+    if (!ps) return { value: null, est: false };
+    if (ps.accuracy_est != null && Number.isFinite(+ps.accuracy_est)) {
+      return { value: +ps.accuracy_est, est: true };
+    }
+    if (matchHasBulletHitData() && ps.accuracy != null && Number.isFinite(+ps.accuracy)) {
+      return { value: +ps.accuracy, est: false };
+    }
+    return { value: null, est: false };
   }
 
   function renderAccuracyTable(leaderboard, channel) {
@@ -7267,14 +7294,15 @@
     rows.sort((a, b) => (b.env ? b.env.mean : -1) - (a.env ? a.env.mean : -1));
     tbody.innerHTML = rows.map(({ p, env }) => {
       const ps = p.personal;
-      const accColor = ps.accuracy >= 0.7 ? 'var(--kb-success)' : ps.accuracy >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
+      const shown = accOf(ps);
+      const accColor = (shown.value || 0) >= 0.7 ? 'var(--kb-success)' : (shown.value || 0) >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
       // v15: on collector-gap matches shots-fired stays real (BulletInit is
       // healthy) but hits/accuracy are unrecorded -- em-dash, not 0.
       const hitsCell = hasHits
         ? ps.shots_hit.toLocaleString()
         : `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
-      const accCell = hasHits
-        ? `<span class="fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</span>`
+      const accCell = (hasHits || shown.est)
+        ? `<span class="fw-bold" style="color:${accColor}"${shown.est ? ` title="${ACC_EST_TITLE}"` : ''}>${shown.est ? '~' : ''}${((shown.value || 0) * 100).toFixed(1)}%</span>`
         : `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
       const tkey = tkeyOf(p.name);
       const tkeyTip = hasTkey
@@ -8156,11 +8184,6 @@
       formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
       desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
     },
-    thug_accuracy: {
-      label: 'Thug accuracy',
-      formula: 'weapon-normalized hit-rate ratio vs lobby (pwa formula)',
-      desc:    'Per-weapon accuracy compared against the lobby baseline for each weapon, weighted by your shot share. PvE hits credited at alpha_pve = 0.5.',
-    },
     thug_efficiency: {
       label: 'Thug efficiency',
       formula: '(pvp_dealt + alpha_pve * pve_to_AI) / max(1, total_dealt - structure_dealt)',
@@ -8261,8 +8284,8 @@
   // thug_efficiency) plus the locked shifted axis (pve_share), we pull
   // z_pre_shift so the v2.4 commander cushion is reversed - that cushion
   // exists to make VTSR-T fair across roles, but for commander-vs-commander
-  // comparison it artificially flattens gaps. For the role-blind axis
-  // (thug_accuracy) pre == post, so axis_contributions[axis] is the raw value.
+  // comparison it artificially flattens gaps. Axes with no commander
+  // shift use axis_contributions[axis] as the raw value.
   //
   // Returns { [steam64|name]: { axisMeans: {axis: meanZ}, n: int } }
   // where n is the count of commander matches contributing data for that
@@ -8829,8 +8852,8 @@
           vb = careerRatioSortValue(b);
           break;
         case 'overall_accuracy':
-          va = a.overall_accuracy || 0;
-          vb = b.overall_accuracy || 0;
+          va = (a.overall_accuracy_est != null ? a.overall_accuracy_est : a.overall_accuracy) || 0;
+          vb = (b.overall_accuracy_est != null ? b.overall_accuracy_est : b.overall_accuracy) || 0;
           break;
         case 'total_kills':
           va = a.total_kills || 0;
@@ -8963,7 +8986,9 @@
       const netAvg = careerPerMatchAvg(netVal, m);
       const netAvgClass = netAvg > 0 ? 'color:var(--kb-success)' : netAvg < 0 ? 'color:var(--kb-danger)' : '';
       const ratioStr = careerRatioDisplayStr(c);
-      const accPct = (c.overall_accuracy != null ? c.overall_accuracy : 0) * 100;
+      const accShown = c.overall_accuracy_est != null ? c.overall_accuracy_est : c.overall_accuracy;
+      const accEst = c.overall_accuracy_est != null;
+      const accPct = (accShown != null ? accShown : 0) * 100;
       const wpns = careerWeaponsUsedCount(c);
       const avgK = careerPerMatchAvg(c.total_kills || 0, m);
       const avgD = careerPerMatchAvg(c.total_deaths || 0, m);
@@ -9046,7 +9071,7 @@
         <td class="text-end vt-career-col-total" style="${netClass}">${netVal > 0 ? '+' : ''}${fmt(netVal)}</td>
         <td class="text-end vt-col-split vt-career-col-avg" style="${netAvgClass}">${netAvg > 0 ? '+' : ''}${fmt(netAvg)}</td>
         <td class="text-end vt-career-col-shared">${ratioStr}</td>
-        <td class="text-end vt-career-col-shared">${accPct.toFixed(1)}%</td>
+        <td class="text-end vt-career-col-shared"${accEst ? ` title="${ACC_EST_TITLE}"` : ''}>${accEst ? '~' : ''}${accPct.toFixed(1)}%</td>
         ${careerKillsTotalCell}
         <td class="text-end vt-col-split vt-career-col-avg">${avgK.toFixed(1)}</td>
         ${careerDeathsTotalCell}
@@ -9097,8 +9122,8 @@
         if (key === 'name') return (c.name || '').toLowerCase();
         if (key === 'matches') return c.matches_played || 0;
         if (key === 'fired') return hitN > 0 ? (c.total_shots_fired || 0) : null;
-        if (key === 'hit') return hitN > 0 ? (c.total_shots_hit || 0) : null;
-        if (key === 'accuracy') return hitN > 0 ? num(c.overall_accuracy) : null;
+        if (key === 'hit') return (hitN > 0 || c.total_shots_hit_est != null) ? (c.total_shots_hit_est != null ? c.total_shots_hit_est : (c.total_shots_hit || 0)) : null;
+        if (key === 'accuracy') return (hitN > 0 || c.overall_accuracy_est != null) ? num(c.overall_accuracy_est != null ? c.overall_accuracy_est : c.overall_accuracy) : null;
         if (key === 'tkey') return tN > 0 ? num(c.mean_target_lock_pct) : null;
         return null;
       };
@@ -9109,17 +9134,23 @@
       const hitN = c.matches_with_bullet_hit_data || 0;
       const tN = c.matches_with_target_lock_data || 0;
       const played = c.matches_played || 0;
-      const acc = hitN > 0 ? num(c.overall_accuracy) : null;
+      const accRaw = c.overall_accuracy_est != null ? c.overall_accuracy_est : (hitN > 0 ? c.overall_accuracy : null);
+      const acc = num(accRaw);
+      const accEst = c.overall_accuracy_est != null;
       const accColor = acc == null ? ''
         : acc >= 0.7 ? 'var(--kb-success)' : acc >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
-      const accTip = (acc != null && hitN < played)
-        ? ` title="From ${hitN} of ${played} matches with hit data"`
-        : '';
+      const accTip = accEst
+        ? ` title="${ACC_EST_TITLE}"`
+        : ((acc != null && hitN < played)
+          ? ` title="From ${hitN} of ${played} matches with hit data"`
+          : '');
       const accCell = acc == null
         ? dash
-        : `<span class="fw-bold" style="color:${accColor}"${accTip}>${(acc * 100).toFixed(1)}%</span>`;
-      const firedCell = hitN > 0 ? (c.total_shots_fired || 0).toLocaleString() : dash;
-      const hitCell = hitN > 0 ? (c.total_shots_hit || 0).toLocaleString() : dash;
+        : `<span class="fw-bold" style="color:${accColor}"${accTip}>${accEst ? '~' : ''}${(acc * 100).toFixed(1)}%</span>`;
+      const firedCell = (hitN > 0 || accEst) ? (c.total_shots_fired || 0).toLocaleString() : dash;
+      const hitCell = (hitN > 0 || accEst)
+        ? (c.total_shots_hit_est != null ? c.total_shots_hit_est : (c.total_shots_hit || 0)).toLocaleString()
+        : dash;
       const tkey = tN > 0 ? num(c.mean_target_lock_pct) : null;
       const tkeyCell = tkey == null
         ? dash

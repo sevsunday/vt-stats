@@ -13,7 +13,7 @@
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
  *                             example (from the shared js/vtsr-explainers.js).
- *   The 6 axes              — annotated mixing-board + weights table.
+ *   The 5 axes              — annotated mixing-board + weights table.
  *   Commanders & fairness   — the fairness rules as plain-language cards.
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
@@ -260,8 +260,8 @@
         case 'accuracy': {
           const ca = vtsrCareerByName(a);
           const cb = vtsrCareerByName(b);
-          va = ca ? (ca.overall_accuracy || 0) : -1;
-          vb = cb ? (cb.overall_accuracy || 0) : -1;
+          va = ca ? ((ca.overall_accuracy_est != null ? ca.overall_accuracy_est : ca.overall_accuracy) || 0) : -1;
+          vb = cb ? ((cb.overall_accuracy_est != null ? cb.overall_accuracy_est : cb.overall_accuracy) || 0) : -1;
           break;
         }
         case 'pvp_accuracy': {
@@ -295,11 +295,6 @@
       label: 'Thug kill rate',
       formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
       desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
-    },
-    thug_accuracy: {
-      label: 'Thug accuracy',
-      formula: 'weapon-normalized hit-rate ratio vs lobby (pwa formula)',
-      desc:    'Per-weapon accuracy compared against the lobby baseline for each weapon, weighted by your shot share. PvE hits credited at alpha_pve = 0.5.',
     },
     thug_efficiency: {
       label: 'Thug efficiency',
@@ -657,16 +652,19 @@
     const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
 
     const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
-    const totalHits  = careerRow ? (careerRow.total_shots_hit || 0) : 0;
+    const totalHits  = careerRow ? (careerRow.total_shots_hit_est != null ? careerRow.total_shots_hit_est : (careerRow.total_shots_hit || 0)) : 0;
     const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
+    const accRate = careerRow
+      ? ((careerRow.overall_accuracy_est != null ? careerRow.overall_accuracy_est : careerRow.overall_accuracy) || 0)
+      : 0;
     const accStr = careerRow
-      ? ((careerRow.overall_accuracy || 0) * 100).toFixed(1) + '%'
+      ? `${careerRow.overall_accuracy_est != null ? '~' : ''}${(accRate * 100).toFixed(1)}%`
       : '\u2014';
     const pvpAccStr = careerRow
       ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
       : '\u2014';
     const accTip = totalShots > 0
-      ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${((careerRow.overall_accuracy || 0) * 100).toFixed(2)}%`
+      ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${(accRate * 100).toFixed(2)}%${careerRow.overall_accuracy_est != null ? ' (est.)' : ''}`
       : 'No shots fired this career';
     const pvpAccTip = totalShots > 0
       ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
@@ -1378,7 +1376,7 @@
   }
 
   // ----------------------------------------------------------------------
-  // Tab: The 6 axes.
+  // Tab: The 5 axes.
   // ----------------------------------------------------------------------
 
   function renderAxesTab() {
@@ -1401,7 +1399,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 6 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
+        <p class="mb-1">These 5 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;

@@ -3,7 +3,7 @@
     "id": "2026-05-19T02-55-54",
     "source_file": "2026-05-19-02-55-54.binpb.gz",
     "source_size_bytes": 1444257,
-    "pipeline_version": 55,
+    "pipeline_version": 56,
     "submitter": "Nomad",
     "map": "vsrPlaza.bzn",
     "date": "2026-05-19T02:55:54.292535+00:00",
@@ -130,7 +130,21 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 31,
+    "schema_version": 32,
+    "event_calibration": {
+      "r_by_weapon": {
+        "minigun_c.odf": 2.1878,
+        "cphcg_c.odf": 2.1347,
+        "tracer.odf": 2.1556,
+        "chainvsr_c.odf": 2.2424
+      },
+      "r_lobby": 2.1878,
+      "ref_hits": 1048,
+      "source": "in_match",
+      "damage_scale": 0.457086,
+      "dup_era": true,
+      "hits_est_source": "damage_events"
+    },
     "proto_schema_version": "v2",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -222,20 +236,24 @@
       "deaths": 0,
       "kd_ratio": null,
       "personal": {
-        "dealt": 18476.9,
-        "received": 2835.0,
-        "pvp_dealt": 7468.9,
-        "pve_dealt": 11008.0,
-        "pvp_received": 2035.0,
-        "pve_received": 800.0,
-        "structure_dealt": 2304.0,
-        "net": 15641.9,
+        "dealt": 8445.5,
+        "received": 1295.8,
+        "pvp_dealt": 3413.9,
+        "pve_dealt": 5031.6,
+        "pvp_received": 930.2,
+        "pve_received": 365.7,
+        "structure_dealt": 1053.1,
+        "net": 7149.7,
         "ratio": 6.52,
         "shots_fired": 991,
         "shots_hit": 178,
         "pvp_shots_hit": 178,
         "pvp_accuracy": 0.18,
         "accuracy": 0.18,
+        "pve_shots_hit_est": 739,
+        "shots_hit_est": 917,
+        "accuracy_est": 0.925,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 1,
         "pvp_deaths": 0,
@@ -265,7 +283,7 @@
         },
         "time_low_health_pct": 0.0,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 13.73
+        "hp_efficiency": 6.27
       },
       "assets": {
         "dealt": 0,
@@ -273,13 +291,16 @@
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 10320.0,
+          "dealt": 4717.1,
           "received": 0,
           "shots": 356,
           "hits": 174,
           "pvp_hits": 174,
           "self_hits": 0,
           "accuracy": 0.489,
+          "pve_hits_est": 132,
+          "hits_est": 306,
+          "accuracy_est": 0.86,
           "range_hist": {
             "pvp": [
               0,
@@ -317,13 +338,16 @@
           }
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 400.0,
+          "dealt": 182.8,
           "received": 0,
           "shots": 5,
           "hits": 4,
           "pvp_hits": 4,
           "self_hits": 0,
           "accuracy": 0.8,
+          "pve_hits_est": 0,
+          "hits_est": 4,
+          "accuracy_est": 0.8,
           "range_hist": {
             "pvp": [
               0,
@@ -361,22 +385,28 @@
           }
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 1116.9,
+          "dealt": 510.5,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Minigun": {
-          "dealt": 6640.0,
+          "dealt": 3035.1,
           "received": 0,
           "shots": 630,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 607,
+          "hits_est": 607,
+          "accuracy_est": 0.963
         }
       },
       "loadout": {
@@ -407,28 +437,28 @@
           "pvp_deaths": 0,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 18476.9,
+          "dealt": 8445.5,
           "shots": 991,
           "hits": 178,
           "pvp_hits": 178,
           "accuracy": 0.18,
           "pvp_accuracy": 0.18,
-          "dpm": 3140.6,
+          "dpm": 1435.5,
           "kd": null
         }
       ],
       "hit_targets": {
         "econchump": {
           "hits": 98,
-          "damage": 3734.9
+          "damage": 1707.2
         },
         "Lithium": {
           "hits": 60,
-          "damage": 2800.4
+          "damage": 1280.0
         },
         "Darkvale": {
           "hits": 20,
-          "damage": 933.6
+          "damage": 426.7
         }
       }
     },
@@ -450,28 +480,32 @@
       "deaths": 1,
       "kd_ratio": 2.0,
       "personal": {
-        "dealt": 13390.7,
-        "received": 5766.2,
-        "pvp_dealt": 8745.1,
-        "pve_dealt": 4132.0,
-        "pvp_received": 4803.1,
-        "pve_received": 449.5,
-        "structure_dealt": 420.0,
-        "net": 7624.5,
+        "dealt": 6120.7,
+        "received": 2635.7,
+        "pvp_dealt": 3997.3,
+        "pve_dealt": 1888.7,
+        "pvp_received": 2195.4,
+        "pve_received": 205.5,
+        "structure_dealt": 192.0,
+        "net": 3485.1,
         "ratio": 2.32,
         "shots_fired": 762,
         "shots_hit": 270,
         "pvp_shots_hit": 270,
         "pvp_accuracy": 0.354,
         "accuracy": 0.354,
+        "pve_shots_hit_est": 279,
+        "shots_hit_est": 549,
+        "accuracy_est": 0.72,
+        "hits_est_source": "damage_events",
         "pvp_kills": 2,
         "pve_kills": 0,
         "pvp_deaths": 1,
         "pve_deaths": 0,
         "effective_pvp_kills": 2.03,
         "pvp_assists": 1,
-        "self_dealt": 513.6,
-        "self_received": 513.6,
+        "self_dealt": 234.8,
+        "self_received": 234.8,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -493,21 +527,24 @@
         },
         "time_low_health_pct": 0.013,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 4.8
+        "hp_efficiency": 2.19
       },
       "assets": {
         "dealt": 0,
-        "received": 387.0
+        "received": 176.9
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 2160.0,
+          "dealt": 987.3,
           "received": 0,
           "shots": 98,
           "hits": 35,
           "pvp_hits": 35,
           "self_hits": 0,
           "accuracy": 0.357,
+          "pve_hits_est": 18,
+          "hits_est": 53,
+          "accuracy_est": 0.541,
           "range_hist": {
             "pvp": [
               0,
@@ -545,22 +582,28 @@
           }
         },
         "Craft Explosion": {
-          "dealt": 358.4,
-          "received": 99.2,
+          "dealt": 163.8,
+          "received": 45.3,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "FAF Msl (fafmsl_c)": {
-          "dealt": 850.0,
+          "dealt": 388.5,
           "received": 0,
           "shots": 10,
           "hits": 9,
           "pvp_hits": 9,
           "self_hits": 0,
           "accuracy": 0.9,
+          "pve_hits_est": 0,
+          "hits_est": 9,
+          "accuracy_est": 0.9,
           "range_hist": {
             "pvp": [
               3,
@@ -598,22 +641,28 @@
           }
         },
         "FAF Msl (xfafmsl)": {
-          "dealt": 2210.4,
-          "received": 414.4,
+          "dealt": 1010.3,
+          "received": 189.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Minigun": {
-          "dealt": 7207.0,
+          "dealt": 3294.2,
           "received": 0,
           "shots": 584,
           "hits": 181,
           "pvp_hits": 181,
           "self_hits": 0,
           "accuracy": 0.31,
+          "pve_hits_est": 261,
+          "hits_est": 442,
+          "accuracy_est": 0.757,
           "range_hist": {
             "pvp": [
               45,
@@ -651,13 +700,16 @@
           }
         },
         "Pulse (tracer)": {
-          "dealt": 485.0,
+          "dealt": 221.7,
           "received": 0,
           "shots": 70,
           "hits": 45,
           "pvp_hits": 45,
           "self_hits": 0,
           "accuracy": 0.643,
+          "pve_hits_est": 0,
+          "hits_est": 45,
+          "accuracy_est": 0.643,
           "range_hist": {
             "pvp": [
               0,
@@ -695,13 +747,16 @@
           }
         },
         "Sign Explosion": {
-          "dealt": 120.0,
+          "dealt": 54.9,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -741,13 +796,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 12547.4,
+          "dealt": 5735.2,
           "shots": 692,
           "hits": 225,
           "pvp_hits": 225,
           "accuracy": 0.325,
           "pvp_accuracy": 0.325,
-          "dpm": 2447.2,
+          "dpm": 1118.6,
           "kd": 2.0
         },
         {
@@ -760,32 +815,32 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 843.4,
+          "dealt": 385.5,
           "shots": 70,
           "hits": 45,
           "pvp_hits": 45,
           "accuracy": 0.643,
           "pvp_accuracy": 0.643,
-          "dpm": 1115.4,
+          "dpm": 509.8,
           "kd": null
         }
       ],
       "hit_targets": {
         "Cloaket": {
           "hits": 115,
-          "damage": 3789.9
+          "damage": 1732.3
         },
         "Darkvale": {
           "hits": 85,
-          "damage": 3451.2
+          "damage": 1577.5
         },
         "econchump": {
           "hits": 48,
-          "damage": 1028.0
+          "damage": 469.9
         },
         "Lithium": {
           "hits": 22,
-          "damage": 476.0
+          "damage": 217.6
         }
       }
     },
@@ -807,20 +862,24 @@
       "deaths": 0,
       "kd_ratio": null,
       "personal": {
-        "dealt": 10356.0,
-        "received": 1122.0,
-        "pvp_dealt": 1328.0,
-        "pve_dealt": 9028.0,
-        "pvp_received": 1122.0,
+        "dealt": 4733.6,
+        "received": 512.9,
+        "pvp_dealt": 607.0,
+        "pve_dealt": 4126.6,
+        "pvp_received": 512.9,
         "pve_received": 0.0,
-        "structure_dealt": 7576.0,
-        "net": 9234.0,
+        "structure_dealt": 3462.9,
+        "net": 4220.7,
         "ratio": 9.23,
         "shots_fired": 555,
         "shots_hit": 40,
         "pvp_shots_hit": 40,
         "pvp_accuracy": 0.072,
         "accuracy": 0.072,
+        "pve_shots_hit_est": 360,
+        "shots_hit_est": 400,
+        "accuracy_est": 0.721,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 0,
         "pvp_deaths": 0,
@@ -850,7 +909,7 @@
         },
         "time_low_health_pct": 0.0,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 18.46
+        "hp_efficiency": 8.44
       },
       "assets": {
         "dealt": 0,
@@ -858,13 +917,16 @@
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 9896.0,
+          "dealt": 4523.3,
           "received": 0,
           "shots": 462,
           "hits": 40,
           "pvp_hits": 40,
           "self_hits": 0,
           "accuracy": 0.087,
+          "pve_hits_est": 318,
+          "hits_est": 358,
+          "accuracy_est": 0.775,
           "range_hist": {
             "pvp": [
               0,
@@ -908,16 +970,22 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         },
         "Minigun": {
-          "dealt": 460.0,
+          "dealt": 210.3,
           "received": 0,
           "shots": 92,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 42,
+          "hits_est": 42,
+          "accuracy_est": 0.457
         }
       },
       "loadout": {
@@ -957,13 +1025,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 10356.0,
+          "dealt": 4733.6,
           "shots": 555,
           "hits": 40,
           "pvp_hits": 40,
           "accuracy": 0.072,
           "pvp_accuracy": 0.072,
-          "dpm": 1760.6,
+          "dpm": 804.7,
           "kd": null
         },
         {
@@ -989,11 +1057,11 @@
       "hit_targets": {
         "Cloaket": {
           "hits": 38,
-          "damage": 1216.0
+          "damage": 555.8
         },
         "Sev": {
           "hits": 2,
-          "damage": 112.0
+          "damage": 51.2
         }
       }
     },
@@ -1015,20 +1083,24 @@
       "deaths": 0,
       "kd_ratio": null,
       "personal": {
-        "dealt": 10066.1,
-        "received": 2505.9,
-        "pvp_dealt": 7236.0,
-        "pve_dealt": 2830.1,
-        "pvp_received": 2439.6,
-        "pve_received": 66.3,
-        "structure_dealt": 2208.0,
-        "net": 7560.2,
+        "dealt": 4601.1,
+        "received": 1145.4,
+        "pvp_dealt": 3307.5,
+        "pve_dealt": 1293.6,
+        "pvp_received": 1115.1,
+        "pve_received": 30.3,
+        "structure_dealt": 1009.2,
+        "net": 3455.7,
         "ratio": 4.02,
         "shots_fired": 465,
         "shots_hit": 224,
         "pvp_shots_hit": 224,
         "pvp_accuracy": 0.482,
         "accuracy": 0.482,
+        "pve_shots_hit_est": 82,
+        "shots_hit_est": 306,
+        "accuracy_est": 0.658,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 0,
         "pvp_deaths": 0,
@@ -1058,21 +1130,24 @@
         },
         "time_low_health_pct": 0.0,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 9.27
+        "hp_efficiency": 4.24
       },
       "assets": {
         "dealt": 0,
-        "received": 9340.1
+        "received": 4269.2
       },
       "weapon_breakdown": {
         "Chain Gun": {
-          "dealt": 8256.0,
-          "received": 112.0,
+          "dealt": 3773.7,
+          "received": 51.2,
           "shots": 328,
           "hits": 176,
           "pvp_hits": 176,
           "self_hits": 0,
           "accuracy": 0.537,
+          "pve_hits_est": 82,
+          "hits_est": 258,
+          "accuracy_est": 0.787,
           "range_hist": {
             "pvp": [
               0,
@@ -1116,16 +1191,22 @@
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.0
+          "accuracy": 0.0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0.0
         },
         "Minigun": {
-          "dealt": 1188.0,
+          "dealt": 543.0,
           "received": 0,
           "shots": 136,
           "hits": 48,
           "pvp_hits": 48,
           "self_hits": 0,
           "accuracy": 0.353,
+          "pve_hits_est": 0,
+          "hits_est": 48,
+          "accuracy_est": 0.353,
           "range_hist": {
             "pvp": [
               0,
@@ -1163,13 +1244,16 @@
           }
         },
         "Vehicle Explosion": {
-          "dealt": 622.1,
+          "dealt": 284.4,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -1224,13 +1308,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1188.0,
+          "dealt": 543.0,
           "shots": 137,
           "hits": 48,
           "pvp_hits": 48,
           "accuracy": 0.35,
           "pvp_accuracy": 0.35,
-          "dpm": 353.0,
+          "dpm": 161.3,
           "kd": null
         },
         {
@@ -1243,13 +1327,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 8878.1,
+          "dealt": 4058.1,
           "shots": 328,
           "hits": 176,
           "pvp_hits": 176,
           "accuracy": 0.537,
           "pvp_accuracy": 0.537,
-          "dpm": 3941.9,
+          "dpm": 1801.8,
           "kd": null
         },
         {
@@ -1313,11 +1397,11 @@
       "hit_targets": {
         "Cloaket": {
           "hits": 176,
-          "damage": 6048.0
+          "damage": 2764.5
         },
         "econchump": {
           "hits": 48,
-          "damage": 1188.0
+          "damage": 543.0
         }
       }
     },
@@ -1339,28 +1423,32 @@
       "deaths": 2,
       "kd_ratio": 0.0,
       "personal": {
-        "dealt": 6799.0,
-        "received": 11895.9,
-        "pvp_dealt": 5064.7,
-        "pve_dealt": 1534.3,
-        "pvp_received": 11295.9,
-        "pve_received": 400.0,
+        "dealt": 3107.7,
+        "received": 5437.4,
+        "pvp_dealt": 2315.0,
+        "pve_dealt": 701.3,
+        "pvp_received": 5163.2,
+        "pve_received": 182.8,
         "structure_dealt": 0,
-        "net": -5096.9,
+        "net": -2329.7,
         "ratio": 0.57,
         "shots_fired": 380,
         "shots_hit": 134,
         "pvp_shots_hit": 134,
         "pvp_accuracy": 0.353,
         "accuracy": 0.353,
+        "pve_shots_hit_est": 2,
+        "shots_hit_est": 136,
+        "accuracy_est": 0.358,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 0,
         "pvp_deaths": 2,
         "pve_deaths": 0,
         "effective_pvp_kills": 0.27,
         "pvp_assists": 1,
-        "self_dealt": 200.0,
-        "self_received": 200.0,
+        "self_dealt": 91.4,
+        "self_received": 91.4,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1382,21 +1470,24 @@
         },
         "time_low_health_pct": 0.009,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 1.21
+        "hp_efficiency": 0.55
       },
       "assets": {
         "dealt": 0,
-        "received": 23696.0
+        "received": 10831.1
       },
       "weapon_breakdown": {
         "Combat Laser (cphlas_c)": {
-          "dealt": 900.0,
+          "dealt": 411.4,
           "received": 0,
           "shots": 10,
           "hits": 2,
           "pvp_hits": 2,
           "self_hits": 0,
           "accuracy": 0.2,
+          "pve_hits_est": 0,
+          "hits_est": 2,
+          "accuracy_est": 0.2,
           "range_hist": {
             "pvp": [
               0,
@@ -1434,40 +1525,52 @@
           }
         },
         "Combat Laser (xcplascar)": {
-          "dealt": 54.4,
+          "dealt": 24.9,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Craft Explosion (Hadean)": {
-          "dealt": 846.1,
-          "received": 200.0,
+          "dealt": 386.8,
+          "received": 91.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Flame Mine (xfbseeke)": {
-          "dealt": 26.9,
+          "dealt": 12.3,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 2995.0,
-          "received": 242.0,
+          "dealt": 1369.0,
+          "received": 110.6,
           "shots": 370,
           "hits": 132,
           "pvp_hits": 132,
           "self_hits": 0,
           "accuracy": 0.357,
+          "pve_hits_est": 2,
+          "hits_est": 134,
+          "accuracy_est": 0.362,
           "range_hist": {
             "pvp": [
               34,
@@ -1505,22 +1608,28 @@
           }
         },
         "Prox Mine": {
-          "dealt": 1100.0,
+          "dealt": 502.8,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Vehicle Explosion (Hadean)": {
-          "dealt": 876.4,
+          "dealt": 400.6,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         }
       },
       "loadout": {
@@ -1565,13 +1674,13 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1501.3,
+          "dealt": 686.2,
           "shots": 188,
           "hits": 64,
           "pvp_hits": 64,
           "accuracy": 0.34,
           "pvp_accuracy": 0.34,
-          "dpm": 601.6,
+          "dpm": 275.0,
           "kd": 0.0
         },
         {
@@ -1584,13 +1693,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1736.2,
+          "dealt": 793.6,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
-          "dpm": 1156.2,
+          "dpm": 528.5,
           "kd": null
         },
         {
@@ -1603,24 +1712,24 @@
           "pvp_deaths": 1,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 3561.4,
+          "dealt": 1627.9,
           "shots": 192,
           "hits": 70,
           "pvp_hits": 70,
           "accuracy": 0.365,
           "pvp_accuracy": 0.365,
-          "dpm": 3682.1,
+          "dpm": 1683.1,
           "kd": 0.0
         }
       ],
       "hit_targets": {
         "Domakus": {
           "hits": 111,
-          "damage": 3067.1
+          "damage": 1401.9
         },
         "Sev": {
           "hits": 23,
-          "damage": 897.6
+          "damage": 410.3
         }
       }
     },
@@ -1642,28 +1751,32 @@
       "deaths": 1,
       "kd_ratio": 1.0,
       "personal": {
-        "dealt": 5438.4,
-        "received": 6196.2,
-        "pvp_dealt": 275.0,
-        "pve_dealt": 5063.4,
-        "pvp_received": 6005.9,
-        "pve_received": 90.3,
+        "dealt": 2485.8,
+        "received": 2832.2,
+        "pvp_dealt": 125.7,
+        "pve_dealt": 2314.4,
+        "pvp_received": 2745.2,
+        "pve_received": 41.3,
         "structure_dealt": 0,
-        "net": -757.8,
+        "net": -346.4,
         "ratio": 0.88,
         "shots_fired": 640,
         "shots_hit": 12,
         "pvp_shots_hit": 12,
         "pvp_accuracy": 0.019,
         "accuracy": 0.019,
+        "pve_shots_hit_est": 461,
+        "shots_hit_est": 473,
+        "accuracy_est": 0.739,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 1,
         "pvp_deaths": 1,
         "pve_deaths": 0,
         "effective_pvp_kills": 0.0,
         "pvp_assists": 0,
-        "self_dealt": 100.0,
-        "self_received": 100.0,
+        "self_dealt": 45.7,
+        "self_received": 45.7,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -1685,30 +1798,36 @@
         },
         "time_low_health_pct": 0.046,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 1.25
+        "hp_efficiency": 0.57
       },
       "assets": {
-        "dealt": 488.2,
-        "received": 13.3
+        "dealt": 223.2,
+        "received": 6.1
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 238.4,
-          "received": 100.0,
+          "dealt": 108.9,
+          "received": 45.7,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 5200.0,
+          "dealt": 2376.8,
           "received": 0,
           "shots": 640,
           "hits": 12,
           "pvp_hits": 12,
           "self_hits": 0,
           "accuracy": 0.019,
+          "pve_hits_est": 461,
+          "hits_est": 473,
+          "accuracy_est": 0.739,
           "range_hist": {
             "pvp": [
               0,
@@ -1783,13 +1902,13 @@
           "pvp_deaths": 1,
           "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 5200.0,
+          "dealt": 2376.8,
           "shots": 640,
           "hits": 12,
           "pvp_hits": 12,
           "accuracy": 0.019,
           "pvp_accuracy": 0.019,
-          "dpm": 1033.2,
+          "dpm": 472.3,
           "kd": 0.0
         },
         {
@@ -1802,20 +1921,20 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 238.4,
+          "dealt": 108.9,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
-          "dpm": 4333.7,
+          "dpm": 1980.9,
           "kd": null
         }
       ],
       "hit_targets": {
         "Nomad": {
           "hits": 12,
-          "damage": 275.0
+          "damage": 125.7
         }
       }
     },
@@ -1837,20 +1956,24 @@
       "deaths": 0,
       "kd_ratio": null,
       "personal": {
-        "dealt": 4310.0,
-        "received": 4384.8,
-        "pvp_dealt": 3520.0,
-        "pve_dealt": 790.0,
-        "pvp_received": 4384.8,
+        "dealt": 1970.0,
+        "received": 2004.3,
+        "pvp_dealt": 1608.9,
+        "pve_dealt": 361.1,
+        "pvp_received": 2004.3,
         "pve_received": 0.0,
         "structure_dealt": 0,
-        "net": -74.8,
+        "net": -34.2,
         "ratio": 0.98,
         "shots_fired": 532,
         "shots_hit": 151,
         "pvp_shots_hit": 151,
         "pvp_accuracy": 0.284,
         "accuracy": 0.284,
+        "pve_shots_hit_est": 71,
+        "shots_hit_est": 222,
+        "accuracy_est": 0.417,
+        "hits_est_source": "damage_events",
         "pvp_kills": 1,
         "pve_kills": 0,
         "pvp_deaths": 0,
@@ -1880,30 +2003,36 @@
         },
         "time_low_health_pct": 0.039,
         "ammo_out_episodes": 15,
-        "hp_efficiency": 2.16
+        "hp_efficiency": 0.99
       },
       "assets": {
-        "dealt": 1919.6,
-        "received": 672.1
+        "dealt": 877.4,
+        "received": 307.2
       },
       "weapon_breakdown": {
         "Flame Mine (xfbseeke)": {
-          "dealt": 30.0,
+          "dealt": 13.7,
           "received": 0,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 4280.0,
+          "dealt": 1956.3,
           "received": 0,
           "shots": 532,
           "hits": 151,
           "pvp_hits": 151,
           "self_hits": 0,
           "accuracy": 0.284,
+          "pve_hits_est": 71,
+          "hits_est": 222,
+          "accuracy_est": 0.417,
           "range_hist": {
             "pvp": [
               3,
@@ -1978,13 +2107,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 4310.0,
+          "dealt": 1970.0,
           "shots": 532,
           "hits": 151,
           "pvp_hits": 151,
           "accuracy": 0.284,
           "pvp_accuracy": 0.284,
-          "dpm": 732.7,
+          "dpm": 334.9,
           "kd": null
         },
         {
@@ -2010,19 +2139,19 @@
       "hit_targets": {
         "Nomad": {
           "hits": 74,
-          "damage": 1760.0
+          "damage": 804.5
         },
         "Domakus": {
           "hits": 66,
-          "damage": 1496.0
+          "damage": 683.8
         },
         "Cloaket": {
           "hits": 10,
-          "damage": 242.0
+          "damage": 110.6
         },
         "The_Bylarge": {
           "hits": 1,
-          "damage": 22.0
+          "damage": 10.1
         }
       }
     },
@@ -2044,28 +2173,32 @@
       "deaths": 0,
       "kd_ratio": null,
       "personal": {
-        "dealt": 3087.3,
-        "received": 3617.7,
-        "pvp_dealt": 1725.0,
-        "pve_dealt": 1105.5,
-        "pvp_received": 3276.4,
-        "pve_received": 84.5,
+        "dealt": 1411.2,
+        "received": 1653.6,
+        "pvp_dealt": 788.5,
+        "pve_dealt": 505.3,
+        "pvp_received": 1497.6,
+        "pve_received": 38.6,
         "structure_dealt": 0,
-        "net": -530.4,
+        "net": -242.4,
         "ratio": 0.85,
         "shots_fired": 317,
         "shots_hit": 79,
         "pvp_shots_hit": 79,
         "pvp_accuracy": 0.249,
         "accuracy": 0.249,
+        "pve_shots_hit_est": 18,
+        "shots_hit_est": 97,
+        "accuracy_est": 0.306,
+        "hits_est_source": "damage_events",
         "pvp_kills": 0,
         "pve_kills": 0,
         "pvp_deaths": 0,
         "pve_deaths": 0,
         "effective_pvp_kills": 0.0,
         "pvp_assists": 0,
-        "self_dealt": 256.8,
-        "self_received": 256.8,
+        "self_dealt": 117.4,
+        "self_received": 117.4,
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
@@ -2087,30 +2220,36 @@
         },
         "time_low_health_pct": 0.001,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 2.11
+        "hp_efficiency": 0.96
       },
       "assets": {
         "dealt": 0,
-        "received": 2348.0
+        "received": 1073.2
       },
       "weapon_breakdown": {
         "Craft Explosion (Hadean)": {
-          "dealt": 975.3,
-          "received": 256.8,
+          "dealt": 445.8,
+          "received": 117.4,
           "shots": 0,
           "hits": 0,
           "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0
+          "accuracy": 0,
+          "pve_hits_est": 0,
+          "hits_est": 0,
+          "accuracy_est": 0
         },
         "Particle Gun": {
-          "dealt": 1782.0,
+          "dealt": 814.5,
           "received": 0,
           "shots": 282,
           "hits": 54,
           "pvp_hits": 54,
           "self_hits": 0,
           "accuracy": 0.191,
+          "pve_hits_est": 15,
+          "hits_est": 69,
+          "accuracy_est": 0.245,
           "range_hist": {
             "pvp": [
               0,
@@ -2148,13 +2287,16 @@
           }
         },
         "Pulse (epulse)": {
-          "dealt": 330.0,
+          "dealt": 150.8,
           "received": 0,
           "shots": 35,
           "hits": 25,
           "pvp_hits": 25,
           "self_hits": 0,
           "accuracy": 0.714,
+          "pve_hits_est": 3,
+          "hits_est": 28,
+          "accuracy_est": 0.8,
           "range_hist": {
             "pvp": [
               0,
@@ -2234,13 +2376,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1305.3,
+          "dealt": 596.6,
           "shots": 35,
           "hits": 25,
           "pvp_hits": 25,
           "accuracy": 0.714,
           "pvp_accuracy": 0.714,
-          "dpm": 404.5,
+          "dpm": 184.9,
           "kd": null
         },
         {
@@ -2253,13 +2395,13 @@
           "pvp_deaths": 0,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 1782.0,
+          "dealt": 814.5,
           "shots": 282,
           "hits": 54,
           "pvp_hits": 54,
           "accuracy": 0.191,
           "pvp_accuracy": 0.191,
-          "dpm": 1051.0,
+          "dpm": 480.4,
           "kd": null
         },
         {
@@ -2285,271 +2427,307 @@
       "hit_targets": {
         "Sev": {
           "hits": 54,
-          "damage": 1430.0
+          "damage": 653.6
         },
         "Domakus": {
           "hits": 21,
-          "damage": 240.0
+          "damage": 109.7
         },
         "econchump": {
           "hits": 4,
-          "damage": 55.0
+          "damage": 25.1
         }
       }
     }
   ],
   "faction_totals": {
     "1": {
-      "player_dealt": 19634.6,
-      "pvp_dealt": 10584.7,
-      "pve_dealt": 9049.9,
-      "asset_dealt": 2407.9,
-      "total_dealt": 22042.5,
-      "player_received": 26094.6,
-      "pvp_received": 24963.0,
-      "pve_received": 1131.6,
-      "asset_received": 26729.4,
-      "total_received": 52824.0,
+      "player_dealt": 8974.7,
+      "pvp_dealt": 4838.1,
+      "pve_dealt": 4136.6,
+      "asset_dealt": 1100.6,
+      "total_dealt": 10075.3,
+      "player_received": 11927.5,
+      "pvp_received": 11410.2,
+      "pve_received": 517.2,
+      "asset_received": 12217.6,
+      "total_received": 24145.1,
       "shots": 1869,
       "hits": 376,
-      "accuracy": 0.201
+      "accuracy": 0.201,
+      "hits_est": 928,
+      "accuracy_est": 0.497
     },
     "2": {
-      "player_dealt": 52289.8,
-      "pvp_dealt": 24778.0,
-      "pve_dealt": 27511.8,
+      "player_dealt": 23900.9,
+      "pvp_dealt": 11325.7,
+      "pve_dealt": 12575.2,
       "asset_dealt": 0,
-      "total_dealt": 52289.8,
-      "player_received": 12229.1,
-      "pvp_received": 10399.7,
-      "pve_received": 1829.4,
-      "asset_received": 9727.1,
-      "total_received": 21956.2,
+      "total_dealt": 23900.9,
+      "player_received": 5589.8,
+      "pvp_received": 4753.6,
+      "pve_received": 836.2,
+      "asset_received": 4446.1,
+      "total_received": 10035.9,
       "shots": 2773,
       "hits": 712,
-      "accuracy": 0.257
+      "accuracy": 0.257,
+      "hits_est": 2172,
+      "accuracy_est": 0.783
     }
   },
   "rivalry_matrix": {
     "Domakus": {
-      "Lithium": 476.0,
-      "econchump": 1028.0,
-      "Cloaket": 3789.9,
-      "Darkvale": 3451.2
+      "Lithium": 217.6,
+      "econchump": 469.9,
+      "Cloaket": 1732.3,
+      "Darkvale": 1577.5
     },
     "Sev": {
-      "econchump": 1188.0,
-      "Cloaket": 6048.0
+      "econchump": 543.0,
+      "Cloaket": 2764.5
     },
     "Darkvale": {
-      "Nomad": 1760.0,
-      "Domakus": 1496.0,
-      "Cloaket": 242.0,
-      "The_Bylarge": 22.0
+      "Nomad": 804.5,
+      "Domakus": 683.8,
+      "Cloaket": 110.6,
+      "The_Bylarge": 10.1
     },
     "Cloaket": {
-      "Domakus": 3067.1,
-      "Sev": 897.6,
-      "The_Bylarge": 1100.0
+      "Domakus": 1401.9,
+      "Sev": 410.3,
+      "The_Bylarge": 502.8
     },
     "Lithium": {
-      "Domakus": 240.0,
-      "econchump": 55.0,
-      "Sev": 1430.0
+      "Domakus": 109.7,
+      "econchump": 25.1,
+      "Sev": 653.6
     },
     "Nomad": {
-      "econchump": 3734.9,
-      "Lithium": 2800.4,
-      "Darkvale": 933.6
+      "econchump": 1707.2,
+      "Lithium": 1280.0,
+      "Darkvale": 426.7
     },
     "econchump": {
-      "Nomad": 275.0
+      "Nomad": 125.7
     },
     "The_Bylarge": {
-      "Cloaket": 1216.0,
-      "Sev": 112.0
+      "Cloaket": 555.8,
+      "Sev": 51.2
     }
   },
   "top_rivalries": [
     {
       "a": "Cloaket",
       "b": "Sev",
-      "a_to_b": 897.6,
-      "b_to_a": 6048.0,
-      "total": 6945.6
+      "a_to_b": 410.3,
+      "b_to_a": 2764.5,
+      "total": 3174.8
     },
     {
       "a": "Cloaket",
       "b": "Domakus",
-      "a_to_b": 3067.1,
-      "b_to_a": 3789.9,
-      "total": 6857.0
+      "a_to_b": 1401.9,
+      "b_to_a": 1732.3,
+      "total": 3134.2
     },
     {
       "a": "Darkvale",
       "b": "Domakus",
-      "a_to_b": 1496.0,
-      "b_to_a": 3451.2,
-      "total": 4947.2
+      "a_to_b": 683.8,
+      "b_to_a": 1577.5,
+      "total": 2261.3
     },
     {
       "a": "Nomad",
       "b": "econchump",
-      "a_to_b": 3734.9,
-      "b_to_a": 275.0,
-      "total": 4009.9
+      "a_to_b": 1707.2,
+      "b_to_a": 125.7,
+      "total": 1832.9
     },
     {
       "a": "Lithium",
       "b": "Nomad",
       "a_to_b": 0,
-      "b_to_a": 2800.4,
-      "total": 2800.4
+      "b_to_a": 1280.0,
+      "total": 1280.0
     }
   ],
   "weapon_meta": [
     {
       "weapon": "Chain Gun",
       "odf": "chainvsr_c.odf",
-      "total_damage": 30632.0,
+      "total_damage": 14001.5,
       "total_shots": 1244,
       "total_hits": 425,
       "accuracy": 0.342,
+      "total_hits_est": 975,
+      "accuracy_est": 0.784,
       "users": 4
     },
     {
       "weapon": "Minigun",
       "odf": "minigun_c.odf",
-      "total_damage": 15495.0,
+      "total_damage": 7082.5,
       "total_shots": 1442,
       "total_hits": 229,
       "accuracy": 0.159,
+      "total_hits_est": 1139,
+      "accuracy_est": 0.79,
       "users": 4
     },
     {
       "weapon": "Particle Gun",
       "odf": "cphcg_c.odf",
-      "total_damage": 14257.0,
+      "total_damage": 6516.7,
       "total_shots": 1824,
       "total_hits": 349,
       "accuracy": 0.191,
+      "total_hits_est": 898,
+      "accuracy_est": 0.492,
       "users": 4
     },
     {
       "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
-      "total_damage": 3327.3,
+      "total_damage": 1520.9,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Craft Explosion (Hadean)",
       "odf": "xcarxpl_e.odf",
-      "total_damage": 2059.8,
+      "total_damage": 941.5,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 3
     },
     {
       "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
-      "total_damage": 1250.0,
+      "total_damage": 571.4,
       "total_shots": 17,
       "total_hits": 13,
       "accuracy": 0.765,
+      "total_hits_est": 13,
+      "accuracy_est": 0.765,
       "users": 2
     },
     {
       "weapon": "Prox Mine",
       "odf": "xminxplvsr.odf",
-      "total_damage": 1100.0,
+      "total_damage": 502.8,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Combat Laser (cphlas_c)",
       "odf": "cphlas_c.odf",
-      "total_damage": 900.0,
+      "total_damage": 411.4,
       "total_shots": 10,
       "total_hits": 2,
       "accuracy": 0.2,
+      "total_hits_est": 2,
+      "accuracy_est": 0.2,
       "users": 1
     },
     {
       "weapon": "Vehicle Explosion (Hadean)",
       "odf": "xvehxpl_e.odf",
-      "total_damage": 876.4,
+      "total_damage": 400.6,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
-      "total_damage": 622.1,
+      "total_damage": 284.4,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Pulse (tracer)",
       "odf": "tracer.odf",
-      "total_damage": 485.0,
+      "total_damage": 221.7,
       "total_shots": 70,
       "total_hits": 45,
       "accuracy": 0.643,
+      "total_hits_est": 45,
+      "accuracy_est": 0.643,
       "users": 1
     },
     {
       "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
-      "total_damage": 358.4,
+      "total_damage": 163.8,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Pulse (epulse)",
       "odf": "epulse.odf",
-      "total_damage": 330.0,
+      "total_damage": 150.8,
       "total_shots": 35,
       "total_hits": 25,
       "accuracy": 0.714,
+      "total_hits_est": 28,
+      "accuracy_est": 0.8,
       "users": 1
     },
     {
       "weapon": "Sign Explosion",
       "odf": "xsgnxpl.odf",
-      "total_damage": 120.0,
+      "total_damage": 54.9,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     },
     {
       "weapon": "Flame Mine (xfbseeke)",
       "odf": "xfbseeke.odf",
-      "total_damage": 56.9,
+      "total_damage": 26.0,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 2
     },
     {
       "weapon": "Combat Laser (xcplascar)",
       "odf": "xcplascar.odf",
-      "total_damage": 54.4,
+      "total_damage": 24.9,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
+      "total_hits_est": 0,
+      "accuracy_est": 0,
       "users": 1
     }
   ],
@@ -2640,7 +2818,7 @@
         0,
         0,
         0,
-        421.1,
+        192.5,
         0,
         0,
         0,
@@ -2654,7 +2832,7 @@
         0,
         0,
         0,
-        330.0,
+        150.8,
         0,
         0,
         0,
@@ -2664,12 +2842,12 @@
         0,
         0,
         0,
-        1430.0,
-        352.0,
+        653.6,
+        160.9,
         0,
         0,
         0,
-        554.1,
+        253.3,
         0
       ],
       "Domakus": [
@@ -2680,34 +2858,34 @@
         0,
         0,
         0,
-        308.0,
+        140.8,
         0,
         0,
         0,
-        187.0,
-        420.0,
-        1620.0,
-        3982.8,
-        4107.9,
-        260.0,
+        85.5,
+        192.0,
+        740.5,
+        1820.5,
+        1877.7,
+        118.8,
         0,
         0,
-        225.0,
-        0,
-        0,
-        0,
-        0,
+        102.8,
         0,
         0,
         0,
         0,
         0,
-        992.0,
-        616.0,
         0,
         0,
         0,
-        672.0,
+        0,
+        453.4,
+        281.6,
+        0,
+        0,
+        0,
+        307.2,
         0
       ],
       "The_Bylarge": [
@@ -2722,7 +2900,7 @@
         0,
         0,
         0,
-        460.0,
+        210.3,
         0,
         0,
         0,
@@ -2740,13 +2918,13 @@
         0,
         0,
         0,
-        1328.0,
+        607.0,
         0,
         0,
         0,
-        1728.0,
-        5412.0,
-        1428.0
+        789.8,
+        2473.7,
+        652.7
       ],
       "Sev": [
         0,
@@ -2761,7 +2939,7 @@
         0,
         0,
         0,
-        1188.0,
+        543.0,
         0,
         0,
         0,
@@ -2772,19 +2950,19 @@
         0,
         0,
         0,
-        622.1,
+        284.4,
         0,
         0,
         0,
         0,
-        2272.0,
-        3776.0,
+        1038.5,
+        1726.0,
         0,
         0,
         0,
         0,
-        648.0,
-        1560.0
+        296.2,
+        713.1
       ],
       "Cloaket": [
         0,
@@ -2799,24 +2977,24 @@
         0,
         0,
         0,
-        13.3,
+        6.1,
         0,
-        1978.3,
+        904.3,
         0,
-        13.6,
-        0,
-        0,
-        586.1,
-        290.4,
+        6.2,
         0,
         0,
+        267.9,
+        132.7,
         0,
         0,
         0,
         0,
         0,
-        2395.4,
-        1521.8,
+        0,
+        0,
+        1094.9,
+        695.6,
         0,
         0,
         0,
@@ -2837,17 +3015,17 @@
         0,
         0,
         0,
-        352.0,
-        154.0,
-        506.0,
-        1232.0,
+        160.9,
+        70.4,
+        231.3,
+        563.1,
         0,
         0,
         0,
         0,
         0,
         0,
-        715.0,
+        326.8,
         0,
         0,
         0,
@@ -2859,8 +3037,8 @@
         0,
         0,
         0,
-        1190.0,
-        161.0
+        543.9,
+        73.6
       ],
       "Nomad": [
         0,
@@ -2879,10 +3057,10 @@
         0,
         0,
         0,
-        1230.0,
-        2040.0,
-        2200.0,
-        1170.0,
+        562.2,
+        932.5,
+        1005.6,
+        534.8,
         0,
         0,
         0,
@@ -2890,15 +3068,15 @@
         0,
         0,
         0,
-        1408.0,
-        2326.9,
+        643.6,
+        1063.6,
         0,
         0,
         0,
         0,
-        1663.9,
-        5336.5,
-        1101.6
+        760.6,
+        2439.2,
+        503.5
       ],
       "econchump": [
         0,
@@ -2921,17 +3099,17 @@
         0,
         0,
         0,
-        370.0,
-        1870.0,
-        1925.0,
-        760.0,
+        169.1,
+        854.8,
+        879.9,
+        347.4,
         0,
         0,
         0,
         0,
-        187.0,
-        88.0,
-        238.4,
+        85.5,
+        40.2,
+        108.9,
         0,
         0,
         0,
@@ -2946,37 +3124,37 @@
         0,
         0,
         0,
-        421.1,
+        192.5,
         0,
         0,
         0,
         0,
         0,
         0,
-        365.3,
-        154.0,
-        2868.3,
-        1232.0,
-        178.6,
+        167.0,
+        70.4,
+        1311.1,
+        563.1,
+        81.6,
         0,
         0,
-        916.1,
-        660.4,
-        1974.2,
-        2640.0,
-        760.0,
+        418.7,
+        301.8,
+        902.4,
+        1206.7,
+        347.4,
         0,
         0,
         0,
         0,
-        2582.4,
-        3039.8,
-        590.4,
-        1754.7,
+        1180.4,
+        1389.5,
+        269.8,
+        802.1,
         0,
         0,
-        1744.1,
-        161.0
+        797.2,
+        73.6
       ],
       "2": [
         0,
@@ -2986,35 +3164,35 @@
         0,
         0,
         0,
-        308.0,
+        140.8,
         0,
         0,
         0,
-        647.0,
-        1608.0,
-        1620.0,
-        3982.8,
-        4107.9,
-        1490.0,
-        2040.0,
-        2200.0,
-        1395.0,
+        295.7,
+        735.0,
+        740.5,
+        1820.5,
+        1877.7,
+        681.1,
+        932.5,
+        1005.6,
+        637.6,
         0,
         0,
         0,
-        622.1,
+        284.4,
         0,
         0,
         0,
-        1408.0,
-        4598.9,
-        6096.0,
-        616.0,
+        643.6,
+        2102.1,
+        2786.4,
+        281.6,
         0,
         0,
-        3391.9,
-        12068.5,
-        4089.6
+        1550.4,
+        5516.3,
+        1869.3
       ]
     }
   },
@@ -3027,224 +3205,196 @@
         "v": "Lithium",
         "t0": 74.63,
         "t1": 75.93,
-        "dmg": 264.0
+        "dmg": 120.7
       },
       {
         "s": "Domakus",
         "v": "econchump",
         "t0": 117.97,
         "t1": 118.37,
-        "dmg": 187.0
+        "dmg": 85.5
       },
       {
         "s": "Sev",
         "v": "econchump",
         "t0": 124.77,
         "t1": 127.97,
-        "dmg": 1188.0
+        "dmg": 543.0
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 128.6,
         "t1": 130.7,
-        "dmg": 506.0
+        "dmg": 231.3
       },
       {
         "s": "Domakus",
         "v": "Cloaket",
         "t0": 143.3,
         "t1": 149.7,
-        "dmg": 2797.9
+        "dmg": 1278.9
       },
       {
         "s": "Cloaket",
         "v": "Domakus",
         "t0": 143.73,
         "t1": 149.73,
-        "dmg": 1533.3
+        "dmg": 700.8
       },
       {
         "s": "Darkvale",
         "v": "Domakus",
         "t0": 145.17,
         "t1": 156.77,
-        "dmg": 1496.0
+        "dmg": 683.8
       },
       {
         "s": "Darkvale",
         "v": "Cloaket",
         "t0": 146.93,
         "t1": 149.53,
-        "dmg": 242.0
+        "dmg": 110.6
       },
       {
         "s": "Domakus",
         "v": "Darkvale",
         "t0": 150.53,
         "t1": 156.77,
-        "dmg": 3451.2
+        "dmg": 1577.5
       },
       {
         "s": "Domakus",
         "v": "econchump",
         "t0": 165.33,
         "t1": 168.63,
-        "dmg": 260.0
-      },
-      {
-        "s": "Domakus",
-        "v": "econchump",
-        "t0": 191.87,
-        "t1": 192.6,
-        "dmg": 85.0
+        "dmg": 118.8
       },
       {
         "s": "Lithium",
         "v": "Domakus",
         "t0": 192.67,
         "t1": 195.33,
-        "dmg": 240.0
+        "dmg": 109.7
       },
       {
         "s": "Domakus",
         "v": "Lithium",
         "t0": 193.17,
         "t1": 195.33,
-        "dmg": 140.0
-      },
-      {
-        "s": "Lithium",
-        "v": "econchump",
-        "t0": 195.33,
-        "t1": 196.0,
-        "dmg": 55.0
+        "dmg": 64.0
       },
       {
         "s": "Nomad",
         "v": "econchump",
         "t0": 276.43,
         "t1": 279.3,
-        "dmg": 1408.0
+        "dmg": 643.6
       },
       {
         "s": "Cloaket",
         "v": "Domakus",
         "t0": 284.0,
         "t1": 286.83,
-        "dmg": 1533.9
+        "dmg": 701.1
       },
       {
         "s": "Nomad",
         "v": "econchump",
         "t0": 285.5,
         "t1": 288.4,
-        "dmg": 2326.9
+        "dmg": 1063.6
       },
       {
         "s": "Sev",
         "v": "Cloaket",
         "t0": 286.1,
         "t1": 296.53,
-        "dmg": 6048.0
+        "dmg": 2764.5
       },
       {
         "s": "Cloaket",
         "v": "Sev",
         "t0": 287.3,
         "t1": 288.53,
-        "dmg": 831.6
+        "dmg": 380.1
       },
       {
         "s": "econchump",
         "v": "Nomad",
         "t0": 289.33,
         "t1": 290.17,
-        "dmg": 275.0
-      },
-      {
-        "s": "Cloaket",
-        "v": "Sev",
-        "t0": 291.93,
-        "t1": 292.13,
-        "dmg": 66.0
+        "dmg": 125.7
       },
       {
         "s": "Lithium",
         "v": "Sev",
         "t0": 292.17,
         "t1": 299.63,
-        "dmg": 1430.0
+        "dmg": 653.6
       },
       {
         "s": "Domakus",
         "v": "Cloaket",
         "t0": 292.83,
         "t1": 294.23,
-        "dmg": 992.0
+        "dmg": 453.4
       },
       {
         "s": "The_Bylarge",
         "v": "Cloaket",
         "t0": 294.23,
         "t1": 296.53,
-        "dmg": 1216.0
+        "dmg": 555.8
       },
       {
         "s": "Cloaket",
         "v": "The_Bylarge",
         "t0": 295.43,
         "t1": 295.57,
-        "dmg": 1100.0
+        "dmg": 502.8
       },
       {
         "s": "The_Bylarge",
         "v": "Sev",
         "t0": 296.53,
         "t1": 297.0,
-        "dmg": 112.0
+        "dmg": 51.2
       },
       {
         "s": "Domakus",
         "v": "econchump",
         "t0": 301.2,
         "t1": 301.97,
-        "dmg": 496.0
-      },
-      {
-        "s": "Domakus",
-        "v": "Lithium",
-        "t0": 306.83,
-        "t1": 306.9,
-        "dmg": 40.0
+        "dmg": 226.7
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 338.33,
         "t1": 341.2,
-        "dmg": 2544.4
+        "dmg": 1163.0
       },
       {
         "s": "Nomad",
         "v": "Lithium",
         "t0": 343.57,
         "t1": 343.7,
-        "dmg": 256.0
+        "dmg": 117.0
       },
       {
         "s": "Darkvale",
         "v": "Nomad",
         "t0": 346.33,
         "t1": 353.0,
-        "dmg": 1254.0
+        "dmg": 573.2
       },
       {
         "s": "Nomad",
         "v": "Darkvale",
         "t0": 352.03,
         "t1": 353.03,
-        "dmg": 933.6
+        "dmg": 426.7
       }
     ],
     "structure_pairs": [
@@ -3255,7 +3405,7 @@
         "vname": "Resourcer",
         "t0": 114.83,
         "t1": 117.7,
-        "dmg": 460.0
+        "dmg": 210.3
       },
       {
         "s": "Domakus",
@@ -3264,7 +3414,7 @@
         "vname": "Resourcer",
         "t0": 125.77,
         "t1": 127.6,
-        "dmg": 420.0
+        "dmg": 192.0
       },
       {
         "s": "The_Bylarge",
@@ -3273,7 +3423,7 @@
         "vname": "Xenomator",
         "t0": 336.67,
         "t1": 350.17,
-        "dmg": 7116.0
+        "dmg": 3252.6
       },
       {
         "s": "Nomad",
@@ -3282,7 +3432,7 @@
         "vname": "Xenomator",
         "t0": 346.33,
         "t1": 352.23,
-        "dmg": 2304.0
+        "dmg": 1053.1
       },
       {
         "s": "Sev",
@@ -3291,7 +3441,7 @@
         "vname": "Xenomator",
         "t0": 349.1,
         "t1": 353.0,
-        "dmg": 2208.0
+        "dmg": 1009.2
       }
     ]
   },
@@ -3299,37 +3449,37 @@
     "by_player": {
       "Cloaket": {
         "dealt": 0,
-        "received": 23696.0
+        "received": 10831.1
       },
       "Darkvale": {
-        "dealt": 1919.6,
-        "received": 672.1
+        "dealt": 877.4,
+        "received": 307.2
       },
       "econchump": {
-        "dealt": 488.2,
-        "received": 13.3
+        "dealt": 223.2,
+        "received": 6.1
       },
       "Lithium": {
         "dealt": 0,
-        "received": 2348.0
+        "received": 1073.2
       },
       "Sev": {
         "dealt": 0,
-        "received": 9340.1
+        "received": 4269.2
       },
       "Domakus": {
         "dealt": 0,
-        "received": 387.0
+        "received": 176.9
       }
     },
     "by_faction": {
       "1": {
-        "dealt": 2407.9,
-        "received": 26729.4
+        "dealt": 1100.6,
+        "received": 12217.6
       },
       "2": {
         "dealt": 0,
-        "received": 9727.1
+        "received": 4446.1
       }
     }
   },
@@ -61469,17 +61619,17 @@
           "name": "Domakus",
           "steam64": "76561198006115793"
         },
-        "value": 8745.1,
+        "value": 3997.3,
         "value_format": "damage",
         "runner_up": {
           "name": "Nomad",
-          "value": 7468.9
+          "value": 3413.9
         },
         "delta_pct": 0.171,
         "narrative": "clear",
         "value_breakdown": {
           "top_victim": "Cloaket",
-          "top_victim_damage": 3789.9
+          "top_victim_damage": 1732.3
         }
       },
       {
@@ -61513,17 +61663,17 @@
           "name": "Cloaket",
           "steam64": "76561198025032941"
         },
-        "value": 11895.9,
+        "value": 5437.4,
         "value_format": "damage",
         "runner_up": {
           "name": "econchump",
-          "value": 6196.2
+          "value": 2832.2
         },
         "delta_pct": 0.92,
         "narrative": "dominant",
         "value_breakdown": {
           "top_tormentor": "Sev",
-          "top_tormentor_damage": 6048.0
+          "top_tormentor_damage": 2764.5
         }
       },
       {
@@ -61532,20 +61682,21 @@
         "icon": "bi-bullseye",
         "winner": {
           "type": "player",
-          "name": "Sev",
-          "steam64": "76561199653748651"
+          "name": "Nomad",
+          "steam64": "76561199066952713"
         },
-        "value": 0.482,
+        "value": 0.925,
         "value_format": "accuracy",
         "runner_up": {
-          "name": "Domakus",
-          "value": 0.354
+          "name": "econchump",
+          "value": 0.739
         },
-        "delta_pct": 0.362,
+        "delta_pct": 0.252,
         "narrative": "clear",
         "value_breakdown": {
-          "shots_hit": 224,
-          "shots_fired": 465
+          "shots_hit": 917,
+          "shots_fired": 991,
+          "estimated": true
         }
       },
       {
@@ -61566,7 +61717,8 @@
         "delta_pct": 0.301,
         "narrative": "clear",
         "value_breakdown": {
-          "accuracy": 0.18
+          "accuracy": 0.925,
+          "estimated": true
         }
       },
       {
@@ -61578,16 +61730,16 @@
           "name": "Darkvale",
           "steam64": "76561198136459671"
         },
-        "value": 1919.6,
+        "value": 877.4,
         "value_format": "damage",
         "runner_up": {
           "name": "econchump",
-          "value": 488.2
+          "value": 223.2
         },
-        "delta_pct": 2.932,
+        "delta_pct": 2.931,
         "narrative": "dominant",
         "value_breakdown": {
-          "personal_dealt": 4310.0
+          "personal_dealt": 1970.0
         }
       },
       {
@@ -61599,15 +61751,15 @@
           "a": "Cloaket",
           "b": "Sev"
         },
-        "value": 6945.6,
+        "value": 3174.8,
         "value_format": "damage",
         "value_breakdown": {
-          "a_to_b": 897.6,
-          "b_to_a": 6048.0
+          "a_to_b": 410.3,
+          "b_to_a": 2764.5
         },
         "runner_up": {
           "name": "Cloaket vs Domakus",
-          "value": 6857.0
+          "value": 3134.2
         },
         "delta_pct": 0.013,
         "narrative": "close"
