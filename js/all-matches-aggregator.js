@@ -388,15 +388,25 @@
     // a NUL separator; value = { a, b, matches, a_wins, b_wins, contested }.
     // We only update when both teams have a known commander in the match.
     const commanderPairs = new Map();
-    // faction_stats: per-team-slot faction picks + per-faction win/loss
-    // bookkeeping, keyed by canonical lowercase faction code ('i'/'e'/'f').
-    const factionByTeamSlot = { 1: { i: 0, e: 0, f: 0 }, 2: { i: 0, e: 0, f: 0 } };
+    // faction_stats: per-faction win/loss bookkeeping, keyed by canonical
+    // lowercase faction code ('i'/'e'/'f').
     const factionWinCounts  = { i: { wins: 0, losses: 0, determined: 0 },
                                 e: { wins: 0, losses: 0, determined: 0 },
                                 f: { wins: 0, losses: 0, determined: 0 } };
+    // matchups[row][col] = row faction's record against col. Both codes
+    // must be known. Diagonal is mirror games (wins stays 0; a percent
+    // there would be which team slot won). Off-diagonal pair shares games
+    // and the two wins add up to games.
+    const factionMatchups = {
+      i: { i: { wins: 0, games: 0 }, e: { wins: 0, games: 0 }, f: { wins: 0, games: 0 } },
+      e: { i: { wins: 0, games: 0 }, e: { wins: 0, games: 0 }, f: { wins: 0, games: 0 } },
+      f: { i: { wins: 0, games: 0 }, e: { wins: 0, games: 0 }, f: { wins: 0, games: 0 } },
+    };
     // meta_charts: per-map roll, duration histogram, player count histogram,
     // submitter histogram, matches-over-time (ISO week buckets).
-    const mapRows = new Map(); // map_file -> { count, wins_t1, wins_t2, contested, unclear, total_duration_sec }
+    // mapRows factions are cross-faction determined games only (same rule
+    // as matchup off-diagonal cells). count is every non-void game.
+    const mapRows = new Map();
     const durationBands = { under5: 0, '5to10': 0, '10to15': 0, '15plus': 0 };
     const playerCounts  = Object.create(null);
     const submitterCounts = new Map(); // submitter -> count
@@ -438,8 +448,23 @@
       // safely degrade (don't bump 'i'/'e'/'f' counters for unknown factions).
       const t1Faction = ((teamFactions['1'] || {}).code || '').toLowerCase() || null;
       const t2Faction = ((teamFactions['2'] || {}).code || '').toLowerCase() || null;
-      if (t1Faction && factionByTeamSlot[1][t1Faction] != null) factionByTeamSlot[1][t1Faction] += 1;
-      if (t2Faction && factionByTeamSlot[2][t2Faction] != null) factionByTeamSlot[2][t2Faction] += 1;
+      // Per-map roll for the Meta faction win-rate table. Created before
+      // the winner branch so a cross-faction game can credit both sides.
+      let mr = mapRows.get(m.map);
+      if (!mr) {
+        mr = {
+          count: 0,
+          total_duration_sec: 0,
+          factions: {
+            i: { wins: 0, games: 0 },
+            e: { wins: 0, games: 0 },
+            f: { wins: 0, games: 0 },
+          },
+        };
+        mapRows.set(m.map, mr);
+      }
+      mr.count += 1;
+      mr.total_duration_sec += m.duration_sec || 0;
       if (winningTeam === 1 || winningTeam === 2) {
         const winFaction = winningTeam === 1 ? t1Faction : t2Faction;
         const losFaction = winningTeam === 1 ? t2Faction : t1Faction;
@@ -451,21 +476,22 @@
           factionWinCounts[losFaction].losses     += 1;
           factionWinCounts[losFaction].determined += 1;
         }
+        // Known-vs-known only. A determined game with one unknown faction
+        // still moves win_counts above and stays out of the matrix, so the
+        // Meta matchup table and the Faction Win Rate bar do not add up.
+        if (winFaction && losFaction && factionMatchups[winFaction] && factionMatchups[losFaction]) {
+          if (winFaction === losFaction) {
+            factionMatchups[winFaction][winFaction].games += 1;
+          } else {
+            factionMatchups[winFaction][losFaction].wins += 1;
+            factionMatchups[winFaction][losFaction].games += 1;
+            factionMatchups[losFaction][winFaction].games += 1;
+            mr.factions[winFaction].wins += 1;
+            mr.factions[winFaction].games += 1;
+            mr.factions[losFaction].games += 1;
+          }
+        }
       }
-
-      // Per-map roll (used by Meta tab + Map Master highlight).
-      let mr = mapRows.get(m.map);
-      if (!mr) { mr = { count: 0, wins_t1: 0, wins_t2: 0, contested: 0, unclear: 0, total_duration_sec: 0 }; mapRows.set(m.map, mr); }
-      mr.count += 1;
-      mr.total_duration_sec += m.duration_sec || 0;
-      if (decidedBy === 'unclear')      mr.unclear  += 1;
-      else if (decidedBy === 'contested') mr.contested += 1;
-      else if (winningTeam === 1)       mr.wins_t1  += 1;
-      else if (winningTeam === 2)       mr.wins_t2  += 1;
-      // v15: draw / cancelled (attested, team null) fold into the
-      // unclear bucket so the documented invariant
-      // `count == wins_t1 + wins_t2 + contested + unclear` keeps holding.
-      else                              mr.unclear  += 1;
 
       // Duration / player-count / submitter / over-time histograms.
       durationBands[durationBand(m.duration_sec)] += 1;
@@ -1203,11 +1229,8 @@
     const mapsArr = Array.from(mapRows.entries()).map(([mapName, mr]) => ({
       map: mapName,
       count: mr.count,
-      wins_t1: mr.wins_t1,
-      wins_t2: mr.wins_t2,
-      contested: mr.contested,
-      unclear: mr.unclear,
       avg_duration_sec: mr.count > 0 ? r1(mr.total_duration_sec / mr.count) : 0,
+      factions: mr.factions,
     })).sort((a, b) => {
       if (b.count !== a.count) return b.count - a.count;
       return (a.map || '').toLowerCase().localeCompare((b.map || '').toLowerCase());
@@ -1234,7 +1257,7 @@
       careerBuckets: career,        // pid -> bucket
       keptNames,
       commanderRowsKept,
-      factionStats: { by_team_slot: factionByTeamSlot, win_counts: factionWinCounts },
+      factionStats: { win_counts: factionWinCounts },
       globalRivalries,
       elo,
       mapsArr,
@@ -1265,8 +1288,8 @@
         most_commanded_against: allPairs,
       },
       faction_stats: {
-        by_team_slot: factionByTeamSlot,
         win_counts:   factionWinCounts,
+        matchups:     factionMatchups,
       },
       meta_charts: {
         maps:              mapsArr,

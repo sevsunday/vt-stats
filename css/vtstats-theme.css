@@ -2486,6 +2486,29 @@ body::before {
     color: var(--kb-faction-f);
 }
 
+/* All Matches → Meta faction matchup table. Neutral cells: the number is
+   the whole read. Diagonal is mirror counts, not a win rate. */
+.vt-matchup-table th,
+.vt-matchup-table td {
+  vertical-align: middle;
+}
+.vt-matchup-cell {
+  min-width: 5.5rem;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+.vt-matchup-pct {
+  font-size: 1.05rem;
+  color: var(--kb-text-primary);
+}
+.vt-matchup-record {
+  font-size: 0.75rem;
+  color: var(--kb-text-muted);
+}
+.vt-matchup-mirror .vt-matchup-pct {
+  color: var(--kb-text-secondary);
+}
+
 /* Campod + Partial row badges (v2.5). Sit inside the Player Leaderboard
    "Player" cell next to the player name when the row is excluded from
    VTSR-T and career stats for one of three reasons:

@@ -2643,9 +2643,7 @@ Schema v3+ (attestation fields at v15; on pre-v15 output they're simply
 absent and consumers default them off). Always emitted. `team` and
 `loser` are `null` for `unclear` / `draw` / `cancelled` outcomes — which
 is what keeps no-winner outcomes out of every win-rate denominator (the
-aggregator's determined check requires `team === 1|2`); the aggregator's
-per-map rollup folds draw/cancelled into its `unclear` bucket to keep
-`count == wins_t1 + wins_t2 + contested + unclear` holding. The rest of
+aggregator's determined check requires `team === 1|2`). The rest of
 the block (including `evidence`, always inference-derived) is always
 present so renderers can read it without absence-checking each field.
 `inferred` preserves the raw inference verbatim whenever an attestation
@@ -3460,21 +3458,29 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
 
 ```json
 {
-  "by_team_slot": { "1": { "i": 32, "e": 16, "f": 16 }, "2": { "i": 33, "e": 6, "f": 25 } },
   "win_counts":   { "i": { "wins": 10, "losses": 10, "determined": 20 },
                     "e": { "wins": 2,  "losses": 1,  "determined": 3 },
-                    "f": { "wins": 5,  "losses": 6,  "determined": 11 } }
+                    "f": { "wins": 5,  "losses": 6,  "determined": 11 } },
+  "matchups":     { "i": { "i": { "wins": 0, "games": 4 },
+                           "e": { "wins": 18, "games": 29 },
+                           "f": { "wins": 7, "games": 12 } },
+                    "e": { "i": { "wins": 11, "games": 29 }, "e": { "wins": 0, "games": 2 }, "f": { "wins": 0, "games": 0 } },
+                    "f": { "i": { "wins": 5, "games": 12 }, "e": { "wins": 0, "games": 0 }, "f": { "wins": 0, "games": 1 } } }
 }
 ```
 
 Faction codes are lowercase (`i`/`e`/`f` = ISDF/Hadean/Scion), matching the pipeline's canonical letter codes on `match.team_factions`.
 
+`matchups[row][col]` is the row faction's record against the column faction. A game enters only when `winner.team` is 1 or 2 (draws, cancellations, and unclear games stay out; a contested game with a team winner counts) and both `team_factions` codes are known. Off-diagonal, the opposite cell shares `games` and the two `wins` add up to `games`. The diagonal is mirror games: `wins` stays 0 and the Meta tab shows the count, never a percent. A determined game with one unknown faction still moves `win_counts` and stays out of `matchups`, so the matchup table and the Faction Win Rate bar do not add up. The Meta tab hides a percent under 5 determined games. Picker-scoped with the rest of this block. Not a rating input.
+
 ### `meta_charts`
 
 ```json
 {
-  "maps":           [{ "map": "stredslopevsr.bzn", "count": 5, "wins_t1": 0, "wins_t2": 3,
-                       "contested": 0, "unclear": 2, "avg_duration_sec": 894.5 }, ...],
+  "maps":           [{ "map": "stredslopevsr.bzn", "count": 5, "avg_duration_sec": 894.5,
+                       "factions": { "i": { "wins": 2, "games": 3 },
+                                     "e": { "wins": 1, "games": 3 },
+                                     "f": { "wins": 0, "games": 0 } } }, ...],
   "duration_bands": { "under5": 6, "5to10": 9, "10to15": 17, "15plus": 32 },
   "player_counts":  { "10": 45, "8": 8, "6": 3, ... },
   "submitters":     [{ "submitter": "VTrider", "count": 64 }, ...],
@@ -3482,7 +3488,7 @@ Faction codes are lowercase (`i`/`e`/`f` = ISDF/Hadean/Scion), matching the pipe
 }
 ```
 
-`maps[].count = wins_t1 + wins_t2 + contested + unclear` always. ISO week ids follow `strftime("%G-W%V")` (the year is the ISO week-numbering year, not the calendar year).
+`maps[]` is sorted by `count` descending. `count` is every non-void game on that map. `factions[code]` is `{wins, games}` for that faction's record on the map against a different known faction: a game counts only when `winner.team` is 1 or 2 (draws, cancellations, and unclear games stay out; a contested game with a team winner counts) and the two faction codes differ. Mirror games and a game with one unknown faction stay out, so the three rates need not sum to 100% and `wins + losses` across factions is not `count`. The Meta tab shows the top 15 and hides a percent under 5 determined games. Picker-scoped. Not a rating input. The per-map page's own faction win-rate card also counts F9 community games and mirror games, so the two numbers can differ. ISO week ids follow `strftime("%G-W%V")` (the year is the ISO week-numbering year, not the calendar year).
 
 ### `career_highlights`
 

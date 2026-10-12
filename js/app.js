@@ -3599,7 +3599,7 @@
       const mc = data.meta_charts || {
         maps: [], duration_bands: {}, player_counts: {}, submitters: [], matches_over_time: [],
       };
-      const fs = data.faction_stats || { by_team_slot: {}, win_counts: {} };
+      const fs = data.faction_stats || { win_counts: {} };
       const mapNameResolver = (mapFile) => {
         const key = (mapFile || '').replace(/\.bzn$/i, '').toLowerCase();
         const reg = (mapRegistry && mapRegistry[key]) || null;
@@ -3612,9 +3612,8 @@
         }
         return (mapFile || '').replace(/\.bzn$/i, '');
       };
-      renderMetaMapsChart('meta-maps-canvas',                   mc.maps, mapNameResolver);
-      renderMetaFactionTeamSlot('meta-faction-team1-canvas',    fs.by_team_slot, 1);
-      renderMetaFactionTeamSlot('meta-faction-team2-canvas',    fs.by_team_slot, 2);
+      renderMetaFactionMaps(mc.maps, mapNameResolver);
+      renderMetaFactionMatchups(fs.matchups);
       renderMetaFactionWinrate('meta-faction-winrate-canvas',   fs.win_counts);
       renderMetaDurationHistogram('meta-duration-canvas',       mc.duration_bands);
       renderMetaPlayerCount('meta-playercount-canvas',          mc.player_counts);
@@ -3638,6 +3637,125 @@
 
     syncUrl(dashboardHistoryLive ? 'push' : 'replace');
     dashboardHistoryLive = true;
+  }
+
+  // All Matches → Meta. Row faction's record against the column faction.
+  // Under 5 determined games the percent is an em dash (same floor as
+  // commander Win %). Diagonal cells are mirror counts, never a percent.
+  const MATCHUP_MIN_GAMES = 5;
+  const MATCHUP_FACTIONS = [
+    { code: 'i', name: 'ISDF' },
+    { code: 'e', name: 'Hadean' },
+    { code: 'f', name: 'Scion' },
+  ];
+  const META_MAP_LIMIT = 15;
+
+  function matchupBadge(code, name) {
+    return `<span class="vt-faction-badge" data-faction-code="${code}">${esc(name)}</span>`;
+  }
+
+  // Off-diagonal matchup cell and a map's faction cell share this floor.
+  function matchupRateCell(wins, games) {
+    if (games < MATCHUP_MIN_GAMES) {
+      const noun = games === 1 ? 'game' : 'games';
+      const tip = `${games} determined ${noun}`;
+      return `<td class="vt-matchup-cell" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">
+        <div class="vt-mono vt-matchup-pct">&mdash;</div>
+      </td>`;
+    }
+    const losses = games - wins;
+    const pct = (wins / games * 100).toFixed(1);
+    return `<td class="vt-matchup-cell">
+      <div class="vt-mono vt-matchup-pct">${pct}%</div>
+      <div class="vt-matchup-record">${wins}\u2013${losses}</div>
+    </td>`;
+  }
+
+  function renderMetaFactionMatchups(matchups) {
+    const container = document.getElementById('meta-faction-matchups');
+    if (!container) return;
+    const grid = matchups || {};
+    const cellOf = (row, col) => {
+      const line = grid[row] || {};
+      const cell = line[col] || {};
+      return { wins: cell.wins || 0, games: cell.games || 0 };
+    };
+    let any = false;
+    for (const a of MATCHUP_FACTIONS) {
+      for (const b of MATCHUP_FACTIONS) {
+        if (cellOf(a.code, b.code).games > 0) any = true;
+      }
+    }
+    if (!any) {
+      container.innerHTML = '<p class="text-center mb-0" style="color:var(--kb-text-muted);">No determined matchups in the current scope.</p>';
+      ensureTooltips(document.getElementById('section-meta-faction-matchups'));
+      return;
+    }
+    const head = MATCHUP_FACTIONS.map(f => `<th class="text-center">${matchupBadge(f.code, f.name)}</th>`).join('');
+    const rows = MATCHUP_FACTIONS.map(row => {
+      const cells = MATCHUP_FACTIONS.map(col => {
+        const { wins, games } = cellOf(row.code, col.code);
+        if (row.code === col.code) {
+          return `<td class="vt-matchup-cell vt-matchup-mirror">
+            <div class="vt-mono vt-matchup-pct">${games}</div>
+            <div class="vt-matchup-record">mirrors</div>
+          </td>`;
+        }
+        return matchupRateCell(wins, games);
+      }).join('');
+      return `<tr><th class="text-start">${matchupBadge(row.code, row.name)}</th>${cells}</tr>`;
+    }).join('');
+    container.innerHTML = `<div class="table-responsive">
+      <table class="table table-sm align-middle text-center mb-0 vt-matchup-table">
+        <thead><tr><th></th>${head}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+    ensureTooltips(document.getElementById('section-meta-faction-matchups'));
+  }
+
+  // Top maps by game count. Each faction cell is that faction's win rate
+  // on the map against a different known faction. Three rates need not
+  // sum to 100%: each faction has its own denominator.
+  function renderMetaFactionMaps(maps, mapNameResolver) {
+    const container = document.getElementById('meta-maps-body');
+    if (!container) return;
+    const rows = (maps || []).slice(0, META_MAP_LIMIT);
+    if (!rows.length) {
+      container.innerHTML = '<p class="text-center mb-0" style="color:var(--kb-text-muted);">No maps in the current scope.</p>';
+      ensureTooltips(document.getElementById('section-meta-maps'));
+      return;
+    }
+    const head = MATCHUP_FACTIONS.map(f => `<th class="text-center">${matchupBadge(f.code, f.name)}</th>`).join('');
+    const body = rows.map(row => {
+      const raw = row.map || '';
+      const name = (mapNameResolver ? mapNameResolver(raw) : raw) || raw;
+      const slug = String(raw).replace(/\.bzn$/i, '').toLowerCase();
+      const label = slug
+        ? `<a class="vt-map-title-link" href="map/${encodeURIComponent(slug)}/" target="_blank" rel="noopener">${esc(name)}</a>`
+        : esc(name);
+      const fac = row.factions || {};
+      const cells = MATCHUP_FACTIONS.map(f => {
+        const cell = fac[f.code] || {};
+        return matchupRateCell(cell.wins || 0, cell.games || 0);
+      }).join('');
+      return `<tr>
+        <th class="text-start">${label}</th>
+        <td class="text-end vt-mono">${row.count || 0}</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+    container.innerHTML = `<div class="table-responsive">
+      <table class="table table-sm align-middle text-center mb-0 vt-matchup-table">
+        <thead><tr>
+          <th class="text-start">Map</th>
+          <th class="text-end">Matches</th>
+          ${head}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+    ensureTooltips(document.getElementById('section-meta-maps'));
   }
 
   function renderTimelineSection(data) {

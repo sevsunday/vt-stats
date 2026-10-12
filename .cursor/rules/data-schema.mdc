@@ -51,7 +51,7 @@ New v15 match fields: `match.roster` (raw PlayerInfo passthrough `[{steam64, slo
 3. Weaker inference (contested/unclear) defers to an attested team win (`decided_by: "attested"`) or draw (`decided_by: "draw"`).
 4. No usable attestation (pre-v3, `UNSPECIFIED`, or out-of-enum values like `IDCANCEL = 2` from ESCing the dialog — access via `getattr(header, "game_outcome", 0)`, v1/v2 descriptors have no such attribute) → inference verbatim, byte-identical to pre-v15.
 
-`decided_by` taxonomy: `"adjudicated"` (v16) / `"attested"` / `"clean_win"` / `"contested"` / `"unclear"` / `"draw"` / `"cancelled"`. New winner fields: `attested`, `disputed`, `agreement`, `inferred` (raw inference preserved whenever an attestation was present), `adjudicated` (v16 — human sign-off flag). Draw/cancelled carry `team: null` so they naturally stay out of every win-rate denominator (the aggregator's determined check requires `team === 1|2`); the aggregator's per-map rollup folds them into the `unclear` bucket to preserve the `count == wins_t1 + wins_t2 + contested + unclear` invariant.
+`decided_by` taxonomy: `"adjudicated"` (v16) / `"attested"` / `"clean_win"` / `"contested"` / `"unclear"` / `"draw"` / `"cancelled"`. New winner fields: `attested`, `disputed`, `agreement`, `inferred` (raw inference preserved whenever an attestation was present), `adjudicated` (v16 — human sign-off flag). Draw/cancelled carry `team: null` so they naturally stay out of every win-rate denominator (the aggregator's determined check requires `team === 1|2`).
 
 ## Human Outcome Adjudication (v16 — `match.schema_version` 16)
 

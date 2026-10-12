@@ -121,8 +121,8 @@ INSIGHT_BEST_COMMANDERS = 5
 INSIGHT_BEST_COMMANDERS_MIN = 3
 
 # Team-win decided_by values. Contested / draw / cancelled / unclear
-# stay out of blowout, closest-call, and commander win rate, matching
-# the Meta tab's wins_t1 / wins_t2 buckets.
+# stay out of blowout, closest-call, and commander win rate on the
+# map page. The Meta tab's faction win-rate table is a separate tally.
 _TEAM_WIN_DECIDED = frozenset({"clean_win", "attested", "adjudicated"})
 _FACTION_CODES = ("i", "e", "f")
 
@@ -562,7 +562,7 @@ def _empty_insights() -> dict:
 
 
 def _winner_bucket(winner: dict | None) -> str:
-    """Same partition as the All Matches Meta map chart:
+    """Partition a recorded match for the map-page insight block:
     t1 / t2 / contested / unclear. Draws and cancellations fold into
     unclear so the four buckets sum to the match count.
     """

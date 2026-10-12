@@ -3016,7 +3016,7 @@ Map browser pages are **picker-unaware** (mirrors VTSR-T leaderboard). The picke
 | Map Info Modal title | `#map-info-modal-title-link` wraps the title text; clicks open `/map/<slug>/` in a new tab (`target="_blank" rel="noopener"`) so the modal stays open. Wired in `renderMapInfoModal()` in `js/app.js`. |
 | Map Info Modal footer | New `#map-info-modal-page-link` `View full map page` button next to Close. Same `target="_blank"` semantics. Toggled `d-none` together with the title link when `meta.key` is empty. |
 | Match-info banner | New `#info-map-link` button next to `#info-raw-link`, wired in `renderMapBannerFields()`. Hidden via `d-none` when the match's map isn't in the registry (parallel to the `#info-map-thumb-btn` toggle). |
-| All Matches → Meta tab | `js/charts.js::renderMetaMapsChart()` gains an `onClick` handler that opens `map/<slug>/` in a new tab on bar click, plus an `onHover` cursor-pointer affordance. |
+| All Matches → Meta tab | `renderMetaFactionMaps()` in `js/app.js` links each map name to `map/<slug>/` in a new tab. |
 
 `.vt-map-title-link` styling lives in `css/vtstats-theme.css` (mirror of `.vt-odf-link`) so the dashboard picks it up without loading the map-browser stylesheet.
 

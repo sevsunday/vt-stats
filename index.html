@@ -1558,29 +1558,36 @@
           <div class="col-lg-12">
             <div class="card h-100" id="section-meta-maps">
               <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Top Maps (with win attribution)</h5>
+                <div class="d-flex align-items-center gap-2">
+                  <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Faction win rate by map</h5>
+                  <i class="bi bi-info-circle vt-col-info"
+                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                     title="&lt;strong&gt;Faction win rate by map&lt;/strong&gt;&lt;br&gt;Each row is a map. Each percent is that faction&#39;s win rate on the map against a different known faction. The other faction in that game takes the loss.&lt;br&gt;&lt;br&gt;Mirror games and a game with an unknown opponent are left out. Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;The 15 maps with the most games in the current picker are listed. This table follows the match picker. The map page&#39;s own win-rate card also counts community ledger games."></i>
+                </div>
                 <button class="btn btn-sm" data-expand="section-meta-maps" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
-              <div class="card-body"><div class="chart-container" style="min-height: 420px;"><canvas id="meta-maps-canvas"></canvas></div></div>
+              <div class="card-body" id="meta-maps-body"></div>
             </div>
           </div>
         </div>
         <div class="row g-4 mb-4">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-faction-team-slot">
+          <div class="col-12">
+            <div class="card h-100" id="section-meta-faction-matchups">
               <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-shield-shaded me-2"></i>Faction Picks by Team Slot</h5>
-                <button class="btn btn-sm" data-expand="section-meta-faction-team-slot" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body">
-                <div class="row">
-                  <div class="col-6"><div class="chart-container" style="height:260px;"><canvas id="meta-faction-team1-canvas"></canvas></div><div class="text-center small mt-2" style="color:var(--kb-text-muted);">Team 1</div></div>
-                  <div class="col-6"><div class="chart-container" style="height:260px;"><canvas id="meta-faction-team2-canvas"></canvas></div><div class="text-center small mt-2" style="color:var(--kb-text-muted);">Team 2</div></div>
+                <div class="d-flex align-items-center gap-2">
+                  <h5 class="mb-0"><i class="bi bi-grid-3x3 me-2"></i>Faction Matchups</h5>
+                  <i class="bi bi-info-circle vt-col-info"
+                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                     title="&lt;strong&gt;Faction matchups&lt;/strong&gt;&lt;br&gt;Each cell is that row faction&#39;s win rate against the column faction, in determined games where both factions are known. The opposite cell is the complement.&lt;br&gt;&lt;br&gt;The diagonal counts mirror games (both teams fielded the same faction). Those games have no win rate, because a percent there would only say which team slot won.&lt;br&gt;&lt;br&gt;Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;Draws, cancellations, unclear games, and a game with an unknown faction are left out. The Faction Win Rate bar still counts mirror games and a known faction against an unknown one, so the two cards do not add up.&lt;br&gt;&lt;br&gt;This table follows the match picker."></i>
                 </div>
+                <button class="btn btn-sm" data-expand="section-meta-faction-matchups" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
+              <div class="card-body" id="meta-faction-matchups"></div>
             </div>
           </div>
-          <div class="col-lg-6">
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-12">
             <div class="card h-100" id="section-meta-faction-winrate">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Faction Win Rate</h5>
