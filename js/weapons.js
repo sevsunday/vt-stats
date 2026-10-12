@@ -60,6 +60,9 @@
         // holding the Scenario weapon is never in here (that mount is `w`).
         lo: {},
     };
+    // Scenario lists only. Default off; ?vsr=1 or localStorage vt.wpn.vsrOnly.
+    let vsrOnly = false;
+
     const view = {
         // slot: the selected hardpoint group. virtual: the Not mounted chip is
         // selected instead (slot stays null), because `w` has no group here.
@@ -148,6 +151,34 @@
             if (hit) state.lo[hit.key] = hit.stem;
         });
         if (!state.w && !state.s && !state.t) Object.assign(state, DEFAULT_SCENARIO);
+        vsrOnly = readVsrPref(p);
+    }
+
+    function readVsrPref(params) {
+        if (params.get('vsr') === '1') return true;
+        try {
+            return localStorage.getItem('vt.wpn.vsrOnly') === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function writeVsrPref() {
+        try {
+            localStorage.setItem('vt.wpn.vsrOnly', vsrOnly ? '1' : '0');
+        } catch (e) {
+            // Private mode can reject the write; the URL still carries the choice.
+        }
+    }
+
+    function setVsrOnly(on) {
+        vsrOnly = !!on;
+        const toggle = document.getElementById('vsrOnlyToggle');
+        if (toggle) toggle.checked = vsrOnly;
+        writeVsrPref();
+        if (!ctx) return;
+        renderLists();
+        renderScenario();
     }
 
     function writeUrl() {
@@ -162,6 +193,7 @@
         if (state.t && state.sh) p.set('sh', state.sh);
         if (state.tab === 'matrix' || state.tab === 'range') p.set('tab', state.tab);
         if (state.cat) p.set('cat', state.cat);
+        if (vsrOnly) p.set('vsr', '1');
         const qs = p.toString();
         const next = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
         const cur = window.location.pathname + window.location.search + window.location.hash;
@@ -681,12 +713,48 @@
             || a.name.localeCompare(b.name) || a.f.key.localeCompare(b.f.key));
     }
 
+    let vsrIndexCache = null;
+
+    function vsrIndex() {
+        if (!vsrIndexCache) {
+            const sc = ctx.scope('vsr');
+            vsrIndexCache = {
+                ships: new Set(sc.ships),
+                buildings: new Set(sc.buildings),
+                pilots: new Set(sc.pilots),
+                weapons: new Set(sc.weapons),
+            };
+        }
+        return vsrIndexCache;
+    }
+
+    function clipVsrWeapons(stems) {
+        if (!vsrOnly) return stems;
+        const allowed = vsrIndex().weapons;
+        const out = new Set();
+        stems.forEach((stem) => { if (allowed.has(stem)) out.add(stem); });
+        return out;
+    }
+
+    function treeNote(kind, stem) {
+        if (!vsrOnly || !stem) return '';
+        const ix = vsrIndex();
+        const inside = kind === 'weapon'
+            ? ix.weapons.has(stem)
+            : kind === 'shooter'
+                ? (ix.ships.has(stem) || ix.pilots.has(stem))
+                : (ix.ships.has(stem) || ix.buildings.has(stem) || ix.pilots.has(stem));
+        return inside ? '' : '<p class="vt-wpn-tree-note">Not in the VSR build tree.</p>';
+    }
+
     function weaponRows(sh) {
         ensureSlot(sh);
         const offer = ctx.weaponStemsFor(sh);
         const filtering = fitFilter(sh);
+        const allowed = vsrOnly ? vsrIndex().weapons : null;
         const byPack = new Map();
         (offer.community || []).forEach((stem) => {
+            if (allowed && !allowed.has(stem)) return;
             if (offer.home.has(stem)) return;
             const pack = ctx.packOf(stem);
             if (!pack) return;
@@ -712,10 +780,10 @@
         // and category chips narrow it; the fit filter does not. A pressed
         // hardpoint narrows every section, including the library.
         return {
-            home: rowsFrom(offer.home, listed, filtering || slotOn),
-            other: filtering ? rowsFrom(offer.other, listed, true) : [],
+            home: rowsFrom(clipVsrWeapons(offer.home), listed, filtering || slotOn),
+            other: filtering ? rowsFrom(clipVsrWeapons(offer.other), listed, true) : [],
             community,
-            library: rowsFrom(offer.library || new Set(), listed, slotOn),
+            library: rowsFrom(clipVsrWeapons(offer.library || new Set()), listed, slotOn),
         };
     }
 
@@ -733,7 +801,7 @@
     }
 
     function unitList(kind) {
-        const sc = ctx.units();
+        const sc = vsrOnly ? ctx.scope('vsr') : ctx.units();
         const v = view[kind];
         let stems;
         if (kind === 'shooter') stems = sc.ships.concat(sc.pilots);
@@ -875,7 +943,8 @@
                 + '<span class="vt-wpn-tagrow"><span class="vt-wpn-tag">' + esc(CATEGORY_NAMES[sc.fam.category] || sc.fam.category || 'Other') + '</span>'
                 + '<span class="vt-wpn-tag ' + (v.isAssault ? 'is-assault' : 'is-combat') + '">' + (v.isAssault ? 'Assault' : 'Combat') + ' \u00b7 ' + esc(v.stem) + '</span>'
                 + sourceChip(source, true)
-                + tierBadge(v.damage.tier, true) + '</span></div></div>';
+                + tierBadge(v.damage.tier, true) + '</span></div></div>'
+                + treeNote('weapon', v.stem);
             return;
         }
         const stem = kind === 'shooter' ? state.s : state.t;
@@ -902,7 +971,8 @@
         box.innerHTML = '<div class="vt-wpn-selected">' + thumbMedia(info)
             + '<div class="vt-wpn-selected-main"><span class="vt-wpn-selected-name">' + esc(info.name) + '</span>'
             + '<span class="vt-wpn-stem vt-mono">' + odfLink(info.stem) + '</span>'
-            + '<span class="vt-wpn-tagrow">' + tags + '</span></div></div>';
+            + '<span class="vt-wpn-tagrow">' + tags + '</span></div></div>'
+            + treeNote(kind, info.stem);
     }
 
     function deploySwitch(kind, on) {
@@ -1897,6 +1967,11 @@
     }
 
     function wireShell() {
+        const vsrToggle = document.getElementById('vsrOnlyToggle');
+        if (vsrToggle) {
+            vsrToggle.checked = vsrOnly;
+            vsrToggle.addEventListener('change', () => setVsrOnly(vsrToggle.checked));
+        }
         document.querySelectorAll('[data-vt-wpn-tab]').forEach((btn) => {
             btn.addEventListener('shown.bs.tab', () => {
                 state.tab = btn.dataset.vtWpnTab;
