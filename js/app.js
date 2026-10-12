@@ -58,6 +58,11 @@
   const $playersSearch      = document.getElementById('match-picker-players-search');
   const $playersModeBtns    = $filtersBody && $filtersBody.querySelectorAll('[data-match-mode]');
   const $playersRoleBtns    = $filtersBody && $filtersBody.querySelectorAll('[data-role]');
+  const $playersToggle      = document.getElementById('match-picker-players-toggle');
+  const $playersPanel       = document.getElementById('match-picker-players-panel');
+  const $playersSummary     = document.getElementById('match-picker-players-summary');
+  const $facetFaction       = document.getElementById('match-picker-faction');
+  const $facetFactionVs     = document.getElementById('match-picker-faction-vs');
   // Bootstrap Modal instance (lazy-initialized on first trigger click). We
   // hold a reference so card-click handlers can programmatically dismiss.
   let pickerModalInstance = null;
@@ -98,7 +103,17 @@
     // Optional v2 key (no storage-key bump): client-side join against
     // data/external/match_videos.json. 'any' | 'yes' | 'no'.
     hasVod: 'any',
+    // Optional v2 keys (no storage-key bump). Manifest faction codes.
+    // `faction` is the first dropdown; `factionVs` is the second and is
+    // only meaningful once `faction` is a specific code. The pair is
+    // unordered — it does not map onto Team 1 / Team 2.
+    faction: 'any',                 // 'any' | 'i' | 'f' | 'e'
+    factionVs: 'any',               // 'any' | 'i' | 'f' | 'e'
   });
+  // i = ISDF, f = Scion, e = Hadean. Letters on the picker cards are I/S/H.
+  const FACTION_CODES = ['any', 'i', 'f', 'e'];
+  const FACTION_LETTER = { i: 'I', f: 'S', e: 'H' };
+  const FACTION_TITLE = { i: 'ISDF', f: 'Scion', e: 'Hadean' };
   let pickerState = DEFAULT_PICKER_STATE();
 
   const MATCH_TAB_SLUGS = {
@@ -148,6 +163,8 @@
   //   ?role=commander|thug (Role toggle; 'any' is default and omitted)
   //   ?sort=<picker-sort>  (e.g. duration-desc; 'date-desc' is default and omitted)
   //   ?vod=yes|no          (Has-VOD facet; 'any' is default and omitted)
+  //   ?fac=i|f|e           (first faction; 'any' is default and omitted)
+  //   ?vs=i|f|e            (second faction; omitted unless fac is set and vs is not any)
 
   function parseUrlState() {
     const p = new URLSearchParams(window.location.search);
@@ -177,6 +194,8 @@
         role:   p.get('role'),
         sort:   p.get('sort'),
         vod:    p.get('vod'),
+        fac:    p.get('fac'),
+        vs:     p.get('vs'),
       },
     };
   }
@@ -314,6 +333,10 @@
     if (ps.role && ps.role !== 'any')             params.set('role', ps.role);
     if (ps.sort && ps.sort !== 'date-desc')       params.set('sort', ps.sort);
     if (ps.hasVod && ps.hasVod !== 'any')         params.set('vod', ps.hasVod);
+    if (ps.faction && ps.faction !== 'any') {
+      params.set('fac', ps.faction);
+      if (ps.factionVs && ps.factionVs !== 'any') params.set('vs', ps.factionVs);
+    }
 
     const slug = getActiveTabSlug();
     if (slug && slug !== 'overview') params.set('tab', slug);
@@ -360,10 +383,10 @@
   // Picker query keys, in the order buildShareUrl() emits them.
   // `outcome` is retired (the facet was removed) and is deleted on sync
   // so a leftover `?outcome=` from an old link does not stick around.
-  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod'];
+  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod', 'fac', 'vs'];
 
   // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
-  // touches the eight picker keys. Existing non-picker params (match,
+  // touches the picker keys. Existing non-picker params (match,
   // filter, team, players, tab, t) in the URL are preserved as-is.
   //
   // Why bypass the live-sync gate: picker filters are deliberately
@@ -389,6 +412,10 @@
     if (ps.role && ps.role !== 'any')             cur.set('role', ps.role);
     if (ps.sort && ps.sort !== 'date-desc')       cur.set('sort', ps.sort);
     if (ps.hasVod && ps.hasVod !== 'any')         cur.set('vod', ps.hasVod);
+    if (ps.faction && ps.faction !== 'any') {
+      cur.set('fac', ps.faction);
+      if (ps.factionVs && ps.factionVs !== 'any') cur.set('vs', ps.factionVs);
+    }
 
     const qs = paramsToString(cur);
     const next = window.location.pathname + (qs ? '?' + qs : '');
@@ -801,11 +828,22 @@
     let leadersHtml = '';
     if (l1 || l2) {
       const leaderSpan = (name, side) => {
-        const winner = winSide === side;
-        const cls = 'vt-match-picker-card-leader vt-match-picker-card-leader--t' + side +
+        const winner = (winSide === 1 || winSide === 2) && winSide === side;
+        const fac = entry.team_factions && entry.team_factions[String(side)];
+        const code = fac && fac.code;
+        const letter = FACTION_LETTER[code] || '';
+        const factionName = FACTION_TITLE[code] || '';
+        const cls = 'vt-match-picker-card-leader' +
           (winner ? ' vt-match-picker-card-leader--winner' : '');
-        const title = winner ? ' title="Winner"' : '';
-        return `<span class="${cls}"${title}>${esc(name || '—')}</span>`;
+        const tip = factionName && winner ? factionName + ' · Winner'
+          : factionName ? factionName
+          : winner ? 'Winner'
+          : '';
+        const title = tip ? ` title="${esc(tip)}"` : '';
+        const mark = letter
+          ? `<span class="vt-match-picker-faction-mark" data-faction="${esc(code)}">${letter}</span>`
+          : '';
+        return `<span class="${cls}"${title}>${mark}${esc(name || '—')}</span>`;
       };
       leadersHtml = `
         <div class="vt-match-picker-card-leaders">
@@ -1187,6 +1225,24 @@
       if (state.hasVod === 'no' && has) return false;
     }
 
+    // Faction pair. Unordered: either team may hold either code. A single
+    // faction matches every game that includes it, mirrors included. Both
+    // codes must be the exact pair. A missing side is not that faction.
+    if (state.faction && state.faction !== 'any') {
+      const tf = entry.team_factions || {};
+      const codeOf = (side) => {
+        const row = tf[side];
+        return row && row.code ? row.code : '';
+      };
+      const codes = [codeOf('1'), codeOf('2')];
+      if (codes.indexOf(state.faction) < 0) return false;
+      if (state.factionVs && state.factionVs !== 'any') {
+        const have = codes.slice().sort().join('');
+        const want = [state.faction, state.factionVs].slice().sort().join('');
+        if (have !== want) return false;
+      }
+    }
+
     return true;
   }
 
@@ -1240,6 +1296,7 @@
     if (state.players.length) n++;
     if (state.sort && state.sort !== 'date-desc') n++;
     if (state.hasVod && state.hasVod !== 'any') n++;
+    if (state.faction && state.faction !== 'any') n++;
     return n;
   }
 
@@ -1342,7 +1399,7 @@
     // of the live-sync gate — picker filters are deliberately
     // user-configured global state and the user's mental model is "I
     // changed a filter, so the URL reflects it". `syncPickerUrl()`
-    // touches only the eight picker keys; non-picker params (match,
+    // touches only the picker keys; non-picker params (match,
     // filter, team, players, tab) stay whatever the gated `syncUrl()`
     // path last wrote. (When live-sync is on, the gated path keeps the
     // rest of the URL fresh too; when off, only picker bits update —
@@ -1406,7 +1463,10 @@
       role:         ['any', 'commander', 'thug'].includes(saved.role) ? saved.role : d.role,
       sort:         typeof saved.sort === 'string' ? saved.sort : d.sort,
       hasVod:       ['any', 'yes', 'no'].includes(saved.hasVod) ? saved.hasVod : d.hasVod,
+      faction:      FACTION_CODES.includes(saved.faction) ? saved.faction : d.faction,
+      factionVs:    FACTION_CODES.includes(saved.factionVs) ? saved.factionVs : d.factionVs,
     };
+    if (pickerState.faction === 'any') pickerState.factionVs = 'any';
   }
 
   function savePickerStateToStorage() {
@@ -1457,6 +1517,10 @@
     }
     if (['any', 'yes', 'no'].includes(u.vod)) {
       pickerState.hasVod = u.vod;
+    }
+    if (FACTION_CODES.includes(u.fac)) {
+      pickerState.faction = u.fac;
+      pickerState.factionVs = (u.fac !== 'any' && FACTION_CODES.includes(u.vs)) ? u.vs : 'any';
     }
   }
 
@@ -1519,6 +1583,26 @@
         btn.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
+    if (pickerState.faction === 'any') pickerState.factionVs = 'any';
+    if ($facetFaction) $facetFaction.value = pickerState.faction || 'any';
+    if ($facetFactionVs) {
+      $facetFactionVs.value = pickerState.factionVs || 'any';
+      $facetFactionVs.disabled = !pickerState.faction || pickerState.faction === 'any';
+    }
+    if ($playersSummary) {
+      const names = pickerState.players;
+      $playersSummary.textContent = !names.length ? ''
+        : names.length <= 2 ? names.join(', ')
+        : names[0] + ', ' + names[1] + ' +' + (names.length - 2);
+    }
+  }
+
+  function setPlayersPanelOpen(open) {
+    if (!$playersPanel || !$playersToggle) return;
+    $playersPanel.hidden = !open;
+    $playersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const row = $playersToggle.closest('.vt-match-picker-filter-row--players');
+    if (row) row.dataset.expanded = open ? 'true' : 'false';
   }
 
   function clearAllFilters() {
@@ -1668,6 +1752,35 @@
     });
   }
 
+  // --- Wiring: faction pair (unordered) ---
+
+  if ($facetFaction) {
+    $facetFaction.addEventListener('change', () => {
+      const v = $facetFaction.value;
+      pickerState.faction = FACTION_CODES.includes(v) ? v : 'any';
+      if (pickerState.faction === 'any') pickerState.factionVs = 'any';
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+  if ($facetFactionVs) {
+    $facetFactionVs.addEventListener('change', () => {
+      if ($facetFactionVs.disabled) return;
+      const v = $facetFactionVs.value;
+      pickerState.factionVs = FACTION_CODES.includes(v) ? v : 'any';
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+
+  // --- Wiring: Players disclosure (collapsed on each modal open) ---
+
+  if ($playersToggle) {
+    $playersToggle.addEventListener('click', () => {
+      setPlayersPanelOpen($playersToggle.getAttribute('aria-expanded') !== 'true');
+    });
+  }
+
   // --- Wiring: sort ---
 
   if ($sortSelect) {
@@ -1738,6 +1851,9 @@
       // Reflect aria-expanded on both triggers.
       if ($trigger) $trigger.setAttribute('aria-expanded', 'true');
       if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'true');
+      // The roster chip cloud starts collapsed on every open. Selected
+      // names stay on the toggle row via applyPickerStateToUI.
+      setPlayersPanelOpen(false);
     });
     $pickerModalEl.addEventListener('shown.bs.modal', () => {
       // Focus the search input + scroll active card into view.

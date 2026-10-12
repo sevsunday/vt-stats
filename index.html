@@ -1999,6 +1999,29 @@
                 </div>
               </div>
 
+              <!-- Faction pair. Unordered: the two selects are not Team 1 / Team 2.
+                   The second stays disabled until the first is a specific faction. -->
+              <div class="vt-match-picker-filter-row">
+                <span class="vt-match-picker-filter-label" id="match-picker-faction-label">Faction</span>
+                <div class="vt-match-picker-faction">
+                  <select id="match-picker-faction" class="form-select form-select-sm vt-match-picker-faction-select"
+                          aria-labelledby="match-picker-faction-label" aria-label="First faction">
+                    <option value="any">Any</option>
+                    <option value="i">ISDF</option>
+                    <option value="f">Scion</option>
+                    <option value="e">Hadean</option>
+                  </select>
+                  <span class="vt-match-picker-faction-vs" aria-hidden="true">vs</span>
+                  <select id="match-picker-faction-vs" class="form-select form-select-sm vt-match-picker-faction-select"
+                          aria-label="Second faction" disabled>
+                    <option value="any">Any</option>
+                    <option value="i">ISDF</option>
+                    <option value="f">Scion</option>
+                    <option value="e">Hadean</option>
+                  </select>
+                </div>
+              </div>
+
               <!-- Player count (multi-select dropdown). Empty = any count.
                    Options are the distinct active_player_count values. -->
               <div class="vt-match-picker-filter-row">
@@ -2025,10 +2048,16 @@
                    own search + Match-mode toggle (Any of these / All of these)
                    + Role toggle (Any / Commander / Thug). The role is derived
                    per-match: a name in `team_leaders` is the match's commander,
-                   anyone else in `players[]` is a thug. -->
-              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--players">
-                <span class="vt-match-picker-filter-label">Players</span>
-                <div class="vt-match-picker-players">
+                   anyone else in `players[]` is a thug. Collapsed by default;
+                   the toggle row keeps selected names visible. -->
+              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--players" data-expanded="false">
+                <button type="button" class="vt-match-picker-players-toggle" id="match-picker-players-toggle"
+                        aria-expanded="false" aria-controls="match-picker-players-panel">
+                  <span class="vt-match-picker-filter-label">Players</span>
+                  <span class="vt-match-picker-players-summary" id="match-picker-players-summary"></span>
+                  <i class="bi bi-chevron-down vt-match-picker-players-chevron" aria-hidden="true"></i>
+                </button>
+                <div class="vt-match-picker-players" id="match-picker-players-panel" hidden>
                   <div class="vt-match-picker-players-head">
                     <div class="input-group input-group-sm vt-match-picker-players-search">
                       <span class="input-group-text"><i class="bi bi-search"></i></span>
