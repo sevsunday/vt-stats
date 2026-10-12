@@ -65,7 +65,7 @@
 
   const DELTA_R_STEPS = [
     { term: 'eq-perf', title: 'Your match score', x: 8, y: 63,
-      body: 'Your 5 stats &mdash; kill rate, damage share, efficiency &amp; more &mdash; measured against everyone in the lobby and blended into one number.' },
+      body: 'Your 4 stats &mdash; kill rate, net damage, PvE share, and mobility &mdash; measured against everyone in the lobby and blended into one number.' },
     { term: 'eq-exp', title: 'The expected bar', x: 63, y: 63,
       body: 'What a player at your current rating was predicted to score against this exact lobby. The higher your rating, the higher the bar.' },
     { term: 'eq-gap', title: 'The surprise', x: 70, y: 5,
@@ -93,19 +93,18 @@
     + '\\htmlId{eq-alpha}{\\alpha} \\cdot \\htmlId{eq-rw}{R^{W}} \\;+\\; '
     + '(1 - \\alpha) \\cdot \\htmlId{eq-rt}{R^{T}}';
 
-  // The 5 axes (v2.12). Single source for the mixing board, the
+  // The 4 axes (v2.13). Single source for the mixing board, the
   // weights table, and the methodology modal table. Raw weights sum to
-  // 0.76; the pipeline renormalizes over present axes at runtime.
-  // Snipes, T-key usage, and the accuracy column are display stats.
-  // thug_accuracy left the composite: BulletHit never recorded
-  // non-human targets, so the axis scored economy fire as misses.
+  // 0.60; the pipeline renormalizes over present axes at runtime.
+  // Snipes, T-key usage, the accuracy column, and fight efficiency are
+  // display stats or retired axes. thug_accuracy left in v2.12 (BulletHit
+  // never recorded non-human targets). thug_efficiency left in v2.13
+  // (the damage-mix ratio scored winners lower).
   const AXES = [
     { key: 'net_damage_share', label: 'Net damage share', weight: 0.20,
       blurb: 'Damage you dealt minus took, vs the lobby total.' },
     { key: 'thug_kill_rate', label: 'Thug kill rate', weight: 0.20,
       blurb: 'Kills per minute (PvE kills count for half).' },
-    { key: 'thug_efficiency', label: 'Thug efficiency', weight: 0.16,
-      blurb: 'What % of your non-base damage hit live targets.' },
     { key: 'pve_share', label: 'PvE share', weight: 0.12,
       blurb: 'Damage on enemy bases, scavs, AI tanks.' },
     { key: 'mobility', label: 'Mobility', weight: 0.08,
@@ -364,7 +363,7 @@
       { hint: 'Press <strong>Next</strong> to meet the two dials.' });
   }
 
-  // The 5-axes mixing board: a horizontal weight bar whose segments are
+  // The 4-axes mixing board: a horizontal weight bar whose segments are
   // the step anchors (solo mode — one spotlight at a time). No KaTeX.
   function axesBoardHtml() {
     const totalW = AXES.reduce((s, a) => s + a.weight, 0);
@@ -376,7 +375,7 @@
         title="${esc(a.label)} \u00b7 weight ${a.weight}">${label}</span>`;
     }).join('');
     const board = `<div class="vt-axesboard" role="img"
-      aria-label="The 5 scoring axes sized by weight">${segs}</div>`;
+      aria-label="The 4 scoring axes sized by weight">${segs}</div>`;
     return buildStageBlock('axes', AXES_STEPS, board,
       { mode: 'solo', hint: 'Press <strong>Next</strong> to spotlight each axis.' });
   }
@@ -413,10 +412,10 @@
   function commanderSectionHtml() {
     return `<p class="mb-2">Commanders typically score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To offset this, the bar adjusts per axis on commander matches:</p>
       <ul class="mb-2">
-        <li><strong>Easier on 4 axes</strong> &middot; mobility, kill rate, damage share, efficiency &mdash; the role-driven shortfalls.</li>
+        <li><strong>Easier on 3 axes</strong> &middot; mobility, kill rate, damage share &mdash; the role-driven shortfalls.</li>
         <li><strong>Small bonus on PvE share</strong> &middot; commanders get a little extra credit for hitting enemy base / scavs.</li>
       </ul>
-      <p class="mb-0 text-muted small">Accuracy is not adjusted &mdash; commanders already sit near the lobby on it. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
+      <p class="mb-0 text-muted small">A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
   }
 
   // Worked example (real numbers from data/processed/elo_history.json:
@@ -482,9 +481,9 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The 5 axes</h6>
+        <h6>The 4 axes</h6>
         ${weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE kills and AI damage count at half-weight in the two &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters. Shot accuracy is a display stat, not a rating input: the collector never recorded hits on non-human targets, so that axis scored economy fire as misses.</div>
+        <div class="vt-katex-caveat">PvE kills count at half-weight on kill rate, so role players still get credit without crowding out pure dogfighters. Damage to bases and scavengers is its own axis (PvE share). Shot accuracy and fight efficiency are not rating inputs: accuracy scored economy fire as misses, and the efficiency ratio scored the winning side lower.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">

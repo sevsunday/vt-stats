@@ -115,7 +115,6 @@
   const AXIS_LABELS = {
     net_damage_share: 'net damage',
     thug_kill_rate: 'kill rate',
-    thug_efficiency: 'fight efficiency',
     pve_share: 'PvE work',
     mobility: 'mobility',
   };

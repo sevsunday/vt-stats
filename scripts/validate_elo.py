@@ -176,7 +176,6 @@ SYNTHETIC_WINNER_THRESHOLD = 0.85
 THUG_WEIGHTS_FALLBACK = {
     "net_damage_share":  0.20,
     "thug_kill_rate":    0.20,
-    "thug_efficiency":   0.16,
     "pve_share":         0.12,
     "mobility":          0.08,
 }

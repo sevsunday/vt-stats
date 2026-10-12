@@ -8184,11 +8184,6 @@
       formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
       desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
     },
-    thug_efficiency: {
-      label: 'Thug efficiency',
-      formula: '(pvp_dealt + alpha_pve * pve_to_AI) / max(1, total_dealt - structure_dealt)',
-      desc:    'Of your non-structure damage, how effectively did you fight? Structure damage flows entirely to pve_share; AI damage gets partial credit here.',
-    },
     pve_share: {
       label: 'PvE share',
       formula: 'pve_dealt / max(1, total_dealt)',
@@ -8279,9 +8274,9 @@
   // Commander-only axis means. Walks window.__vtEloHistory deltas and
   // averages each axis's z-score using ONLY rows where the player was a
   // commander. Commander rows are self-labeling via axis_contributions_meta
-  // (emitted only when v2.4 applied a role-fairness shift). For the four
-  // shifted axes (mobility, thug_kill_rate, net_damage_share,
-  // thug_efficiency) plus the locked shifted axis (pve_share), we pull
+  // (emitted only when v2.4 applied a role-fairness shift). For the three
+  // shifted axes (mobility, thug_kill_rate, net_damage_share)
+  // plus the locked shifted axis (pve_share), we pull
   // z_pre_shift so the v2.4 commander cushion is reversed - that cushion
   // exists to make VTSR-T fair across roles, but for commander-vs-commander
   // comparison it artificially flattens gaps. Axes with no commander

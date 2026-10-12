@@ -1,7 +1,7 @@
 """VTSR-T (VT Stats Rating - Thug): pipeline-side Thug ELO.
 
 Computes a per-player rating from chronological match data using a
-five-axis thug composite + ELO-style updates with loss aversion and a
+four-axis thug composite + ELO-style updates with loss aversion and a
 soft floor. Pure module (no I/O); writer lives in process_stats.py.
 
 The published rating is ``VTSR-T = alpha * R^W + (1 - alpha) * R^T``.
@@ -19,12 +19,12 @@ Per-match update:
 
 v2.4: per-match commander role adjustment. For each commander
 match-row, post-clip per-axis z-scores get shifted by the negation of a
-typical-commander baseline (then re-clipped to [-1, +1]). 4 audit-derived
+typical-commander baseline (then re-clipped to [-1, +1]). 3 audit-derived
 priors apply with shrinkage strength 30; 1 hand-tuned prior (pve_share)
 is locked (no shrinkage). v2.11 retired snipe_bonus and
 target_lock_pct; v2.12 retired thug_accuracy (the collector never
-recorded non-human BulletHits, so the axis scored economy fire as
-misses and was anti-predictive). They are no longer axes.
+recorded non-human BulletHits); v2.13 retired thug_efficiency (sign
+agreement 38.8%, CI entirely below 50%). They are no longer axes.
 Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
@@ -117,29 +117,30 @@ ELO_K_LOSS_AVERSION = 0.85
 ELO_RATING_FLOOR = 1000.0
 ELO_FLOOR_TAPER_WINDOW = 150.0
 
-# Fractional weight for PvE work in the two remaining thug axes
-# (thug_kill_rate, thug_efficiency). PvE damage / kills count at this
-# fraction of equivalent PvP work. Lobby z-scoring still rewards
-# exceptional PvE on its own. Surfaced in elo_current.json for
-# auditability; tunable without a schema bump. v2.12 retired
-# thug_accuracy, which used to be the third alpha-blended axis.
+# Fractional weight for PvE kills on thug_kill_rate, the only axis that
+# still uses it. PvE kills count at this fraction of equivalent PvP
+# kills. Lobby z-scoring still rewards exceptional PvE on pve_share.
+# Surfaced in elo_current.json for auditability; tunable without a
+# schema bump. v2.12 retired thug_accuracy and v2.13 retired
+# thug_efficiency, which used to share this constant.
 ALPHA_PVE = 0.5
 
-# Thug composite weights (v2.12: five axes). v2.11 retired snipe_bonus
+# Thug composite weights (v2.13: four axes). v2.11 retired snipe_bonus
 # and target_lock_pct. v2.12 retired thug_accuracy: BulletHit requires
 # both shooter and victim to be players, so rounds into extractors were
-# scored as misses and the axis was anti-predictive (sign agreement
-# 39.5%). The function _thug_accuracy_lobby stays for the Phase 3
-# candidate on reconstructed hits. Snipes stay a per-match feed and
-# highlight; T-key usage and the accuracy column are display stats,
-# never rating inputs. The raw dict sums to 0.76.
+# scored as misses (sign agreement 39.5%). v2.13 retired thug_efficiency:
+# the damage-mix ratio scored winners lower (sign agreement 38.8%, CI
+# entirely below 50%, including on v4). _thug_accuracy_lobby stays for
+# the reconstructed-hits candidate. _thug_efficiency_lobby stays
+# uncalled so the retirement memo's formula remains reproducible; it is
+# not a re-admit candidate. Snipes, T-key usage, and the accuracy column
+# are display stats, never rating inputs. The raw dict sums to 0.60.
 # compute_performance_index() always renormalizes available-axis weights
 # at runtime (`weights[a] = THUG_WEIGHTS[a] / sum(available)`). Per-row
 # inline comments describe what each axis measures.
 THUG_WEIGHTS = {
     "net_damage_share":  0.20,   # damage you dealt minus what you took, vs lobby total
     "thug_kill_rate":    0.20,   # (pvp_kills + ALPHA_PVE * pve_kills) / minutes
-    "thug_efficiency":   0.16,   # (pvp_dealt + α * pve_to_AI) / max(1, total - structure)
     "pve_share":         0.12,   # pve_dealt / total_dealt (asset disruption)
     "mobility":          0.08,   # activity_score from positioning data
 }
@@ -177,10 +178,10 @@ COMMANDER_AXIS_PRIOR = {
     # ---- Audit-derived structural penalty relief (use shrinkage strength 30).
     # Commanders are tied to base / building / not in dedicated combat ships,
     # so we don't ding them as hard for the natural commander shortfall.
+    # thug_efficiency (-0.106) left with the axis in v2.13.
     "mobility":         -0.488,
     "thug_kill_rate":   -0.164,
     "net_damage_share": -0.131,
-    "thug_efficiency":  -0.106,
 
     # ---- Hand-tuned: PvE reward boost (LOCKED, no shrinkage).
     # Seed-era audit said +0.111 (commanders naturally do more PvE). We
@@ -201,9 +202,11 @@ COMMANDER_AXIS_PRIOR = {
     "pve_share":        -0.05,
 
     # ---- Omitted.
+    # thug_efficiency left the composite in v2.13 (sign agreement 38.8%;
+    # see critique/decisions/thug-efficiency-retirement.md).
     # thug_accuracy left the composite in v2.12 (collector never recorded
     # non-human BulletHits; the axis scored economy fire as misses).
-    # snipe_bonus and target_lock_pct left in v2.11. None of the three
+    # snipe_bonus and target_lock_pct left in v2.11. None of them
     # are axes.
 }
 
@@ -375,13 +378,18 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # `axis_means`, and `axis_contributions` now carry 6 keys. The locked
 # commander prior on `target_lock_pct` is gone; `pve_share` stays locked.
 # Ratings move, so **pre-v15 `peak_vtsr` is no longer comparable**.
-# v16 (current) = v2.12 accuracy-axis retirement. `thug_accuracy` leaves
+# v16 = v2.12 accuracy-axis retirement. `thug_accuracy` leaves
 # the composite. The collector's BulletHit gate requires both shooter and
 # victim to be players, so the axis scored rounds into extractors as
 # misses and was anti-predictive. Output shape: `weights`, `axis_means`,
 # and `axis_contributions` carry 5 keys. Ratings move, so
 # **pre-v16 `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 16
+# v17 (current) = v2.13 efficiency-axis retirement. `thug_efficiency`
+# leaves the composite. The damage-mix ratio scored the winning side
+# lower (sign agreement 38.8%, CI entirely below 50%). Output shape:
+# `weights`, `axis_means`, and `axis_contributions` carry 4 keys.
+# Ratings move, so **pre-v17 `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 17
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +798,12 @@ def _thug_efficiency_lobby(lobby: list[dict]) -> list[float]:
     Where ``pve_to_AI ≈ pve_dealt - structure_dealt`` (mobile AI damage).
     Structure-busters' work is rewarded via ``pve_share`` instead of
     diluting their efficiency score here.
+
+    v2.13: not called from ``compute_performance_index``. Sign agreement
+    on determined matches was 38.8% (Wilson CI entirely below 0.50),
+    including on v4 where ``structure_dealt`` is real. Kept so the formula
+    in ``critique/decisions/thug-efficiency-retirement.md`` stays
+    reproducible. Not a re-admit candidate.
     """
     out = []
     for p in lobby:
@@ -1018,10 +1032,11 @@ def compute_performance_index(
     # Per-axis raw values keyed by axis name; None entries trigger weight redistribution.
     # v2.12: thug_accuracy is not assembled. _thug_accuracy_lobby remains
     # for the reconstructed-hits candidate (validate_elo.py §21).
+    # v2.13: thug_efficiency is not assembled. _thug_efficiency_lobby
+    # remains uncalled (forensic formula only; not a re-admit candidate).
     raw: dict[str, list[float] | None] = {
         "net_damage_share": _net_damage_share_lobby(lobby),
         "thug_kill_rate":   _thug_kill_rate_lobby(lobby, minutes),
-        "thug_efficiency":  _thug_efficiency_lobby(lobby),
         "pve_share":        _pve_share_lobby(lobby),
         "mobility":         _mobility_lobby(lobby, pos_players),
     }

@@ -772,7 +772,7 @@
     window.location.href = u.pathname + (u.search || '') + (u.hash || '');
   }
 
-  // ---- VTSR-T axes (the five composite axes the rating is built on) ---
+  // ---- VTSR-T axes (the four composite axes the rating is built on) ---
   //
   // Distinct from RADAR_AXIS_LABELS in charts-radar.js: those are the
   // career_stats-derived visualization axes (All Matches / per-match
@@ -784,7 +784,6 @@
   const VTSR_AXES = [
     { key: 'net_damage_share', label: 'Net Damage Share', icon: 'bi-fire' },
     { key: 'thug_kill_rate',   label: 'Thug Kill Rate',   icon: 'bi-crosshair' },
-    { key: 'thug_efficiency',  label: 'Thug Efficiency',  icon: 'bi-speedometer' },
     { key: 'pve_share',        label: 'PvE Share',        icon: 'bi-building' },
     { key: 'mobility',         label: 'Mobility',         icon: 'bi-arrows-move' },
   ];
@@ -934,10 +933,6 @@
     thug_kill_rate: {
       head: 'You\u2019re closing fewer kills per minute than peers.',
       body: 'This is (PvP kills + 0.5 \u00d7 PvE kills) divided by total match minutes \u2014 dying or sitting back hurts it because the denominator keeps ticking. Close the distance on enemies and follow through on damaged targets so they don\u2019t escape to heal up.',
-    },
-    thug_efficiency: {
-      head: 'Your shots aren\u2019t landing on mobile units.',
-      body: 'This is the share of your damage that landed on humans or mobile AI. Structure damage (hitting recyclers, factories, turrets, etc.) is excluded from both sides \u2014 that work is rewarded on PvE Share instead, not here. You climb this axis by missing fewer shots, fleeing fights without dying, and focusing fire on one target rather than spreading damage across multiple enemies that all escape. If you aren\u2019t a big dogfighter, focus on PvE Share and Net Damage Share rather than this one.',
     },
     pve_share: {
       head: 'You\u2019re not doing a lot of damage to non-human stuff.',

@@ -45,10 +45,6 @@
       label: 'Thug kill rate',
       desc: 'Kills per minute (PvE kills count at half). How often you converted fights.',
     },
-    thug_efficiency: {
-      label: 'Thug efficiency',
-      desc: 'How much of your non-structure damage landed in actual fights.',
-    },
     pve_share: {
       label: 'PvE share',
       desc: 'Share of your damage that hit enemy buildings and AI — economy disruption.',
@@ -62,7 +58,6 @@
   const MATCH_ELO_COPY = {
     net_damage_share: { noun: 'net damage' },
     thug_kill_rate: { noun: 'kill rate' },
-    thug_efficiency: { noun: 'fight efficiency' },
     pve_share: { noun: 'PvE work' },
     mobility: { noun: 'mobility' },
   };

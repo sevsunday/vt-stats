@@ -13,7 +13,7 @@
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
  *                             example (from the shared js/vtsr-explainers.js).
- *   The 5 axes              — annotated mixing-board + weights table.
+ *   The 4 axes              — annotated mixing-board + weights table.
  *   Commanders & fairness   — the fairness rules as plain-language cards.
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
@@ -295,11 +295,6 @@
       label: 'Thug kill rate',
       formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
       desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
-    },
-    thug_efficiency: {
-      label: 'Thug efficiency',
-      formula: '(pvp_dealt + alpha_pve * pve_to_AI) / max(1, total_dealt - structure_dealt)',
-      desc:    'Of your non-structure damage, how effectively did you fight? Structure damage flows entirely to pve_share; AI damage gets partial credit here.',
     },
     pve_share: {
       label: 'PvE share',
@@ -1376,7 +1371,7 @@
   }
 
   // ----------------------------------------------------------------------
-  // Tab: The 5 axes.
+  // Tab: The 4 axes.
   // ----------------------------------------------------------------------
 
   function renderAxesTab() {
@@ -1399,7 +1394,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 5 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
+        <p class="mb-1">These 4 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;

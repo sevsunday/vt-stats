@@ -2173,34 +2173,20 @@ The rookie curve ($K \approx 52$ decaying toward $K \approx 12$–16 settled) mi
 
 ### 13.4 Performance index
 
-Six thug axes (exported as `THUG_WEIGHTS` in `scripts/elo.py`). v2.11 removed `snipe_bonus` and `target_lock_pct` (v2.10 had cut them to 0.005 and left them visible). The **raw weights sum to 0.91, NOT 1.00** — they are renormalized over the axes present in each lobby at runtime (`weights[a] = THUG_WEIGHTS[a] / \sum_{\text{available}} w`):
+Four thug axes (exported as `THUG_WEIGHTS` in `scripts/elo.py`, v2.13). v2.11 removed `snipe_bonus` and `target_lock_pct`. v2.12 removed `thug_accuracy` (§13.7.7). v2.13 removed `thug_efficiency` (§13.7.8). The **raw weights sum to 0.60, NOT 1.00** — they are renormalized over the axes present in each lobby at runtime (`weights[a] = THUG_WEIGHTS[a] / \sum_{\text{available}} w`), so the effective shares are net damage 33.3%, kill rate 33.3%, PvE share 20%, mobility 13.3%:
 
 | Axis | Weight | Per-match metric (before z-score) |
 |---|---|---|
 | `net_damage_share` | 0.20 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
 | `thug_kill_rate`   | 0.20 | $(\text{effective\_pvp\_kills} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_kills}) / \text{minutes\_played}$ (v2.9; was raw `pvp_kills` pre-v2.9 — see §13.4.1) |
-| `thug_efficiency`  | 0.16 | $(\text{pvp\_dealt} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_to\_AI}) / \max(1, \text{total\_dealt} - \text{structure\_dealt})$ |
-| `thug_accuracy`    | 0.15 | weapon-normalized hit-rate ratio vs lobby (see formula below) |
 | `pve_share`        | 0.12 | $\text{pve\_dealt} / \max(1, \text{total\_dealt})$ — damage to enemy non-human assets (structures + mobile AI) as share of total (omit axis if lobby has zero PvE damage) |
 | `mobility`         | 0.08 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
 
-Direct-dogfight axes (`thug_kill_rate + thug_accuracy + thug_efficiency`) total **0.51** of the raw weight; the asset-disruption axis (`pve_share`) is **0.12**; `net_damage_share + mobility` total **0.28**. Snipes and T-key usage are not axes (v2.11, §13.7.6).
+**`ALPHA_PVE = 0.5`** (locked module constant in `scripts/elo.py`, surfaced as `alpha_pve` in `elo_current.json`). PvE kills on `thug_kill_rate` count at half the weight of equivalent PvP kills. `pve_share` credits non-human damage on its own axis. Tunable post-ship without a schema bump.
 
-**`ALPHA_PVE = 0.5`** (locked module constant in `scripts/elo.py`, surfaced as `alpha_pve` in `elo_current.json`). PvE work in the three "thug" axes counts at half the weight of equivalent PvP work — a nonzero floor so role players doing PvE work get credit, with PvP retaining the higher signal. Lobby z-scoring still naturally rewards exceptional PvE — a player who does dramatically more PvE damage than peers z-scores high on `pve_share` and `thug_efficiency` simultaneously without needing a separate "PvE excellence" axis. Tunable post-ship without a schema bump.
+**`thug_accuracy`** left the composite in v2.12. The weapon-normalized formula is recorded in §13.7.7. `_thug_accuracy_lobby` stays in `scripts/elo.py` for the reconstructed-hits candidate and is not called from `compute_performance_index`.
 
-**`thug_accuracy`** (weapon-normalized): for each player $p$ and each weapon $w$ that $p$ fired,
-
-$$
-\text{thug\_hits}_{p,w} = \text{pvp\_hits}_{p,w} + \alpha_{\mathrm{PvE}} \cdot (\text{hits}_{p,w} - \text{pvp\_hits}_{p,w})
-$$
-
-$$
-\text{pwa}_p = \frac{\sum_w \dfrac{\text{thug\_hits}_{p,w} / \text{shots}_{p,w}}{\text{thug\_hits}_w / \text{shots}_w} \cdot \dfrac{\text{shots}_{p,w}}{\text{shots}_p}}{\sum_w \dfrac{\text{shots}_{p,w}}{\text{shots}_p}}
-$$
-
-(weapons with no lobby signal are dropped; `used_weight` renormalizes). Output is a positive number per player; lobby z-score handles centering. Robust to weapon-mix bias — sniper mains aren't punished for the rifle's natural lower hit rate.
-
-**`thug_efficiency`** (was `pvp_share` in v2.2): the alpha-blended numerator credits PvE-to-AI damage at $\alpha$ weight; the denominator excludes structure damage so a structure-buster's economy work flows entirely to `pve_share` rather than diluting their efficiency score. Where `pve_to_AI ≈ pve_dealt - structure_dealt` (mobile AI damage, excluding world props which are negligible after the sentinel filter).
+**`thug_efficiency`** left the composite in v2.13. The ratio was $(\text{pvp\_dealt} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_to\_AI}) / \max(1, \text{total\_dealt} - \text{structure\_dealt})$, with `pve_to_AI ≈ pve_dealt - structure_dealt`. Sign agreement and the decision not to re-admit it are in §13.7.8 and `critique/decisions/thug-efficiency-retirement.md`. `_thug_efficiency_lobby` stays uncalled.
 
 **`pve_share`** (was `structure_share` in v2.2): broadened from buildings-only to all enemy non-human damage — covers structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`, which is already `total_dealt - pvp_dealt` and excludes player-owned-AI damage by construction. Returns `None` when no player in the lobby dealt PvE damage (axis-missing → weight redistribution).
 
@@ -2597,6 +2583,16 @@ Keying on the *canonical* rating (not the lifted one) is the load-bearing stabil
 **Damage normalization.** Before collector commit `103284d` (2026-08-30), each damage event was written once per game world. `r = DD_pvp / BH_pvp` is 1.0 on later v4 matches and about 2.15 before that. `match.event_calibration.damage_scale` is `1/r` when `r >= 1.5`. It is applied after the sentinel filter and in the timeline recompute. See `critique/decisions/damage-multiworld-dedup.md`.
 
 **Reconstructed hits.** `pve_hits_est = min(non-human damage events / r, shots − human hits − self hits)`. `accuracy_est` is that total over rounds fired. Human hits stay exact. The UI marks the estimate with `~`. `PIPELINE_VERSION 55 → 56`, `match.schema_version 31 → 32`.
+
+### 13.7.8 v2.13 — efficiency axis retired
+
+**Problem.** `thug_efficiency` is `(pvp_dealt + 0.5 * (pve_dealt − structure_dealt)) / max(1, dealt − structure_dealt)`. It was 0.16 of the raw weight sum 0.76, about 21% of the index. Spending damage on scavengers and bases lowers the ratio versus pure player damage, so the winning side scored lower on it. Stored sign agreement on 188 determined matches was 38.8% (Wilson CI 32.2–46.0%, mean post-clip gap −0.069). A raw-z recomputation on the same lobbies matches the rate and puts the mean gap at −0.14. On v4, where `structure_dealt` is real, agreement is 38.6% on 101 matches (CI 29.7–48.4%). On v1, where `structure_dealt` is always 0, it is 26.8% on 41 matches. The ranking is unrelated to volume (Spearman versus net damage −0.04).
+
+**The rating change.** `thug_efficiency` leaves `THUG_WEIGHTS`, `compute_performance_index`, and `COMMANDER_AXIS_PRIOR` (the −0.106 shrinking prior leaves with it). Four axes remain and the raw dict sums to **0.60**. Runtime renormalization gives net damage and kill rate 33.3% each, PvE share 20%, and mobility 13.3%. `ALPHA_PVE` stays 0.5 and applies only to `thug_kill_rate`. `pve_share` still credits every point of non-human damage. `ELO_SCHEMA_VERSION 16 → 17`. No `PIPELINE_VERSION` or `match.schema_version` bump. **Pre-v17 `peak_vtsr` is no longer comparable.** `_thug_efficiency_lobby` stays in `scripts/elo.py` and is not called. It is not a re-admit candidate. Memo: `critique/decisions/thug-efficiency-retirement.md`.
+
+**Damage per minute was not added.** Lobby z-scoring cancels the shared match clock, so damage per minute is damage dealt. That ranking agrees with the winner 88.3% and correlates 0.89 with net damage share inside a lobby. Net damage already carries the volume signal and also subtracts damage taken.
+
+**Measured drift (2026-10-12, 47 players, 247 matches cached).** Max |ΔVTSR-T| 82.0 (dd 1497.9 → 1579.9). Next largest: blue +77.0, Totokomo +72.8, judgeguns +59.0, AussieLag +54.5, Lamper −41.6, Nomad −41.1. Mean |Δ| 22.7, mean signed +8.9. Mean rating 1566.6 → 1575.5. 43 of 47 players changed rank; the largest moves were Lamper 22 → 34 and dd 32 → 20. Validator versus the v2.12 run earlier the same day: Spearman ρ 0.412 → 0.275, self-consistency 0.787 → 0.672, calibration MAE 0.015 → 0.030, clean-win mean accuracy 57.2% → 55.1%, clean-win hard-max 57.8% → 58.3%, log-loss 0.682 → 0.682, synthetic-winner agreement unchanged at 92.0%. The Spearman drop trips the validator's 0.03 warning. The four remaining axes still agree with the winner: mobility 88.8%, net damage 87.8%, kill rate 85.4%, PvE share 78.7%.
 
 ### 13.8 Tier ladder
 
