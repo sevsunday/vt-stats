@@ -197,7 +197,8 @@
   }
 
   function getActiveTabSlug() {
-    const activeBtn = document.querySelector('#match-tabs .nav-link.active, #all-tabs .nav-link.active');
+    const root = currentTarget === '__all__' ? '#all-tabs' : '#match-tabs';
+    const activeBtn = document.querySelector(root + ' .nav-link.active');
     return activeBtn ? btnIdToSlug(activeBtn.id) : null;
   }
 
@@ -322,17 +323,37 @@
   }
 
   // Gated URL writer — no-op unless live sync is enabled.
-  // mode 'replace' rewrites the current entry (boot, catch-up).
-  // Anything else pushes once the first load has finished, so Back
-  // walks match / tab / filter changes.
+  // All Matches is the exception: the address bar always becomes
+  // ?match=all (Overview omits tab) so that view can be copied and
+  // shared with Live Sync off. mode 'replace' rewrites the current
+  // entry (boot, catch-up). Anything else pushes once the first load
+  // has finished, so Back walks match / tab / filter changes.
   function syncUrl(mode) {
-    if (!liveSyncEnabled || historyWrites) return;
+    const onAllMatches = currentTarget === '__all__';
+    if ((!liveSyncEnabled && !onAllMatches) || historyWrites) return;
     const next = buildShareUrl();
     const cur = window.location.pathname + window.location.search;
     if (next === cur) { shownUrl = cur; return; }
     const replace = mode === 'replace' || !dashboardHistoryLive;
     if (replace) history.replaceState(null, '', next);
     else history.pushState(null, '', next);
+    shownUrl = next;
+  }
+
+  // Live Sync off: opening a match after All Matches must not keep
+  // ?match=all, or a refresh would jump back to the aggregate. Picker
+  // params stay. Live Sync on leaves this to syncUrl(), which records
+  // the match id.
+  function clearAllMatchesUrl() {
+    if (liveSyncEnabled || historyWrites) return;
+    const cur = new URLSearchParams(window.location.search);
+    if (cur.get('match') !== 'all') return;
+    cur.delete('match');
+    cur.delete('tab');
+    cur.delete('t');
+    const qs = paramsToString(cur);
+    const next = window.location.pathname + (qs ? '?' + qs : '');
+    history.replaceState(null, '', next);
     shownUrl = next;
   }
 
@@ -3131,6 +3152,7 @@
   // filter/tab fields take precedence over any in-memory state or persist
   // preference — URL is explicit user intent.
   async function loadMatch(file, urlState) {
+    clearAllMatchesUrl();
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
