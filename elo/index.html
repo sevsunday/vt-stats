@@ -118,17 +118,17 @@
     <div class="vt-tab-scroll-wrap mb-3">
       <ul class="nav nav-pills vt-elo-tabs" id="elo-tabs" role="tablist">
         <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="elo-tab-leaderboard-btn" data-bs-toggle="pill"
-                  data-bs-target="#elo-tab-leaderboard" type="button" role="tab"
-                  aria-controls="elo-tab-leaderboard" aria-selected="true">
-            <i class="bi bi-list-ol me-1"></i>VTSR-T Elo
+          <button class="nav-link active" id="elo-tab-vtsr-c-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-vtsr-c" type="button" role="tab"
+                  aria-controls="elo-tab-vtsr-c" aria-selected="true">
+            <i class="bi bi-person-badge me-1"></i>VTSR-C Elo
           </button>
         </li>
         <li class="nav-item" role="presentation">
-          <button class="nav-link" id="elo-tab-vtsr-c-btn" data-bs-toggle="pill"
-                  data-bs-target="#elo-tab-vtsr-c" type="button" role="tab"
-                  aria-controls="elo-tab-vtsr-c" aria-selected="false">
-            <i class="bi bi-person-badge me-1"></i>VTSR-C Elo
+          <button class="nav-link" id="elo-tab-leaderboard-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-leaderboard" type="button" role="tab"
+                  aria-controls="elo-tab-leaderboard" aria-selected="false">
+            <i class="bi bi-list-ol me-1"></i>VTSR-T Elo
           </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -164,10 +164,33 @@
 
     <div class="tab-content" id="elo-tab-content">
 
-      <!-- Tab: Leaderboard (default, eager). The full sortable
-           table with expandable per-row detail panels — moved here from
-           the dashboard's All Matches view. -->
-      <div class="tab-pane fade show active" id="elo-tab-leaderboard" role="tabpanel"
+      <!-- Tab: VTSR-C Elo (default). The commander ladder is a SEPARATE
+           ladder from VTSR-T. Table only, mirroring the VTSR-T pane. The
+           explainer lives on the How-it-works pill (no How button here).
+           404-safe: the ladder card stays hidden and the empty state shows
+           when elo_commander_current.json is absent. -->
+      <div class="tab-pane fade show active" id="elo-tab-vtsr-c" role="tabpanel" aria-labelledby="elo-tab-vtsr-c-btn">
+        <div class="card mb-4 d-none" id="section-vtsr-c">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">
+              <i class="bi bi-person-badge me-2"></i>Commander Ratings &mdash; VTSR-C
+            </h5>
+            <span id="vtsr-c-f9-credit" class="text-muted small" hidden></span>
+          </div>
+          <div class="card-body" id="vtsr-c-body"></div>
+        </div>
+        <div class="vt-elo-empty card d-none" id="elo-vtsr-c-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-person-badge d-block mb-2" style="font-size: 1.6rem;"></i>
+            No commander ratings published yet &mdash; run the pipeline to generate <code>elo_commander_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Leaderboard. The full sortable table with expandable
+           per-row detail panels — moved here from the dashboard's All
+           Matches view. Eager at boot; opened by ?tab=vtsr-t. -->
+      <div class="tab-pane fade" id="elo-tab-leaderboard" role="tabpanel"
            aria-labelledby="elo-tab-leaderboard-btn">
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -248,29 +271,6 @@
           <div class="card-body text-center text-muted py-5">
             <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
             No ratings published yet &mdash; run the pipeline to generate <code>elo_current.json</code>.
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: VTSR-C Elo (lazy). The commander ladder is a SEPARATE ladder
-           from VTSR-T. Table only, mirroring the VTSR-T pane. The
-           explainer lives on the How-it-works pill (no How button here).
-           404-safe: the ladder card stays hidden and the empty state shows
-           when elo_commander_current.json is absent. -->
-      <div class="tab-pane fade" id="elo-tab-vtsr-c" role="tabpanel" aria-labelledby="elo-tab-vtsr-c-btn">
-        <div class="card mb-4 d-none" id="section-vtsr-c">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">
-              <i class="bi bi-person-badge me-2"></i>Commander Ratings &mdash; VTSR-C
-            </h5>
-            <span id="vtsr-c-f9-credit" class="text-muted small" hidden></span>
-          </div>
-          <div class="card-body" id="vtsr-c-body"></div>
-        </div>
-        <div class="vt-elo-empty card d-none" id="elo-vtsr-c-empty">
-          <div class="card-body text-center text-muted py-5">
-            <i class="bi bi-person-badge d-block mb-2" style="font-size: 1.6rem;"></i>
-            No commander ratings published yet &mdash; run the pipeline to generate <code>elo_commander_current.json</code>.
           </div>
         </div>
       </div>

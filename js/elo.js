@@ -6,9 +6,9 @@
  * VTSR-C commander ladder, and four explainer tabs that present the ratings
  * in layman-first language:
  *
- *   VTSR-T Elo (default)    — sortable table + detail panels.
- *   VTSR-C Elo              — sortable experimental commander-ladder
+ *   VTSR-C Elo (default)    — sortable experimental commander-ladder
  *                             table (explainer lives on How).
+ *   VTSR-T Elo              — sortable table + detail panels.
  *   How it works            — annotated ΔR = K(P−E) stage + the 13.1
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
@@ -31,10 +31,11 @@
  * v2.7 thug-only alt pair and toggle are retired. Published VTSR-T is
  * always elo_current.json (alpha 0). ?rating=wins previews a blend.
  *
- * URL routing: ?tab=vtsr-t|vtsr-c|how|axes|fairness|accuracy (replaceState
+ * URL routing: ?tab=vtsr-c|vtsr-t|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
- * VTSR-T pane is the default and writes no ?tab= at all; `leaderboard` is
- * kept as a permanent inbound alias for pre-split links.
+ * VTSR-C pane is the default and writes no ?tab= at all. `vtsr-t` opens
+ * the thug board; `leaderboard` is a permanent inbound alias rewritten to
+ * `vtsr-t`. ?rating=wins with no tab still opens the thug board.
  */
 (function () {
   'use strict';
@@ -1452,18 +1453,19 @@
   // Tab routing (?tab=) + lazy renderers.
   // ----------------------------------------------------------------------
 
-  // The VTSR-T pane is the default: it never writes a ?tab= at all, so
-  // neither of its two accepted slugs is ever emitted. `leaderboard` is the
-  // pre-split alias and is kept forever so shared links keep landing.
-  const DEFAULT_TAB_TARGET = '#elo-tab-leaderboard';
+  // The VTSR-C pane is the default: it never writes a ?tab= at all.
+  // `vtsr-t` is listed before `leaderboard` so the thug pane emits vtsr-t.
+  // `leaderboard` stays as a permanent inbound alias for pre-split links.
+  const DEFAULT_TAB_TARGET = '#elo-tab-vtsr-c';
+  const THUG_TAB_TARGET = '#elo-tab-leaderboard';
   const TAB_SLUGS = {
-    'vtsr-t': DEFAULT_TAB_TARGET,
-    'vtsr-c': '#elo-tab-vtsr-c',
+    'vtsr-c': DEFAULT_TAB_TARGET,
+    'vtsr-t': THUG_TAB_TARGET,
     how: '#elo-tab-how',
     axes: '#elo-tab-axes',
     fairness: '#elo-tab-fairness',
     accuracy: '#elo-tab-accuracy',
-    leaderboard: DEFAULT_TAB_TARGET,
+    leaderboard: THUG_TAB_TARGET,
   };
   const tabRendered = {};
   const tabRenderers = {
@@ -1484,7 +1486,19 @@
   }
 
   function slugForTarget(target) {
-    return Object.keys(TAB_SLUGS).find(k => TAB_SLUGS[k] === target) || 'vtsr-t';
+    return Object.keys(TAB_SLUGS).find(k => TAB_SLUGS[k] === target) || 'vtsr-c';
+  }
+
+  // No tab, and ?tab=vtsr-c, land on the commander ladder. A wins preview
+  // with no tab still lands on the thug board, because that control lives
+  // there. `leaderboard` is resolved by TAB_SLUGS to the same thug pane.
+  function landingTargetFromUrl() {
+    const q = new URLSearchParams(window.location.search);
+    const slug = q.get('tab');
+    if (!slug && q.get('rating') === 'wins') return THUG_TAB_TARGET;
+    const target = TAB_SLUGS[slug];
+    if (!target || target === DEFAULT_TAB_TARGET) return DEFAULT_TAB_TARGET;
+    return target;
   }
 
   let historyWrites = 0;
@@ -1502,11 +1516,12 @@
   }
 
   function activateTabFromUrl() {
-    const slug = new URLSearchParams(window.location.search).get('tab');
-    const target = TAB_SLUGS[slug];
-    if (!target || target === DEFAULT_TAB_TARGET) {
-      // Normalize a legacy / redundant / unknown ?tab= off the entry we
-      // landed on. That is a replace, not a Back step.
+    const q = new URLSearchParams(window.location.search);
+    const slug = q.get('tab');
+    const target = landingTargetFromUrl();
+    if (target === DEFAULT_TAB_TARGET) {
+      // Normalize a redundant / unknown ?tab= off the commander ladder.
+      // That is a replace, not a Back step.
       if (slug) syncUrl(DEFAULT_TAB_TARGET, 'replace');
       const home = document.querySelector(`#elo-tabs [data-bs-target="${DEFAULT_TAB_TARGET}"]`);
       if (home && !home.classList.contains('active')) {
@@ -1516,6 +1531,8 @@
       }
       return;
     }
+    // Rewrite the pre-split alias to the slug this pane actually emits.
+    if (slug === 'leaderboard') syncUrl(target, 'replace');
     const btn = document.querySelector(`#elo-tabs [data-bs-target="${target}"]`);
     if (!btn || btn.classList.contains('active')) return;
     btn._vtQuiet = true;
@@ -2219,11 +2236,15 @@
 
     if (parsedRating.dirty) writeRatingUrl();
     renderLeaderboard();
-    tabRendered[DEFAULT_TAB_TARGET] = true;
+    // The thug table is always built. The commander ladder is built now
+    // only when this visit lands on it; any other pane still lazy-renders
+    // from shown.bs.tab. Its data is already fetched above.
+    if (landingTargetFromUrl() === DEFAULT_TAB_TARGET) {
+      renderCommanderLadder();
+      tabRendered[DEFAULT_TAB_TARGET] = true;
+    }
 
-    // Deep links (?tab=...) boot straight into the right pane; the
-    // shown.bs.tab handler above lazy-renders it (VTSR-C included — its
-    // data is already fetched above, so the pill only pays for markup).
+    // Deep links (?tab=...) boot straight into the right pane.
     activateTabFromUrl();
     window.addEventListener('popstate', () => {
       historyWrites++;
