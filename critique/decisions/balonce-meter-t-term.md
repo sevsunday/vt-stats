@@ -248,6 +248,43 @@ MAX implies.
 softmax into Team Balonce. Anyone revisiting it should be pointed at
 this table first.
 
+## Rescore (2026-10-13) — under-1pp claim holds, still HOLD
+
+The ~250-duel re-run trigger above is about detecting a real +3pp. It
+has not fired (200 scoreable rows). This run only checks the
+player-facing claim that folding each commander's own pre-match VTSR-T
+into the thug mean gains less than 1 percentage point. The promote rule
+above was not amended before the numbers were read, and the shipped
+formula is unchanged.
+
+Scored by `metric_cmdr_t_term` on the 2026-10-13T03:02 snapshot already
+on disk (`elo_history.json` + `elo_commander_history.json`, seed 12345,
+default validator mode). `canonical` and `cmdr_in_mean` share the same
+200 telemetry rows: a winner, a join to thug history, and at least one
+rated thug on each side. That is not the 705-match λ ablation (F9 has
+no per-player VTSR-T) and not the 199-row wins-blend set. Report:
+gitignored `_validation/cmdr-t-term-2026-10-13/report.json`.
+
+| variant | n | accuracy | log-loss | Δacc | Δll | promote |
+|---|---|---|---|---|---|---|
+| `canonical` (V0) | 200 | **66.5%** (133/200) | 0.6322 | — | — | baseline |
+| `cmdr_in_mean` (V1) | 200 | 67.0% (134/200) | 0.6215 | **+0.5pp** | −0.0106 | FAIL |
+
+The claim holds: `0.670 − 0.665 = +0.5pp`, under 1 percentage point.
+One extra correct call on the same 200 rows.
+
+Rule-by-rule for `cmdr_in_mean` (the function's own verdict):
+
+1. Accuracy >= +3pp: **FAIL**. +0.5pp.
+2. Log-loss strictly better: **pass** (−0.0106).
+3. `n_scored` >= 100: **pass** (200).
+4. Gain not confined to one confidence band: **pass** (2 bands improved,
+   2 degraded). The discard rule (drop > 3pp) does not fire.
+
+**VERDICT: HOLD at V0 (canonical).** `cmdr_in_mean` is not
+promote-eligible. No partial credit. The September +0.8pp on 120 rows
+is now +0.5pp on 200, still inside the +3pp bar.
+
 ## Source files
 
 - `scripts/validate_elo.py` §14 `metric_cmdr_t_term` (regenerable:

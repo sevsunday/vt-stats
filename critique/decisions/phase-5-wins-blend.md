@@ -220,6 +220,58 @@ unresolved scale confound (29.3 -> 37.1) and calibration MAE degrades
 
 The ELO-page VTSR-T leaderboard can preview the side files. `?rating=wins` shows the 50% blend. `w=10`, `w=25`, and `w=100` select the other weights. `w=100` is `alpha_override=1.0` (`elo_current_alpha100.json`): the wins ladder with the axes turned off, emitted for that preview only. It is not a promote candidate. The promote rule above is unchanged and still scores only {0.10, 0.25, 0.50}. Published `ALPHA` stays 0. The dashboard teaser, player pages, Tools, and the Balonce meter do not read these files. `last_delta` on the alpha files remains the performance step; the preview's Last column is assembled in the browser from canonical history (`alpha * wins step + (1 - alpha) * performance step`).
 
+## Rescore (2026-10-13) — trigger fired, still HOLD
+
+The "~80 determined matches" re-run above fired. Scored on the
+2026-10-13T03:02 snapshot already on disk (`elo_current.json` and
+`elo_current_alpha{10,25,50}.json`: 223 rated matches, 200 wins-rated,
+seed 12345, validator v9). No pipeline re-run. The promote rule above
+was not amended before the numbers were read, and `ALPHA` stays 0.
+
+The prediction set is the validator's current team-mean winner call
+(`clean_win_accuracy.aggregations.mean`): `clean_win` / `attested` /
+`adjudicated`, contested excluded. Baseline is the committed
+`validation_summary.json` from the same snapshot, 114/199 = 57.3%.
+Alt-mode reports are in gitignored
+`_validation/wins-blend-2026-10-13/`.
+
+| mode | Spearman rho | self-cons | winner acc (mean R) | log-loss | calib MAE | bootstrap sigma | mean vtsr |
+|---|---|---|---|---|---|---|---|
+| ALPHA = 0 (canonical) | 0.277 | 0.713 | 57.3% (114/199) | 0.6816 | 0.0280 | 49.8 | 1578.6 |
+| alpha10 | 0.278 | 0.713 | 56.8% (113/199) | 0.6815 | 0.0279 | 49.8 | 1570.8 |
+| alpha25 | 0.279 | 0.713 | 56.8% (113/199) | 0.6814 | 0.0279 | 49.8 | 1559.1 |
+| alpha50 | 0.280 | 0.713 | 56.8% (113/199) | 0.6813 | 0.0278 | 49.8 | 1539.8 |
+
+Winner-call flips against canonical team-mean `before`, same 199 rows:
+**1 flip at every alpha, and it is the same match.** `2026-10-04T02-15-47`
+(attested, team 2 won). Canonical team means were 1615.82 vs 1615.83, so
+team 2 was the favorite by 0.01 and the call was correct. All three blends
+move the favorite to team 1. No other row changes side. Net −1 correct
+call, no offsetting gain.
+
+Rule-by-rule (deltas vs the ALPHA = 0 row):
+
+1. Determined-outcome accuracy >= +5pp: **FAIL** at every alpha.
+   113/199 vs 114/199 is −0.50pp.
+2. Log-loss improves: **pass** at every alpha, marginally and
+   monotonically (−0.000062 / −0.000155 / −0.000308).
+3. Spearman within −0.01: **pass** (improves, +0.0006 / +0.0016 / +0.0029).
+   The discard rule (drop > 0.03) does not fire.
+4. Calibration MAE within +0.005: **pass** (improves,
+   −0.000035 / −0.000087 / −0.000175).
+5. Mean rating < 1550: **fail** at alpha10 (1570.8) and alpha25 (1559.1).
+   **Pass** at alpha50 (1539.8, 39.8 above the 1500 anchor). The canonical
+   pool is already 1578.6, 78.6 above the anchor, from corpus growth since
+   the September sweep. The gate is the blend's own mean. Higher alpha
+   still compresses the pool, which is what lets alpha50 clear it.
+
+**VERDICT: HOLD at ALPHA = 0.0.** Rule 1 fails everywhere, so no alpha is
+promote-eligible. No partial credit. The September finding does not
+survive as "the calls are identical": one coin-flip match changes, and it
+changes the wrong way. It does survive as "mixing wins in does not clear
+the accuracy bar." Rho, log-loss, and calibration still improve slightly
+as alpha rises. That is not a promote.
+
 ## Source files
 
 - `scripts/elo.py` (wins ladder + alpha_override)
