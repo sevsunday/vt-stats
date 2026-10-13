@@ -315,3 +315,24 @@
     margin-bottom: 0.75rem;
     max-width: 52rem;
 }
+
+/* Leaderboard rating preview. Performance is the published number.
+   Wins weighted reveals 10/25/50 and Wins only. Colors stay on --kb-*. */
+.vt-vtsr-seg > .btn {
+    color: var(--kb-text-secondary);
+    background: transparent;
+    border-color: var(--kb-border-subtle);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+.vt-vtsr-seg > .btn:hover,
+.vt-vtsr-seg > .btn:focus-visible {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+    border-color: var(--kb-border-subtle);
+}
+.vt-vtsr-seg > .btn.active {
+    color: var(--kb-primary-fg);
+    background: var(--kb-primary);
+    border-color: var(--kb-primary);
+}

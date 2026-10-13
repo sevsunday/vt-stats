@@ -2545,6 +2545,7 @@ def load_cache_index():
             "elo_current_alpha10.json", "elo_history_alpha10.json",
             "elo_current_alpha25.json", "elo_history_alpha25.json",
             "elo_current_alpha50.json", "elo_history_alpha50.json",
+            "elo_current_alpha100.json", "elo_history_alpha100.json",
             "validation_summary.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
@@ -11041,17 +11042,19 @@ def main():
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T (rank lobby scoring) ({e}); skipping.")
 
-    # ----- VTSR-T forensic alt pairs #6-8: Stage E ALPHA sweep -----
-    # Re-runs the rating loop with alpha_override in {0.10, 0.25, 0.50}
-    # so the published vtsr becomes the real R^W/R^T blend at each
-    # setting. FORENSIC ONLY: never consumed by the dashboard; scored
-    # via `validate_elo.py --elo-mode alpha{10,25,50}` against the
-    # pre-registered promote rule in
+    # ----- VTSR-T forensic alt pairs #6-9: Stage E ALPHA sweep -----
+    # Re-runs the rating loop with alpha_override in {0.10, 0.25, 0.50,
+    # 1.0} so `vtsr` on each side file is the real R^W/R^T blend at that
+    # weight. 0.10/0.25/0.50 are the pre-registered promote grid, scored
+    # via `validate_elo.py --elo-mode alpha{10,25,50}` against
     # critique/decisions/phase-5-wins-blend.md (accuracy >= +5pp AND
     # log-loss improves AND Spearman within -0.01 AND calibration MAE
     # within +0.005 AND mean drift < 50; discard on Spearman drop
-    # > 0.03; else HOLD). Soft-fails per pair.
-    for _alpha_pct, _alpha_val in ((10, 0.10), (25, 0.25), (50, 0.50)):
+    # > 0.03; else HOLD). 1.0 is display-only: the ELO-page leaderboard
+    # preview reads all four files (10/25/50 mixes and the wins ladder
+    # with the axes turned off). Nothing else may. Canonical ALPHA stays
+    # 0. Soft-fails per pair.
+    for _alpha_pct, _alpha_val in ((10, 0.10), (25, 0.25), (50, 0.50), (100, 1.0)):
         try:
             import elo as elo_module
             _cur_a, _hist_a = elo_module.compute_elo(

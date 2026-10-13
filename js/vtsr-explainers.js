@@ -85,7 +85,7 @@
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
       body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
-      body: 'How much the Wins dial counts. <strong>Currently set to 0</strong> &mdash; your published rating is 100% performance. The wins ladder is computed but doesn&rsquo;t feed your number.' },
+      body: 'How much the Wins dial counts. <strong>Currently set to 0</strong> &mdash; your published rating is 100% performance. The wins ladder is computed but doesn&rsquo;t feed your number. The leaderboard can preview a 10%, 25%, or 50% mix, or the wins ladder with the axes turned off. None of those previews is the published number.' },
     { term: 'eq-vtsr', title: 'Your published rating', x: 3, y: 5,
       body: 'The VTSR-T number on the leaderboard: the two dials, mixed by the knob.' },
   ];

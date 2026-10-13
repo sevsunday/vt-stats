@@ -216,6 +216,10 @@ accuracy leads by +7.9pp, but bootstrap sigma is still worse under the
 unresolved scale confound (29.3 -> 37.1) and calibration MAE degrades
 0.0134 -> 0.0238.
 
+## Display preview (not a promote)
+
+The ELO-page VTSR-T leaderboard can preview the side files. `?rating=wins` shows the 50% blend. `w=10`, `w=25`, and `w=100` select the other weights. `w=100` is `alpha_override=1.0` (`elo_current_alpha100.json`): the wins ladder with the axes turned off, emitted for that preview only. It is not a promote candidate. The promote rule above is unchanged and still scores only {0.10, 0.25, 0.50}. Published `ALPHA` stays 0. The dashboard teaser, player pages, Tools, and the Balonce meter do not read these files. `last_delta` on the alpha files remains the performance step; the preview's Last column is assembled in the browser from canonical history (`alpha * wins step + (1 - alpha) * performance step`).
+
 ## Source files
 
 - `scripts/elo.py` (wins ladder + alpha_override)

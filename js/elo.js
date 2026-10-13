@@ -23,11 +23,13 @@
  * player_slugs.json (player links), validation_summary.json (noise band
  * + accuracy tab), and match_contributions.json -> VTAggregate.build()
  * for the corpus-wide career_stats[] the leaderboard joins its Ship /
- * K/D / Acc columns from.
+ * K/D / Acc columns from. The leaderboard preview additionally reads
+ * elo_current_alpha{10,25,50,100}.json. Those files are not the
+ * published rating.
  *
  * Corpus-wide and picker-unaware (mirrors the VTSR-T contract). The
- * v2.7 thug-only alt pair and toggle are retired — this page always
- * reads the canonical ratings.
+ * v2.7 thug-only alt pair and toggle are retired. Published VTSR-T is
+ * always elo_current.json (alpha 0). ?rating=wins previews a blend.
  *
  * URL routing: ?tab=vtsr-t|vtsr-c|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
@@ -172,6 +174,201 @@
     careerStats: [],      // corpus-wide aggregate join source
     historyChart: null,   // Chart.js instance on the accuracy tab
   };
+
+  // Leaderboard preview. Published VTSR-T stays state.elo (alpha 0).
+  // ?rating=wins shows a side file; w is omitted at the 50% default.
+  const WINS_WEIGHTS = [10, 25, 50, 100];
+  const DEFAULT_WINS_WEIGHT = 50;
+  let ratingView = 'performance';
+  let winsWeight = DEFAULT_WINS_WEIGHT;
+  const winsFiles = Object.create(null);
+  const winsLoaded = Object.create(null);
+  const winsInflight = Object.create(null);
+
+  function previewAlpha() {
+    if (ratingView !== 'wins') return null;
+    const file = winsFiles[winsWeight];
+    if (file && typeof file.alpha === 'number') return file.alpha;
+    return winsWeight / 100;
+  }
+  function isWinsOnly(alpha) {
+    return alpha != null && alpha >= 0.999;
+  }
+  function previewStatus() {
+    if (ratingView !== 'wins') return 'off';
+    if (!winsLoaded[winsWeight]) return 'loading';
+    if (!winsFiles[winsWeight]) return 'missing';
+    return 'ready';
+  }
+  function readRatingFromUrl() {
+    const q = new URLSearchParams(window.location.search);
+    const rating = q.get('rating');
+    const raw = q.get('w');
+    if (rating !== 'wins') {
+      return { view: 'performance', weight: winsWeight, dirty: rating != null || raw != null };
+    }
+    if (raw == null || raw === '') {
+      return { view: 'wins', weight: DEFAULT_WINS_WEIGHT, dirty: false };
+    }
+    const n = Number(raw);
+    if (!WINS_WEIGHTS.includes(n) || n === DEFAULT_WINS_WEIGHT) {
+      return { view: 'wins', weight: DEFAULT_WINS_WEIGHT, dirty: true };
+    }
+    return { view: 'wins', weight: n, dirty: false };
+  }
+  function writeRatingUrl() {
+    if (historyWrites) return;
+    const url = new URL(window.location.href);
+    if (ratingView !== 'wins') {
+      url.searchParams.delete('rating');
+      url.searchParams.delete('w');
+    } else {
+      url.searchParams.set('rating', 'wins');
+      if (winsWeight === DEFAULT_WINS_WEIGHT) url.searchParams.delete('w');
+      else url.searchParams.set('w', String(winsWeight));
+    }
+    const next = url.pathname + url.search + url.hash;
+    const cur = window.location.pathname + window.location.search + window.location.hash;
+    if (next === cur) return;
+    history.replaceState(null, '', next);
+  }
+  function ensureWinsFile(pct) {
+    if (winsLoaded[pct]) return Promise.resolve(winsFiles[pct]);
+    if (winsInflight[pct]) return winsInflight[pct];
+    winsInflight[pct] = fetchJson(`${DATA}elo_current_alpha${pct}.json`).then((data) => {
+      winsFiles[pct] = data;
+      winsLoaded[pct] = true;
+      return data;
+    });
+    return winsInflight[pct];
+  }
+  function blendedLastByKey(alpha) {
+    const map = new Map();
+    const hist = (state.eloHistory && state.eloHistory.history) || [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const h = hist[i];
+      if (h.match_excluded) continue;
+      for (const d of (h.deltas || [])) {
+        const keys = [];
+        if (d.steam64) keys.push(String(d.steam64));
+        if (d.name) keys.push('name:' + d.name);
+        if (!keys.length || keys.some(k => map.has(k))) continue;
+        const thug = (d.after != null && d.before != null)
+          ? (Number(d.after) - Number(d.before))
+          : (Number(d.delta) || 0);
+        const w = d.wins;
+        const winsStep = (w && w.after != null && w.before != null)
+          ? (Number(w.after) - Number(w.before)) : 0;
+        const step = Math.round((alpha * winsStep + (1 - alpha) * thug) * 100) / 100;
+        for (const k of keys) map.set(k, step);
+      }
+    }
+    return map;
+  }
+  function withPreviewDeltas(ratings, alpha) {
+    const last = blendedLastByKey(alpha);
+    return ratings.map((r) => {
+      const byId = r.steam64 ? last.get(String(r.steam64)) : undefined;
+      const byName = r.name ? last.get('name:' + r.name) : undefined;
+      const step = byId != null ? byId : (byName != null ? byName : 0);
+      return Object.assign({}, r, { last_delta: step });
+    });
+  }
+  function setTooltipTitle(el, title) {
+    if (!el) return;
+    if (window.bootstrap && bootstrap.Tooltip) {
+      const inst = bootstrap.Tooltip.getInstance(el);
+      if (inst) inst.dispose();
+    }
+    el.setAttribute('title', title);
+  }
+  function applyColumnTip(el, title) {
+    if (!el) return;
+    if (!el.dataset.tipDefault) el.dataset.tipDefault = el.getAttribute('title') || '';
+    setTooltipTitle(el, title == null ? el.dataset.tipDefault : title);
+  }
+  function previewBannerHtml() {
+    const status = previewStatus();
+    if (status === 'off') return '';
+    if (status === 'loading') {
+      const which = winsWeight === 100 ? 'wins-only' : `${winsWeight}%`;
+      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">Loading the ${which} preview\u2026</div>`;
+    }
+    if (status === 'missing') {
+      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">Could not load <code>elo_current_alpha${winsWeight}.json</code>. This preview stays empty until that file is present.</div>`;
+    }
+    const alpha = previewAlpha();
+    const common = 'This is not the published VTSR-T. The accuracy tests have not cleared folding wins into the published rating. Tiers use the same cuts. Player pages still show the published rating.';
+    if (isWinsOnly(alpha)) {
+      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">The axes are off. This number is the wins ladder only. ${common} This ladder only spans the wins ratings, so those cuts land almost everyone in Tier 3 or Tier 4.</div>`;
+    }
+    const pct = Math.round((alpha || 0) * 100);
+    return `<div class="alert alert-secondary py-2 px-3 mb-3 small">${pct}% of this number is the wins ladder and ${100 - pct}% is the performance rating. ${common} The mix pulls the number toward 1500.</div>`;
+  }
+  function syncPreviewChrome() {
+    const winsOn = ratingView === 'wins';
+    const alpha = previewAlpha();
+    const winsOnly = winsOn && isWinsOnly(alpha);
+    const perfBtn = document.getElementById('vtsr-rating-performance');
+    const winsBtn = document.getElementById('vtsr-rating-wins');
+    const weights = document.getElementById('vtsr-weight-toggle');
+    if (perfBtn) {
+      perfBtn.classList.toggle('active', !winsOn);
+      perfBtn.setAttribute('aria-pressed', winsOn ? 'false' : 'true');
+    }
+    if (winsBtn) {
+      winsBtn.classList.toggle('active', winsOn);
+      winsBtn.setAttribute('aria-pressed', winsOn ? 'true' : 'false');
+    }
+    if (weights) {
+      weights.hidden = !winsOn;
+      weights.querySelectorAll('[data-wins-weight]').forEach((btn) => {
+        const on = winsOn && Number(btn.dataset.winsWeight) === winsWeight;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    const title = document.getElementById('vtsr-card-title');
+    if (title) {
+      const label = !winsOn ? 'VTSR-T Leaderboard'
+        : (winsOnly ? 'Wins ladder preview' : 'Wins-weighted preview');
+      title.innerHTML = `<i class="bi bi-stars me-2"></i>${label}`;
+    }
+    const banner = document.getElementById('vtsr-preview-banner');
+    if (banner) banner.innerHTML = previewBannerHtml();
+    const rankTh = document.querySelector('#vtsr-table thead th:first-child');
+    const ratingTh = document.querySelector('#vtsr-table th[data-sort="vtsr"]');
+    const lastTh = document.querySelector('#vtsr-table th[data-sort="last_delta"]');
+    const peakTh = document.querySelector('#vtsr-table th[data-sort="peak_vtsr"]');
+    if (ratingTh) ratingTh.textContent = !winsOn ? 'VTSR-T' : (winsOnly ? 'Wins' : 'Wins-weighted');
+    if (!winsOn) {
+      applyColumnTip(rankTh, null);
+      applyColumnTip(ratingTh, null);
+      applyColumnTip(lastTh, null);
+      applyColumnTip(peakTh, null);
+    } else if (winsOnly) {
+      applyColumnTip(rankTh, 'Rank (1 = highest wins ladder).');
+      applyColumnTip(ratingTh, '<strong>Wins ladder</strong><br>The axes are off. This number is the wins ladder only. It is not the published VTSR-T.');
+      applyColumnTip(lastTh, '<strong>Last</strong><br>Change in the wins ladder on the latest rated match. Not the published VTSR-T change.');
+      applyColumnTip(peakTh, '<strong>Peak</strong><br>Highest the wins ladder has been for this player.');
+    } else {
+      const pct = Math.round((alpha || 0) * 100);
+      applyColumnTip(rankTh, 'Rank (1 = highest wins-weighted rating).');
+      applyColumnTip(ratingTh, `<strong>Wins-weighted</strong><br>${pct}% wins ladder, ${100 - pct}% performance. Not the published VTSR-T.`);
+      applyColumnTip(lastTh, '<strong>Last</strong><br>Change in this wins-weighted number on the latest rated match. Not the published VTSR-T change.');
+      applyColumnTip(peakTh, '<strong>Peak</strong><br>Highest this wins-weighted number has been.');
+    }
+  }
+  function showWinsPreview(weight) {
+    ratingView = 'wins';
+    if (WINS_WEIGHTS.includes(weight)) winsWeight = weight;
+    const weightNow = winsWeight;
+    writeRatingUrl();
+    renderLeaderboard();
+    ensureWinsFile(weightNow).then(() => {
+      if (ratingView === 'wins' && winsWeight === weightNow) renderLeaderboard();
+    });
+  }
 
   // Player links resolve to the canonical player/<slug>/ from this page's
   // subdirectory (../player/...); fall back to the runtime ?p= route.
@@ -367,13 +564,41 @@
         <span class="vt-axis-bar-z">${reading}</span>
       </div>`;
     }).join('');
+    let careerSub = 'typical showing across rated matches';
+    if (ratingView === 'wins') {
+      careerSub = isWinsOnly(previewAlpha())
+        ? 'how this player has been playing; not in this number'
+        : 'the axes half of this preview';
+    }
     const heading = mode === 'career'
-      ? 'Career axis profile <span class="vt-vtsr-detail-sub text-muted">(typical showing across rated matches)</span>'
+      ? `Career axis profile <span class="vt-vtsr-detail-sub text-muted">(${careerSub})</span>`
       : 'Last-match axis breakdown';
     return `<section class="vt-vtsr-detail-section">
       <h6>${heading}</h6>
       <div class="vt-axis-bar-grid">${rows}</div>
     </section>`;
+  }
+
+  function winsPreviewNote(lastDelta) {
+    const alpha = previewAlpha();
+    if (alpha == null || !lastDelta) return '';
+    const wins = lastDelta.wins;
+    const winsStep = (wins && wins.after != null && wins.before != null)
+      ? (Number(wins.after) - Number(wins.before)) : 0;
+    const sign = winsStep > 0 ? '+' : '';
+    if (isWinsOnly(alpha)) {
+      if (!wins) {
+        return '<div class="vt-vtsr-detail-formula">The axes are not in this number or in Last. This match had no decided winner, so Last is 0.</div>';
+      }
+      return `<div class="vt-vtsr-detail-formula">The axes are not in this number or in Last. Last is the wins step alone (${sign}${winsStep.toFixed(1)}).</div>`;
+    }
+    const pct = Math.round(alpha * 100);
+    const rest = 100 - pct;
+    if (!wins) {
+      return `<div class="vt-vtsr-detail-formula">This match had no decided winner, so the wins ladder did not move. Last is ${rest}% of the performance change.</div>`;
+    }
+    const word = wins.s === 1 ? 'a win' : wins.s === 0 ? 'a loss' : wins.s === 0.5 ? 'a draw' : 'a decided result';
+    return `<div class="vt-vtsr-detail-formula">This match was ${word}. The wins ladder moved ${sign}${winsStep.toFixed(1)}. Last mixes ${pct}% of that step with ${rest}% of the performance change.</div>`;
   }
 
   function renderVtsrLastMatchSection(eloRow) {
@@ -426,7 +651,7 @@
     }
     const grid = renderVtsrAxisGrid(ac, 'last_match', weightsRedistributed);
     const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; Scored ${perfSign}${perfStr} vs ${expSign}${expStr} expected \u2192 <span class="${lastDelta.delta > 0 ? 'vt-vtsr-delta-positive' : lastDelta.delta < 0 ? 'vt-vtsr-delta-negative' : ''}">${drSign}${dr}</span></div>`;
-    return grid.replace('</h6>', `</h6>${formulaLine}`);
+    return grid.replace('</h6>', `</h6>${formulaLine}${winsPreviewNote(lastDelta)}`);
   }
 
   function renderVtsrCombatSection(careerRow) {
@@ -569,18 +794,22 @@
   }
 
   function renderVtsrLadderRow(r, elo, rank, noiseSigma) {
+    const alpha = previewAlpha();
+    const preview = alpha != null;
+    const winsOnly = isWinsOnly(alpha);
+    const ratingLabel = !preview ? 'VTSR-T' : (winsOnly ? 'wins ladder' : 'wins-weighted preview');
     const tier = resolveTier(r.vtsr, r.matches_played);
     let tierTip;
     if (tier.id === 0) {
       tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
     } else if (tier.id === 1) {
-      tierTip = `${tier.label} · ${tier.min}+ VTSR-T · top of the ladder`;
+      tierTip = `${tier.label} · ${tier.min}+ ${ratingLabel} · top of the ladder`;
     } else if (tier.id === 5) {
       const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
-      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${fromFloor} pts above floor`;
+      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} ${ratingLabel} · ${fromFloor} pts above floor`;
     } else {
       const prog = tierProgress(r.vtsr, tier);
-      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
+      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} ${ratingLabel} · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
     }
     const badge = tierBadgeHtml(tier, { title: tierTip });
     const lastDelta = r.last_delta || 0;
@@ -636,21 +865,30 @@
       ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T.`
       : 'No decided rated matches';
 
-    const vtsrValueStr = noiseSigma != null
+    const vtsrValueStr = (!preview && noiseSigma != null)
       ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
-      : `${Math.round(r.vtsr)} VTSR-T`;
-    const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
+      : `${Math.round(r.vtsr)} ${ratingLabel}`;
+    let vtsrTip;
+    if (!preview) {
+      vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
+    } else if (winsOnly) {
+      vtsrTip = `${Math.round(r.vtsr)} on the wins ladder. The axes are off, so this is not the published VTSR-T. Published performance rating ${Math.round(r.thug_elo || r.vtsr)}.`;
+    } else {
+      const pct = Math.round(alpha * 100);
+      vtsrTip = `${Math.round(r.vtsr)} wins-weighted preview: ${pct}% wins ladder, ${100 - pct}% performance. Not the published VTSR-T. Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)}.`;
+    }
 
-    const lastTip = (r.last_match_id && lastDelta !== 0)
+    let lastTip = (r.last_match_id && lastDelta !== 0)
       ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
       : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
+    if (preview) lastTip = `Change in this preview, not the published VTSR-T. ${lastTip}`;
 
     const peakAt = r.peak_at || '';
     const peakTip = peakAt
-      ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
-      : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
+      ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} ${preview ? 'of this preview ' : ''}reached at ${peakAt}`
+      : `Peak ${preview ? 'of this preview' : 'rating'}: ${Math.round(r.peak_vtsr || r.vtsr)}`;
 
-    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <4 min duration`;
+    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} ${ratingLabel} \u00b7 excludes matches with <6 players or <4 min duration`;
 
     const detailHtml = buildVtsrDetailPanel(r, careerRow);
     const progressChip = rank == null ? vtsrProgressChipHtml(r, elo) : '';
@@ -684,12 +922,16 @@
   }
 
   function renderLeaderboard() {
-    const elo = state.elo;
+    syncPreviewChrome();
+    const status = previewStatus();
+    const elo = ratingView === 'wins' ? (winsFiles[winsWeight] || null) : state.elo;
     const $card = document.getElementById('section-vtsr');
     const $empty = document.getElementById('elo-leaderboard-empty');
     if (!$card) return;
 
-    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
+    const canonicalReady = state.elo && Array.isArray(state.elo.ratings) && state.elo.ratings.length > 0;
+    const previewShell = ratingView === 'wins' && canonicalReady && status !== 'ready';
+    if ((!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) && !previewShell) {
       $card.classList.add('d-none');
       if ($empty) $empty.classList.remove('d-none');
       return;
@@ -703,9 +945,10 @@
 
     _vtsrCareerStats = state.careerStats || [];
 
-    const minMatches = vtsrLadderMinMatches(elo);
-    const win = inactivityWindowDays(elo);
-    const need = comebackGamesRequired(elo);
+    const rulesElo = elo || state.elo;
+    const minMatches = vtsrLadderMinMatches(rulesElo);
+    const win = inactivityWindowDays(rulesElo);
+    const need = comebackGamesRequired(rulesElo);
     const $banner = document.getElementById('vtsr-ladder-banner');
     if ($banner) {
       $banner.innerHTML = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
@@ -714,9 +957,20 @@
       </div>`;
     }
 
+    if (previewShell) {
+      const tbody = $card.querySelector('#vtsr-table tbody');
+      if (tbody) tbody.innerHTML = '';
+      const $unrankedWrap = document.getElementById('vtsr-unranked-wrap');
+      if ($unrankedWrap) $unrankedWrap.replaceChildren();
+      ensureTooltips($card);
+      return;
+    }
+
+    const alpha = previewAlpha();
+    const ratings = alpha == null ? elo.ratings : withPreviewDeltas(elo.ratings, alpha);
     const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
-    const ranked = elo.ratings.filter(r => vtsrLadderEligible(r, elo)).slice().sort(sorter);
-    const unranked = elo.ratings.filter(r => !vtsrLadderEligible(r, elo)).slice().sort(sorter);
+    const ranked = ratings.filter(r => vtsrLadderEligible(r, elo)).slice().sort(sorter);
+    const unranked = ratings.filter(r => !vtsrLadderEligible(r, elo)).slice().sort(sorter);
 
     const tbody = $card.querySelector('#vtsr-table tbody');
     tbody.innerHTML = ranked.map((r, i) => renderVtsrLadderRow(r, elo, i + 1, noiseSigma)).join('');
@@ -1310,7 +1564,7 @@
         <p class="mb-1">Under the hood, the number on the leaderboard is a <strong>mix of two ratings</strong> &mdash; one for raw match performance and one for wins &mdash; with a knob that decides the blend:</p>
         ${blendBlock}
         <p class="mb-2 mt-2 text-muted small">The Wins dial isn&rsquo;t a placeholder &mdash; it&rsquo;s a real win/loss ladder that updates on every match with a verified outcome, and each player&rsquo;s value shows in the leaderboard&rsquo;s rating tooltip. What&rsquo;s off is the <strong>mixer</strong>.</p>
-        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. Early recordings often had no provable winner, which kept that wins sample small for a long time (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab); newer matches are signed off, so the gap is closing. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result.</p>
+        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. Early recordings often had no provable winner, which kept that wins sample small for a long time (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab); newer matches are signed off, so the gap is closing. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result. The leaderboard can still preview a 10%, 25%, or 50% mix, or the wins ladder with the axes turned off. None of those previews is the published number.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -1865,10 +2119,44 @@
   // Boot.
   // ----------------------------------------------------------------------
 
+  function bindRatingToggle() {
+    const perfBtn = document.getElementById('vtsr-rating-performance');
+    const winsBtn = document.getElementById('vtsr-rating-wins');
+    const weights = document.getElementById('vtsr-weight-toggle');
+    if (perfBtn) {
+      perfBtn.addEventListener('click', () => {
+        if (ratingView === 'performance') return;
+        ratingView = 'performance';
+        writeRatingUrl();
+        renderLeaderboard();
+      });
+    }
+    if (winsBtn) {
+      winsBtn.addEventListener('click', () => {
+        if (ratingView === 'wins') return;
+        showWinsPreview(winsWeight);
+      });
+    }
+    if (weights) {
+      weights.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-wins-weight]');
+        if (!btn) return;
+        const w = Number(btn.dataset.winsWeight);
+        if (ratingView === 'wins' && w === winsWeight) return;
+        showWinsPreview(w);
+      });
+    }
+  }
+
   async function boot() {
     // Orphaned v2.7 thug-only key — the toggle is gone; drop it so a
     // returning user never carries a stale pref that nothing reads.
     try { localStorage.removeItem('vt.elo_mode'); } catch { /* private mode / storage blocked */ }
+
+    const parsedRating = readRatingFromUrl();
+    ratingView = parsedRating.view;
+    if (parsedRating.view === 'wins') winsWeight = parsedRating.weight;
+    bindRatingToggle();
 
     // "How It's Calculated" on the leaderboard card switches to the
     // How-it-works pill (no modal on this page — the tab IS the modal).
@@ -1893,7 +2181,9 @@
       });
     }
 
-    // Core data, all in parallel + 404-safe.
+    // Core data, all in parallel + 404-safe. A wins deep link fetches
+    // its side file in the same batch so the first paint is that preview.
+    const winsBoot = ratingView === 'wins' ? ensureWinsFile(winsWeight) : Promise.resolve(null);
     const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
@@ -1902,6 +2192,7 @@
       fetchJson(`${DATA}match_contributions.json`),
       fetchJson(`${DATA}elo_commander_current.json`),
       fetchJson(`${DATA}elo_commander_history.json`),
+      winsBoot,
     ]);
     state.elo = elo;
     state.eloHistory = eloHistory;
@@ -1924,6 +2215,7 @@
       }
     }
 
+    if (parsedRating.dirty) writeRatingUrl();
     renderLeaderboard();
     tabRendered[DEFAULT_TAB_TARGET] = true;
 
@@ -1933,8 +2225,24 @@
     activateTabFromUrl();
     window.addEventListener('popstate', () => {
       historyWrites++;
-      try { activateTabFromUrl(); }
-      finally { historyWrites--; }
+      try {
+        activateTabFromUrl();
+        const next = readRatingFromUrl();
+        const prevView = ratingView;
+        const prevWeight = winsWeight;
+        ratingView = next.view;
+        if (next.view === 'wins') winsWeight = next.weight;
+        if (prevView !== ratingView || (ratingView === 'wins' && prevWeight !== winsWeight)) {
+          const viewNow = ratingView;
+          const weightNow = winsWeight;
+          if (viewNow === 'wins') {
+            ensureWinsFile(weightNow).then(() => {
+              if (ratingView === 'wins' && winsWeight === weightNow) renderLeaderboard();
+            });
+          }
+          renderLeaderboard();
+        }
+      } finally { historyWrites--; }
     });
   }
 
