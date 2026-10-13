@@ -315,6 +315,11 @@
     },
     compareMode: false,
     selection:   new Set(),    // Set<steam64-string>
+    // Directory layout. 'grid' until hydrateViewMode() reads storage.
+    // The modal is the only writer of vt-player-view-pref until one
+    // exists; after that the toolbar updates the saved pref itself.
+    viewMode: 'grid',
+    viewModalDismissed: false,
   };
 
   // ---- Helpers ----------------------------------------------------------
@@ -601,7 +606,7 @@
          </span>`
       : '';
     const shipHtml = row.primary_ship
-      ? `<span class="vt-player-card-pill" title="Primary ship (by time)">
+      ? `<span class="vt-player-card-pill vt-player-card-pill--ship" title="Primary ship (by time)">
            <i class="bi bi-fuel-pump"></i><span>${escapeHtml(row.primary_ship)}</span>
          </span>`
       : '';
@@ -680,6 +685,92 @@
     } else {
       el.hidden = true;
     }
+  }
+
+  // ---- Directory grid / list -------------------------------------------
+  //
+  // vt-player-view-pref is written by the default-view modal, and by
+  // the toolbar only after that pref already exists. Dismissing the
+  // modal (close or backdrop) leaves the live layout in place and
+  // saves nothing, so the next switch to list asks again.
+  // vt-player-view-modal-dismissed is set only when "Don't ask me
+  // again" is checked at the moment a modal button is chosen.
+
+  function storedViewPref() {
+    try {
+      const pref = localStorage.getItem('vt-player-view-pref');
+      if (pref === 'grid' || pref === 'list') return pref;
+    } catch (_) { /* private mode / blocked storage */ }
+    return null;
+  }
+
+  function syncViewTogglePressed() {
+    if (dom.viewGridBtn) {
+      dom.viewGridBtn.setAttribute('aria-pressed', state.viewMode === 'grid' ? 'true' : 'false');
+    }
+    if (dom.viewListBtn) {
+      dom.viewListBtn.setAttribute('aria-pressed', state.viewMode === 'list' ? 'true' : 'false');
+    }
+  }
+
+  function viewPrefModalInstance() {
+    if (!dom.viewPrefModal || !window.bootstrap || !window.bootstrap.Modal) return null;
+    return window.bootstrap.Modal.getOrCreateInstance(dom.viewPrefModal);
+  }
+
+  function hideViewPrefModal() {
+    const inst = viewPrefModalInstance();
+    if (inst) inst.hide();
+  }
+
+  function openViewPrefModal() {
+    if (dom.viewPrefDismiss) dom.viewPrefDismiss.checked = true;
+    const inst = viewPrefModalInstance();
+    if (inst) inst.show();
+  }
+
+  function setViewMode(mode, opts) {
+    const fromToggle = !!(opts && opts.fromToggle);
+    if (mode !== 'list') mode = 'grid';
+    if (fromToggle && mode === state.viewMode) return;
+
+    const hadPref = !!storedViewPref();
+    state.viewMode = mode;
+    document.documentElement.dataset.playerView = mode;
+    syncViewTogglePressed();
+
+    if (fromToggle && hadPref) {
+      try { localStorage.setItem('vt-player-view-pref', mode); } catch (_) {}
+    }
+    if (fromToggle && mode !== 'list') hideViewPrefModal();
+    if (mode === 'list' && fromToggle && !state.viewModalDismissed && !hadPref) {
+      openViewPrefModal();
+    }
+  }
+
+  function hydrateViewMode() {
+    let dismissed = false;
+    let mode = 'grid';
+    try {
+      mode = localStorage.getItem('vt-player-view-pref') === 'list' ? 'list' : 'grid';
+      dismissed = localStorage.getItem('vt-player-view-modal-dismissed') === '1';
+    } catch (_) {}
+    state.viewModalDismissed = dismissed;
+    setViewMode(mode);
+  }
+
+  function commitViewPref(pref) {
+    if (pref !== 'grid' && pref !== 'list') return;
+    const dismiss = !!(dom.viewPrefDismiss && dom.viewPrefDismiss.checked);
+    try {
+      localStorage.setItem('vt-player-view-pref', pref);
+      if (dismiss) {
+        localStorage.setItem('vt-player-view-modal-dismissed', '1');
+        state.viewModalDismissed = true;
+      }
+    } catch (_) {}
+    setViewMode(pref);
+    hideViewPrefModal();
   }
 
   function clearFilters() {
@@ -4716,12 +4807,28 @@
         goToCompare();
       }
     });
+
+    if (dom.viewToggle) {
+      dom.viewToggle.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-view]');
+        if (!btn) return;
+        setViewMode(btn.getAttribute('data-view'), { fromToggle: true });
+      });
+    }
+    if (dom.viewPrefModal) {
+      dom.viewPrefModal.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pref]');
+        if (!btn) return;
+        commitViewPref(btn.getAttribute('data-pref'));
+      });
+    }
   }
 
   // ---- Boot -------------------------------------------------------------
 
   async function boot() {
     cacheDom();
+    hydrateViewMode();
 
     state.dataPrefix = detectDataPrefix();
     try {
@@ -4812,6 +4919,11 @@
     dom.compareChips   = $('vt-player-compare-chips');
     dom.compareCount   = $('vt-player-compare-count');
     dom.compareGo      = $('vt-player-compare-go');
+    dom.viewToggle     = document.querySelector('.vt-player-view-toggle');
+    dom.viewGridBtn    = document.querySelector('.vt-player-view-btn[data-view="grid"]');
+    dom.viewListBtn    = document.querySelector('.vt-player-view-btn[data-view="list"]');
+    dom.viewPrefModal  = $('vt-player-view-pref-modal');
+    dom.viewPrefDismiss = $('vt-player-view-pref-dismiss');
     dom.singleHero     = $('vt-player-single-hero');
     dom.singleTabs     = $('vt-player-tabs');
     dom.compareHero    = $('vt-player-compare-hero');

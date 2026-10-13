@@ -24,6 +24,15 @@
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/vtstats-theme.css">
   <link rel="stylesheet" href="../css/player.css">
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem('vt-player-view-pref') === 'list') {
+          document.documentElement.dataset.playerView = 'list';
+        }
+      } catch (_) { /* private mode / blocked storage — ignore */ }
+    })();
+  </script>
 </head>
 <body class="d-flex flex-column h-100">
 
@@ -161,6 +170,19 @@
               <i class="bi bi-search vt-player-search-icon"></i>
               <input type="search" id="vt-player-search" class="form-control vt-player-search-input"
                      placeholder="Search players…" autocomplete="off">
+            </div>
+
+            <!-- View mode stays outside the filter drawer so it remains
+                 visible on phones. Layout only; not a filter. -->
+            <div class="btn-group btn-group-sm vt-player-view-toggle" role="group" aria-label="View mode">
+              <button type="button" class="btn vt-player-view-btn" data-view="grid"
+                      aria-pressed="true" title="Grid view" aria-label="Grid view">
+                <i class="bi bi-grid-3x3-gap-fill"></i>
+              </button>
+              <button type="button" class="btn vt-player-view-btn" data-view="list"
+                      aria-pressed="false" title="List view" aria-label="List view">
+                <i class="bi bi-list-ul"></i>
+              </button>
             </div>
 
             <!-- Mobile-only funnel button: opens the filter offcanvas.
@@ -330,6 +352,34 @@
         </div>
       </div>
     </section>
+
+    <div class="modal fade" id="vt-player-view-pref-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-eye me-2"></i>Set your default view</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-3">Always open Players in this layout from now on?</p>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="vt-player-view-pref-dismiss" checked>
+              <label class="form-check-label" for="vt-player-view-pref-dismiss">
+                Don't ask me again
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-pref="grid">
+              <i class="bi bi-grid-3x3-gap-fill me-1"></i>Default to Gallery
+            </button>
+            <button type="button" class="btn btn-primary" data-pref="list">
+              <i class="bi bi-list-ul me-1"></i>Default to List
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
   </main>
 
