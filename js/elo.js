@@ -6,7 +6,7 @@
  * VTSR-C commander ladder, and four explainer tabs that present the ratings
  * in layman-first language:
  *
- *   VTSR-T Elo (default)    — 13-column sortable table + detail panels.
+ *   VTSR-T Elo (default)    — sortable table + detail panels.
  *   VTSR-C Elo              — sortable experimental commander-ladder
  *                             table (explainer lives on How).
  *   How it works            — annotated ΔR = K(P−E) stage + the 13.1
@@ -236,13 +236,6 @@
         case 'last_delta':     va = a.last_delta || 0;            vb = b.last_delta || 0;            break;
         case 'peak_vtsr':      va = a.peak_vtsr || 0;             vb = b.peak_vtsr || 0;             break;
         case 'matches_played': va = a.matches_played || 0;        vb = b.matches_played || 0;        break;
-        case 'primary_ship': {
-          const ca = (vtsrCareerByName(a) || {}).career_loadout;
-          const cb = (vtsrCareerByName(b) || {}).career_loadout;
-          va = (ca && ca.primary_ship && ca.primary_ship.name) ? String(ca.primary_ship.name).toLowerCase() : '\uffff';
-          vb = (cb && cb.primary_ship && cb.primary_ship.name) ? String(cb.primary_ship.name).toLowerCase() : '\uffff';
-          break;
-        }
         case 'pvp_kd': {
           const ca = vtsrCareerByName(a);
           const cb = vtsrCareerByName(b);
@@ -250,11 +243,17 @@
           vb = cb ? (cb.total_pvp_kills || 0) / Math.max(1, cb.total_pvp_deaths || 0) : -1;
           break;
         }
-        case 'pve_kd': {
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.total_pve_kills || 0) / Math.max(1, ca.total_pve_deaths || 0) : -1;
-          vb = cb ? (cb.total_pve_kills || 0) / Math.max(1, cb.total_pve_deaths || 0) : -1;
+        case 'win_rate': {
+          const rate = (row) => {
+            const rec = row.wins_record || {};
+            const w = rec.w || 0;
+            const l = rec.l || 0;
+            const d = rec.d || 0;
+            const n = w + l + d;
+            return n > 0 ? (w + 0.5 * d) / n : -1;
+          };
+          va = rate(a);
+          vb = rate(b);
           break;
         }
         case 'accuracy': {
@@ -262,13 +261,6 @@
           const cb = vtsrCareerByName(b);
           va = ca ? ((ca.overall_accuracy_est != null ? ca.overall_accuracy_est : ca.overall_accuracy) || 0) : -1;
           vb = cb ? ((cb.overall_accuracy_est != null ? cb.overall_accuracy_est : cb.overall_accuracy) || 0) : -1;
-          break;
-        }
-        case 'pvp_accuracy': {
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.pvp_accuracy || 0) : -1;
-          vb = cb ? (cb.pvp_accuracy || 0) : -1;
           break;
         }
         case 'vtsr':
@@ -599,7 +591,6 @@
     const expanded = expandedVtsrRows.has(rowKey);
 
     const careerRow = vtsrCareerByName(r);
-    const cl = (careerRow && careerRow.career_loadout) || null;
 
     let playerCellAttrs = '';
     const playerTipParts = [];
@@ -612,58 +603,38 @@
       playerCellAttrs = ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(playerTipParts.join(' \u00b7 '))}"`;
     }
 
-    let primaryShipCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
-    if (cl && cl.primary_ship && cl.primary_ship.name) {
-      const psName = cl.primary_ship.name;
-      const psShare = cl.primary_ship.share != null ? (cl.primary_ship.share * 100).toFixed(1) + '%' : '';
-      const ss = cl.secondary_ship;
-      const ssPart = (ss && ss.name && ss.share != null)
-        ? ` \u00b7 secondary ${ss.name} (${(ss.share * 100).toFixed(1)}%)`
-        : '';
-      const diversity = cl.ship_diversity || 0;
-      const diversityPart = diversity > 0
-        ? ` \u00b7 ${diversity} distinct ${diversity === 1 ? 'ship' : 'ships'}`
-        : '';
-      const activeSec = cl.active_seconds || 0;
-      const activeStr = activeSec >= 3600
-        ? (activeSec / 3600).toFixed(1) + 'h active'
-        : Math.round(activeSec / 60) + 'm active';
-      const psTip = `${psName} \u00b7 ${psShare} of ${activeStr}${ssPart}${diversityPart}`;
-      primaryShipCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(psTip)}"><span class="vt-vtsr-primary-class">${esc(psName)}</span></td>`;
-    }
-
     const pvpK = careerRow ? (careerRow.total_pvp_kills || 0) : 0;
     const pvpD = careerRow ? (careerRow.total_pvp_deaths || 0) : 0;
-    const pveK = careerRow ? (careerRow.total_pve_kills || 0) : 0;
-    const pveD = careerRow ? (careerRow.total_pve_deaths || 0) : 0;
     const fmtKd = (k, d) => {
       if (d === 0 && k === 0) return '\u2014';
       if (d === 0) return '\u221e';
       return (k / d).toFixed(2);
     };
     const pvpKdStr = (pvpK + pvpD > 0) ? fmtKd(pvpK, pvpD) : '\u2014';
-    const pveKdStr = (pveK + pveD > 0) ? fmtKd(pveK, pveD) : '\u2014';
     const pvpKdTip = (pvpK + pvpD > 0) ? `${pvpK} PvP kills / ${pvpD} PvP deaths` : 'No PvP combat';
-    const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
 
     const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
     const totalHits  = careerRow ? (careerRow.total_shots_hit_est != null ? careerRow.total_shots_hit_est : (careerRow.total_shots_hit || 0)) : 0;
-    const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
     const accRate = careerRow
       ? ((careerRow.overall_accuracy_est != null ? careerRow.overall_accuracy_est : careerRow.overall_accuracy) || 0)
       : 0;
     const accStr = careerRow
       ? `${careerRow.overall_accuracy_est != null ? '~' : ''}${(accRate * 100).toFixed(1)}%`
       : '\u2014';
-    const pvpAccStr = careerRow
-      ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
-      : '\u2014';
     const accTip = totalShots > 0
       ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${(accRate * 100).toFixed(2)}%${careerRow.overall_accuracy_est != null ? ' (est.)' : ''}`
       : 'No shots fired this career';
-    const pvpAccTip = totalShots > 0
-      ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
-      : 'No shots fired this career';
+
+    const winRec = r.wins_record || {};
+    const winW = winRec.w || 0;
+    const winL = winRec.l || 0;
+    const winD = winRec.d || 0;
+    const winN = winW + winL + winD;
+    const winRateStr = winN > 0 ? `${Math.round(((winW + 0.5 * winD) / winN) * 100)}%` : '\u2014';
+    const winRecordStr = winD > 0 ? `${winW}\u2013${winL}\u2013${winD}` : `${winW}\u2013${winL}`;
+    const winRateTip = winN > 0
+      ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T.`
+      : 'No decided rated matches';
 
     const vtsrValueStr = noiseSigma != null
       ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
@@ -699,18 +670,16 @@
       </td>
       <td class="text-center">${badge}</td>
       <td class="fw-semibold"${playerCellAttrs}>${playerLinkHtml(r.name, r.steam64)}${progressChip}</td>
-      ${primaryShipCell}
       <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(winRateTip)}">${winRateStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
-      <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pveKdTip)}">${pveKdStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
-      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpAccTip)}">${pvpAccStr}</td>
       <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
     </tr>
     <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-      <td colspan="13">${detailHtml}</td>
+      <td colspan="11">${detailHtml}</td>
     </tr>`;
   }
 

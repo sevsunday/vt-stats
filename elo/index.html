@@ -164,7 +164,7 @@
 
     <div class="tab-content" id="elo-tab-content">
 
-      <!-- Tab: Leaderboard (default, eager). The full 13-column sortable
+      <!-- Tab: Leaderboard (default, eager). The full sortable
            table with expandable per-row detail panels — moved here from
            the dashboard's All Matches view. -->
       <div class="tab-pane fade show active" id="elo-tab-leaderboard" role="tabpanel"
@@ -196,30 +196,22 @@
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
                   >Player</th>
-                  <th data-sort="primary_ship" class="text-center"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Primary Ship</strong><br>Most-played ship ODF across the player's career (raw lowercased ODF stem -- e.g. <code>ivscout_vsr</code>, <code>fvtank_vsr</code>). Hover the cell for share + secondary ship + active hours."
-                  >Primary Ship</th>
                   <th data-sort="vtsr" class="text-end sort-active"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
                   >VTSR-T</th>
+                  <th data-sort="win_rate" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Win%</strong><br>How often this player's team won in rated matches with a decided result. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T. Hover a cell for the W&ndash;L record."
+                  >Win%</th>
                   <th data-sort="pvp_kd" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>PvP K/D</strong><br>Career kills against human players &divide; deaths from human players. Click the row chevron for the raw PvP K + PvP D counts and the per-axis breakdown."
                   >PvP K/D</th>
-                  <th data-sort="pve_kd" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>PvE K/D</strong><br>Career kills against AI / structures &divide; deaths from AI / world. Click the row chevron for the raw PvE K + PvE D counts."
-                  >PvE K/D</th>
                   <th data-sort="accuracy" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits. Hover the cell for raw hits / shots."
                   >Acc</th>
-                  <th data-sort="pvp_accuracy" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>PvP Accuracy</strong><br>PvP-only hit rate. The deeper per-weapon breakdown is in the row's expand panel."
-                  >PvP Acc</th>
                   <th data-sort="last_delta" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
@@ -331,7 +323,7 @@
   <script src="../vendor/chartjs/chart.umd.min.js"></script>
   <script src="../js/theme.js"></script>
   <!-- Aggregator: builds the corpus-wide career_stats[] the leaderboard
-       joins its Primary Ship / K/D / accuracy columns from. -->
+       joins its K/D and accuracy columns from. -->
   <script src="../js/all-matches-aggregator.js"></script>
   <!-- Shared explainer content + annotated-stage engine (also loaded by
        the dashboard for its methodology modal). -->
