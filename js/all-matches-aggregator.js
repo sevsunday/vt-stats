@@ -408,7 +408,10 @@
       f: { i: { wins: 0, games: 0 }, e: { wins: 0, games: 0 }, f: { wins: 0, games: 0 } },
     };
     // meta_charts: per-map roll, duration histogram, player count histogram,
-    // submitter histogram, matches-over-time (ISO week buckets).
+    // submitter histogram, matches-over-time (ISO week buckets), and the
+    // raw start instants for the When-games-are-played charts. Those
+    // instants stay unbucketed so the renderer can apply the viewer's
+    // timezone. This file does not read the community ledger.
     // mapRows factions are cross-faction determined games only (same rule
     // as matchup off-diagonal cells). count is every non-void game.
     const mapRows = new Map();
@@ -416,6 +419,7 @@
     const playerCounts  = Object.create(null);
     const submitterCounts = new Map(); // submitter -> count
     const overTimeWeeks  = new Map();  // 'YYYY-Www' -> count
+    const startTimes = [];             // ISO instants, picker-scoped, non-void
 
     // Iterate in the order ids were passed; the final career_stats /
     // weapon_meta sorts are deterministic regardless of iteration order
@@ -504,7 +508,10 @@
       playerCounts[pc] = (playerCounts[pc] || 0) + 1;
       if (m.submitter) submitterCounts.set(m.submitter, (submitterCounts.get(m.submitter) || 0) + 1);
       const wk = isoWeek(m.date);
-      if (wk) overTimeWeeks.set(wk, (overTimeWeeks.get(wk) || 0) + 1);
+      if (wk) {
+        overTimeWeeks.set(wk, (overTimeWeeks.get(wk) || 0) + 1);
+        startTimes.push(m.date);
+      }
 
       // Commander head-to-head: pair team-1 commander (slot 1) with team-2
       // commander (slot 6) when both are present in this match's leaderboard.
@@ -1324,6 +1331,7 @@
         player_counts:     playerCounts,
         submitters:        submitterRows,
         matches_over_time: matchesOverTime,
+        start_times:       startTimes,
       },
       career_highlights: careerHighlights,
     };

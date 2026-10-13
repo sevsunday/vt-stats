@@ -15,9 +15,9 @@ committed artifacts:
                                    adjudication jogger)
   data/external/f9_community.json  display-only rollups (thug team
                                    records, commander records, faction
-                                   picks, map counts) consumed 404-safe
-                                   by js/player.js, js/app.js (Meta tab)
-                                   and js/maps.js
+                                   picks, map counts, play_dates) consumed
+                                   404-safe by js/player.js, js/app.js
+                                   (Meta tab) and js/maps.js
 
 THIS SCRIPT IS NOT PART OF THE PIPELINE. It runs once per ledger drop
 (`python scripts/import_f9_ledger.py`), requires openpyxl (import-time
@@ -632,6 +632,9 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
         "generated_at": ledger["provenance"]["imported_at"],
         "duel_count": len(ledger_duels),
         "date_range": [min(dates), max(dates)] if dates else [None, None],
+        # Calendar days only (YYYY-MM-DD). The sheet has no clock time.
+        # Overlap rows are already absent from ledger_duels.
+        "play_dates": dates,
         "thug_records": record_rows(thug_rec, "team_wins", "team_losses"),
         "commander_records": record_rows(cmdr_rec, "wins", "losses"),
         "faction_stats": faction_stats,

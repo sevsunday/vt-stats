@@ -3485,11 +3485,14 @@ Faction codes are lowercase (`i`/`e`/`f` = ISDF/Hadean/Scion), matching the pipe
   "duration_bands": { "under5": 6, "5to10": 9, "10to15": 17, "15plus": 32 },
   "player_counts":  { "10": 45, "8": 8, "6": 3, ... },
   "submitters":     [{ "submitter": "VTrider", "count": 64 }, ...],
-  "matches_over_time": [{ "week_iso": "2026-W16", "count": 8 }, ...]
+  "matches_over_time": [{ "week_iso": "2026-W16", "count": 8 }, ...],
+  "start_times":    ["2026-04-16T01:27:48.447651+00:00", ...]
 }
 ```
 
 `maps[]` is sorted by `count` descending. `count` is every non-void game on that map. `factions[code]` is `{wins, games}` for that faction's record on the map against a different known faction: a game counts only when `winner.team` is 1 or 2 (draws, cancellations, and unclear games stay out; a contested game with a team winner counts) and the two faction codes differ. Mirror games and a game with one unknown faction stay out, so the three rates need not sum to 100% and `wins + losses` across factions is not `count`. The Meta tab shows the top 15 and hides a percent under 5 determined games. Picker-scoped. Not a rating input. The per-map page's own faction win-rate card also counts F9 community games and mirror games, so the two numbers can differ. ISO week ids follow `strftime("%G-W%V")` (the year is the ISO week-numbering year, not the calendar year).
+
+`start_times` is the ISO start instant (`date` on the contribution) of every non-void match in the picker scope, in the order the aggregator walked them. The Meta **Start hour**, **Day of week**, and **Month** charts bucket those instants in the viewer's timezone, or in a zone the viewer picks (Central, Eastern, Mountain, Pacific, UTC). Each game counts in the hour it started. The community ledger is not in this list. Its `play_dates` (`YYYY-MM-DD`, no clock time) join the weekday and month charts only, and only while the match picker is clear. Those dates stay on the sheet's calendar day when the timezone changes. Games present in both corpora are already absent from `play_dates`, so a stacked bar counts each game once. Not a rating input.
 
 ### `career_highlights`
 
@@ -3692,7 +3695,7 @@ roster-complete → commanders parse as `A vs B` (names de-duped per side, comma
 
 ### `data/external/f9_community.json` (display-only rollups)
 
-`{schema_version: 1, provider: {name, url}, generated_at, duel_count, date_range, thug_records: [{steam64|null, name, team_wins, team_losses, games}], commander_records: [{…, wins, losses, games}], faction_stats: {i/e/f: {picks, wins}}, maps: [{map_key|null, title, games}]}`. Consumers (all 404-safe, all crediting `F9bomber` → `https://f9bomber.com`): the player-page Overview community-record strip (`js/player.js` — copy states **team outcomes, not a skill rating**; never a VTSR-T input), the All Matches → Meta **Community Ledger** card (`js/app.js` `renderF9CommunityCard()` — deliberately separate from picker-scoped `faction_stats`), and the per-map Matches figure (`js/maps.js` — `play_count` adds these games to recorded `match_count`; the split and the F9bomber credit live on that stat's tooltip; `match_count` itself stays recorded sessions).
+`{schema_version: 1, provider: {name, url}, generated_at, duel_count, date_range, play_dates: ["YYYY-MM-DD", ...], thug_records: [{steam64|null, name, team_wins, team_losses, games}], commander_records: [{…, wins, losses, games}], faction_stats: {i/e/f: {picks, wins}}, maps: [{map_key|null, title, games}]}`. `play_dates` is one calendar day per gated duel, in ledger order, with no clock time (the sheet's `Time` column is match length). Overlap rows are already absent. The All Matches Meta weekday and month charts read it; the hour chart does not. Consumers (all 404-safe, all crediting `F9bomber` → `https://f9bomber.com`): the player-page Overview community-record strip (`js/player.js` — copy states **team outcomes, not a skill rating**; never a VTSR-T input), the All Matches → Meta **Community Ledger** card (`js/app.js` `renderF9CommunityCard()` — deliberately separate from picker-scoped `faction_stats`), and the per-map Matches figure (`js/maps.js` — `play_count` adds these games to recorded `match_count`; the split and the F9bomber credit live on that stat's tooltip; `match_count` itself stays recorded sessions).
 
 ### VTSR-C surface changes (schema 3)
 

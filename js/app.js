@@ -3735,7 +3735,7 @@
 
     registerTabRenderer('#all-tab-meta', () => {
       const mc = data.meta_charts || {
-        maps: [], duration_bands: {}, player_counts: {}, submitters: [], matches_over_time: [],
+        maps: [], duration_bands: {}, player_counts: {}, submitters: [], matches_over_time: [], start_times: [],
       };
       const fs = data.faction_stats || { win_counts: {} };
       const mapNameResolver = (mapFile) => {
@@ -3755,7 +3755,7 @@
       renderMetaFactionWinrate('meta-faction-winrate-canvas',   fs.win_counts);
       renderMetaDurationHistogram('meta-duration-canvas',       mc.duration_bands);
       renderMetaPlayerCount('meta-playercount-canvas',          mc.player_counts);
-      renderMetaOverTime('meta-overtime-canvas',                mc.matches_over_time);
+      renderWhenPlayed(mc.start_times || []);
       renderF9CommunityCard();
     });
 
@@ -3772,6 +3772,12 @@
       const allOverviewBtn = document.getElementById('all-tab-overview-btn');
       if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
     }
+    // Bootstrap does not re-fire shown.bs.tab when that pill is already
+    // active, so a picker re-aggregate while Meta is open would leave
+    // the charts destroyed. Render the open pane if it has not run yet.
+    const activeAllBtn = document.querySelector('#all-tabs .nav-link.active');
+    const activeAllTarget = activeAllBtn && activeAllBtn.getAttribute('data-bs-target');
+    if (activeAllTarget) renderTabIfNeeded(activeAllTarget);
 
     syncUrl(dashboardHistoryLive ? 'push' : 'replace');
     dashboardHistoryLive = true;
@@ -7847,7 +7853,181 @@
     ensureF9CommunityLoaded().then(paintHeroCommunity);
   }
 
-  // ---- Community ledger (display-only, never folded into VTAggregate) --
+  // ---- When games are played (Meta tab) ----
+  // Recorded start instants come from the picker-scoped aggregate.
+  // F9bomber's dates are calendar days and join weekday, month, and
+  // the weekly line only while the picker is clear. The timezone
+  // select is static HTML so a tab rebuild does not reset it.
+  const PLAYTIME_TZ_KEY = 'vt.playtime.tz';
+  const PLAYTIME_TZ_VALUES = [
+    'local',
+    'America/Los_Angeles',
+    'America/Denver',
+    'America/Chicago',
+    'America/New_York',
+    'Europe/London',
+    'Europe/Berlin',
+    'Australia/Sydney',
+    'UTC',
+  ];
+  const PLAYTIME_TZ_NAMES = {
+    local: 'Your timezone',
+    'America/Los_Angeles': 'Pacific',
+    'America/Denver': 'Mountain',
+    'America/Chicago': 'Central',
+    'America/New_York': 'Eastern',
+    'Europe/London': 'London',
+    'Europe/Berlin': 'Germany',
+    'Australia/Sydney': 'Sydney',
+    UTC: 'UTC',
+  };
+  let whenPlayedStartTimes = [];
+  let whenPlayedBucket = null;
+  let whenPlayedGen = 0;
+
+  function viewerTimeZone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (e) {
+      return 'UTC';
+    }
+  }
+
+  function utcOffsetLabel(timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone || 'UTC',
+        timeZoneName: 'shortOffset',
+      }).formatToParts(new Date());
+      let raw = (parts.find(p => p.type === 'timeZoneName') || {}).value || 'GMT';
+      raw = raw.replace(/^GMT/i, '').trim();
+      if (!raw) return 'UTC';
+      const m = /^([+-])(\d{1,2})(?::(\d{2}))?$/.exec(raw);
+      if (!m) return 'UTC';
+      const sign = m[1] === '-' ? '\u2212' : '+';
+      const hours = String(Number(m[2]));
+      const mins = m[3] && m[3] !== '00' ? ':' + m[3] : '';
+      return 'UTC' + sign + hours + mins;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function playtimeOptionLabel(value) {
+    const name = PLAYTIME_TZ_NAMES[value] || value;
+    if (value === 'UTC') return 'UTC';
+    const zone = value === 'local' ? viewerTimeZone() : value;
+    const off = utcOffsetLabel(zone);
+    if (!off || off === 'UTC') return value === 'local' ? 'Your timezone' : name;
+    return name + ' (' + off + ')';
+  }
+
+  function initWhenPlayedTimezone() {
+    const sel = document.getElementById('meta-when-tz');
+    if (!sel || sel.dataset.wired === '1') return;
+    sel.dataset.wired = '1';
+    sel.querySelectorAll('option').forEach(opt => {
+      opt.textContent = playtimeOptionLabel(opt.value);
+    });
+    let stored = 'local';
+    try { stored = localStorage.getItem(PLAYTIME_TZ_KEY) || 'local'; } catch (e) {}
+    if (PLAYTIME_TZ_VALUES.indexOf(stored) < 0) stored = 'local';
+    if (stored !== 'local') {
+      try { Intl.DateTimeFormat('en-US', { timeZone: stored }); }
+      catch (e) { stored = 'local'; }
+    }
+    sel.value = stored;
+    sel.addEventListener('change', () => {
+      const value = PLAYTIME_TZ_VALUES.indexOf(sel.value) >= 0 ? sel.value : 'local';
+      if (value !== sel.value) sel.value = value;
+      try { localStorage.setItem(PLAYTIME_TZ_KEY, value); } catch (e) {}
+      repaintWhenPlayed();
+    });
+  }
+
+  function readPlaytimePref() {
+    const sel = document.getElementById('meta-when-tz');
+    if (sel && sel.dataset.wired === '1' && PLAYTIME_TZ_VALUES.indexOf(sel.value) >= 0) return sel.value;
+    return 'local';
+  }
+
+  function resolvePlaytimeZone(pref) {
+    if (!pref || pref === 'local') return viewerTimeZone();
+    try {
+      Intl.DateTimeFormat('en-US', { timeZone: pref });
+      return pref;
+    } catch (e) {
+      return viewerTimeZone();
+    }
+  }
+
+  function playtimeZoneLabel(pref, resolved) {
+    if (pref && pref !== 'local' && PLAYTIME_TZ_NAMES[pref]) return PLAYTIME_TZ_NAMES[pref];
+    if (PLAYTIME_TZ_NAMES[resolved]) return PLAYTIME_TZ_NAMES[resolved];
+    return String(resolved || 'UTC').replace(/_/g, ' ');
+  }
+
+  function whenPlayedSummary(bucket, zoneLabel) {
+    if (!bucket || !bucket.recorded) return 'No recorded matches in this view.';
+    const h = bucket.busiestHour;
+    const n = bucket.hours[h] || 0;
+    const games = n === 1 ? 'game' : 'games';
+    const pct = Math.round((100 * bucket.evening) / bucket.recorded);
+    const hourText = (typeof formatHourLong === 'function') ? formatHourLong(h) : String(h);
+    const where = zoneLabel.indexOf('/') >= 0
+      ? hourText + ' (' + zoneLabel + ', ' + n + ' ' + games + ')'
+      : hourText + ' ' + zoneLabel + ' (' + n + ' ' + games + ')';
+    return 'Busiest hour is ' + where + '. 7:00\u201310:00 PM accounts for ' + pct + '% of recorded starts.';
+  }
+
+  function paintWhenPlayed(startTimes, comm) {
+    if (typeof bucketWhenPlayed !== 'function') return;
+    initWhenPlayedTimezone();
+    whenPlayedStartTimes = startTimes || [];
+    const filtered = hasAnyFilterEngaged(pickerState);
+    const playDates = (comm && Array.isArray(comm.play_dates)) ? comm.play_dates : [];
+    const includeCommunity = !filtered && playDates.length > 0;
+    const pref = readPlaytimePref();
+    const timeZone = resolvePlaytimeZone(pref);
+    const zoneLabel = playtimeZoneLabel(pref, timeZone);
+    const bucket = bucketWhenPlayed({
+      startTimes: whenPlayedStartTimes,
+      playDates: playDates,
+      includeCommunity: includeCommunity,
+      timeZone: timeZone,
+    });
+    whenPlayedBucket = bucket;
+    const summary = document.getElementById('meta-when-hour-summary');
+    if (summary) summary.textContent = whenPlayedSummary(bucket, zoneLabel);
+    renderMetaWhenHour('meta-when-hour-canvas', bucket);
+    renderMetaWhenWeekday('meta-when-weekday-canvas', bucket);
+    renderMetaWhenMonth('meta-when-month-canvas', bucket);
+    if (typeof renderMetaWhenWeeks === 'function') {
+      renderMetaWhenWeeks('meta-overtime-canvas', bucket);
+    }
+  }
+
+  function renderWhenPlayed(startTimes) {
+    const gen = ++whenPlayedGen;
+    whenPlayedStartTimes = startTimes || [];
+    const paint = (comm) => {
+      if (gen !== whenPlayedGen) return;
+      if (currentTarget !== '__all__') return;
+      paintWhenPlayed(whenPlayedStartTimes, comm);
+    };
+    // Draw recorded bars immediately. F9bomber's dates arrive with the
+    // sheet fetch and the same generation repaints the combined totals.
+    paint(f9CommunityCache);
+    if (f9CommunityCache === undefined) ensureF9CommunityLoaded().then(paint);
+  }
+
+  function repaintWhenPlayed() {
+    if (currentTarget !== '__all__') return;
+    if (!tabRendered['#all-tab-meta']) return;
+    paintWhenPlayed(whenPlayedStartTimes, f9CommunityCache || null);
+  }
+
+  // ---- F9bomber's stats (display-only, never folded into VTAggregate) --
   // Static rollup of F9bomber's hand-kept match ledger
   // (data/external/f9_community.json). Corpus-wide reference data:
   // deliberately NOT merged into the picker-scoped faction_stats /
@@ -7917,10 +8097,9 @@
       }).join('');
       body.innerHTML = `
         <p class="small text-secondary mb-2">
-          ${comm.duel_count.toLocaleString()} hand-logged community matches
-          (${esc(range[0] || '?')} \u2192 ${esc(range[1] || '?')}), even 3v3/4v4/5v5 lobbies only,
-          deduplicated against recorded matches. Kept separate from the recorded-corpus
-          charts above on purpose.
+          ${comm.duel_count.toLocaleString()} matches in
+          <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>'s stats
+          (${esc(range[0] || '?')} \u2192 ${esc(range[1] || '?')}), even 3v3/4v4/5v5 lobbies only.
         </p>
         <div class="row g-3">
           <div class="col-md-4">
@@ -8449,12 +8628,12 @@
               <th>Commander</th>
               <th class="text-end">VTSR-C</th>
               <th class="text-end">Recorded W\u2013L</th>
-              <th class="text-end">Community W\u2013L</th>
+              <th class="text-end">F9bomber W\u2013L</th>
             </tr></thead>
             <tbody>${bodyRows}</tbody>
           </table>
         </div>
-        <p class="text-muted small mb-0">VTSR-C ranks recorded duels and the community ledger together. The win columns stay separate. Recorded wins follow the match picker. Community wins are the full ledger from <a href="${esc(creditUrl)}" target="_blank" rel="noopener">${esc(creditName)}</a>.</p>`;
+        <p class="text-muted small mb-0">VTSR-C ranks recorded duels and <a href="${esc(creditUrl)}" target="_blank" rel="noopener">${esc(creditName)}</a>'s stats together. The win columns stay separate. Recorded wins follow the match picker.</p>`;
       card.classList.remove('d-none');
     };
 
@@ -9911,6 +10090,19 @@
         careerScale: careerRadarState.mode,
       });
     });
+    registerChartRenderer('section-meta-when-hour', (canvasId) => {
+      return whenPlayedBucket ? renderMetaWhenHour(canvasId, whenPlayedBucket) : null;
+    });
+    registerChartRenderer('section-meta-when-weekday', (canvasId) => {
+      return whenPlayedBucket ? renderMetaWhenWeekday(canvasId, whenPlayedBucket) : null;
+    });
+    registerChartRenderer('section-meta-when-month', (canvasId) => {
+      return whenPlayedBucket ? renderMetaWhenMonth(canvasId, whenPlayedBucket) : null;
+    });
+    registerChartRenderer('section-meta-over-time', (canvasId) => {
+      return whenPlayedBucket && typeof renderMetaWhenWeeks === 'function'
+        ? renderMetaWhenWeeks(canvasId, whenPlayedBucket) : null;
+    });
   }
 
   // --- Helpers ---
@@ -10122,6 +10314,8 @@
       else clearRecordStatsDismissed();
     });
   }
+
+  initWhenPlayedTimezone();
 
   // Gate the boot sequence behind the "How to record your stats" modal
   // until the user dismisses it. The dismissal flag is independent of

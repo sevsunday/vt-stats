@@ -1555,23 +1555,21 @@
       <!-- All Tab: Meta — corpus-distribution charts -->
       <div class="tab-pane fade" id="all-tab-meta" role="tabpanel" aria-labelledby="all-tab-meta-btn">
         <div class="row g-4 mb-4">
-          <div class="col-lg-12">
+          <div class="col-lg-6 vt-meta-maps-col">
             <div class="card h-100" id="section-meta-maps">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <div class="d-flex align-items-center gap-2">
                   <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Faction win rate by map</h5>
                   <i class="bi bi-info-circle vt-col-info"
                      data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                     title="&lt;strong&gt;Faction win rate by map&lt;/strong&gt;&lt;br&gt;Each row is a map. Each percent is that faction&#39;s win rate on the map against a different known faction. The other faction in that game takes the loss.&lt;br&gt;&lt;br&gt;Mirror games and a game with an unknown opponent are left out. Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;The 15 maps with the most games in the current picker are listed. This table follows the match picker. The map page&#39;s own win-rate card also counts community ledger games."></i>
+                     title="&lt;strong&gt;Faction win rate by map&lt;/strong&gt;&lt;br&gt;Each row is a map. Each percent is that faction&#39;s win rate on the map against a different known faction. The other faction in that game takes the loss.&lt;br&gt;&lt;br&gt;Mirror games and a game with an unknown opponent are left out. Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;The 15 maps with the most games in the current picker are listed. This table follows the match picker. The map page&#39;s own win-rate card also counts F9bomber&#39;s stats."></i>
                 </div>
                 <button class="btn btn-sm" data-expand="section-meta-maps" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
               <div class="card-body" id="meta-maps-body"></div>
             </div>
           </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-12">
+          <div class="col-lg-6">
             <div class="card h-100" id="section-meta-faction-matchups">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <div class="d-flex align-items-center gap-2">
@@ -1598,7 +1596,7 @@
           </div>
         </div>
         <div class="row g-4 mb-4">
-          <div class="col-lg-4">
+          <div class="col-lg-6">
             <div class="card h-100" id="section-meta-duration-histogram">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Match Duration</h5>
@@ -1607,7 +1605,7 @@
               <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-duration-canvas"></canvas></div></div>
             </div>
           </div>
-          <div class="col-lg-4">
+          <div class="col-lg-6">
             <div class="card h-100" id="section-meta-player-counts">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Player Count</h5>
@@ -1616,7 +1614,61 @@
               <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-playercount-canvas"></canvas></div></div>
             </div>
           </div>
-          <div class="col-lg-4">
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-12">
+            <div class="card h-100" id="section-meta-when-hour">
+              <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Start hour</h5>
+                <div class="d-flex align-items-center gap-2">
+                  <label for="meta-when-tz" class="visually-hidden">Timezone</label>
+                  <select id="meta-when-tz" class="form-select form-select-sm vt-when-tz" autocomplete="off">
+                    <option value="local">Your timezone</option>
+                    <option value="America/Los_Angeles">Pacific</option>
+                    <option value="America/Denver">Mountain</option>
+                    <option value="America/Chicago">Central</option>
+                    <option value="America/New_York">Eastern</option>
+                    <option value="Europe/London">London</option>
+                    <option value="Europe/Berlin">Germany</option>
+                    <option value="Australia/Sydney">Sydney</option>
+                    <option value="UTC">UTC</option>
+                  </select>
+                  <button class="btn btn-sm" data-expand="section-meta-when-hour" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="chart-container" style="height:260px;"><canvas id="meta-when-hour-canvas"></canvas></div>
+                <p class="small mb-0 mt-2" id="meta-when-hour-summary"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-meta-when-weekday">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Day of week</h5>
+                <button class="btn btn-sm" data-expand="section-meta-when-weekday" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body">
+                <div class="chart-container" style="height:240px;"><canvas id="meta-when-weekday-canvas"></canvas></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-meta-when-month">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Month</h5>
+                <button class="btn btn-sm" data-expand="section-meta-when-month" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body">
+                <div class="chart-container" style="height:240px;"><canvas id="meta-when-month-canvas"></canvas></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-12">
             <div class="card h-100" id="section-meta-over-time">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Matches Over Time</h5>
@@ -1628,12 +1680,12 @@
         </div>
         <div class="row g-4 mb-4">
           <div class="col-12">
-            <!-- Community ledger card (F9bomber; static counts, hides on 404).
-                 Corpus-wide reference data — deliberately NOT part of the
-                 picker-scoped faction_stats above. -->
+            <!-- F9bomber's stats (static counts, hides on 404).
+                 Corpus-wide reference data — not part of the picker-scoped
+                 faction_stats above. -->
             <div class="card h-100 d-none" id="section-f9-community">
               <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Community Ledger</h5>
+                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>F9bomber's stats</h5>
               </div>
               <div class="card-body" id="f9-community-body"></div>
             </div>

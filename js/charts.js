@@ -1350,13 +1350,13 @@ function renderMetaPlayerCount(canvasId, playerCounts) {
   return chart;
 }
 
-function renderMetaOverTime(canvasId, weeks) {
+function renderMetaOverTime(canvasId, labels, values) {
   applyThemeDefaults();
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
+  destroyChartOnCanvas(canvasId);
+  if (!labels || !labels.length) return null;
   const ctx = canvas.getContext('2d');
-  const labels = (weeks || []).map(w => w.week_iso);
-  const values = (weeks || []).map(w => w.count);
   const primary = getCSSVar('--kb-primary') || '#4d7cff';
   const chart = new Chart(ctx, {
     type: 'line',
@@ -1384,4 +1384,279 @@ function renderMetaOverTime(canvasId, weeks) {
   });
   activeCharts.push(chart);
   return chart;
+}
+
+// --- When games are played (All Matches → Meta) ---
+// Recorded instants are bucketed here, not in the aggregator, so a
+// timezone change can redraw without re-aggregating. F9bomber's dates
+// are calendar days with no clock time; they never enter the hour
+// chart and they do not move with the timezone. Weekly buckets stay
+// UTC, matching isoWeek() in all-matches-aggregator.js.
+
+const WHEN_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WHEN_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatHourLong(h) {
+  const hour12 = h % 12 || 12;
+  return hour12 + (h < 12 ? ' AM' : ' PM');
+}
+
+function formatHourTick(h) {
+  const hour12 = h % 12 || 12;
+  return hour12 + (h < 12 ? 'a' : 'p');
+}
+
+function destroyChartOnCanvas(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === 'undefined' || typeof Chart.getChart !== 'function') return;
+  const existing = Chart.getChart(canvas);
+  if (!existing) return;
+  activeCharts = activeCharts.filter(c => c !== existing);
+  existing.destroy();
+}
+
+function isoWeekId(dateStr) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return d.getUTCFullYear() + '-W' + String(weekNo).padStart(2, '0');
+}
+
+function zonedParts(iso, timeZone) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timeZone || 'UTC',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    weekday: 'short',
+  });
+  const read = (parts, type) => {
+    const p = parts.find(x => x.type === type);
+    return p ? p.value : '';
+  };
+  let parts = fmt.formatToParts(d);
+  let hour = parseInt(read(parts, 'hour'), 10);
+  let weekday = read(parts, 'weekday');
+  let year = read(parts, 'year');
+  let month = read(parts, 'month');
+  // Some engines report midnight as 24:00 on the previous calendar day.
+  if (hour === 24) {
+    parts = fmt.formatToParts(new Date(d.getTime() + 60 * 60 * 1000));
+    hour = 0;
+    weekday = read(parts, 'weekday');
+    year = read(parts, 'year');
+    month = read(parts, 'month');
+  }
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  const monthNum = parseInt(month, 10);
+  if (!year || !Number.isFinite(monthNum) || monthNum < 1 || monthNum > 12 || !weekday) return null;
+  return { hour, weekday, ym: year + '-' + String(monthNum).padStart(2, '0') };
+}
+
+function communityCalendarParts(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, day));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== day) return null;
+  return {
+    weekday: WHEN_WEEKDAYS[dt.getUTCDay()],
+    ym: m[1] + '-' + m[2],
+  };
+}
+
+function enumerateMonths(keys) {
+  if (!keys.length) return [];
+  const sorted = keys.slice().sort();
+  const start = sorted[0].split('-').map(Number);
+  const end = sorted[sorted.length - 1].split('-').map(Number);
+  const out = [];
+  let y = start[0];
+  let m = start[1];
+  for (let i = 0; i < 240; i++) {
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    if (y === end[0] && m === end[1]) break;
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+function monthLabel(ym) {
+  const parts = String(ym).split('-');
+  const name = WHEN_MONTH_NAMES[Number(parts[1]) - 1] || parts[1];
+  return name + ' ' + parts[0];
+}
+
+function bucketWhenPlayed(payload) {
+  const p = payload || {};
+  const hours = new Array(24).fill(0);
+  const dowRec = new Array(7).fill(0);
+  const dowCom = new Array(7).fill(0);
+  const monthRec = new Map();
+  const monthCom = new Map();
+  const weekRec = new Map();
+  const weekCom = new Map();
+  let recorded = 0;
+  for (const iso of p.startTimes || []) {
+    const parts = zonedParts(iso, p.timeZone);
+    if (!parts) continue;
+    const di = WHEN_WEEKDAYS.indexOf(parts.weekday);
+    if (di < 0) continue;
+    recorded += 1;
+    hours[parts.hour] += 1;
+    dowRec[di] += 1;
+    monthRec.set(parts.ym, (monthRec.get(parts.ym) || 0) + 1);
+    const wk = isoWeekId(iso);
+    if (wk) weekRec.set(wk, (weekRec.get(wk) || 0) + 1);
+  }
+  if (p.includeCommunity) {
+    for (const date of p.playDates || []) {
+      const parts = communityCalendarParts(date);
+      if (!parts) continue;
+      const di = WHEN_WEEKDAYS.indexOf(parts.weekday);
+      if (di >= 0) dowCom[di] += 1;
+      monthCom.set(parts.ym, (monthCom.get(parts.ym) || 0) + 1);
+      const wk = isoWeekId(date);
+      if (wk) weekCom.set(wk, (weekCom.get(wk) || 0) + 1);
+    }
+  }
+  let busiestHour = 0;
+  for (let h = 1; h < 24; h++) {
+    if (hours[h] > hours[busiestHour]) busiestHour = h;
+  }
+  return {
+    hours,
+    dowRec,
+    dowCom,
+    monthRec,
+    monthCom,
+    weekRec,
+    weekCom,
+    recorded,
+    busiestHour,
+    evening: hours[19] + hours[20] + hours[21],
+    includeCommunity: !!p.includeCommunity,
+  };
+}
+
+function renderWhenBarChart(canvasId, config) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  destroyChartOnCanvas(canvasId);
+  const primary = getCSSVar('--kb-primary') || '#4d7cff';
+  const datasets = [{
+    label: 'Games',
+    data: config.recorded,
+    backgroundColor: withAlpha(primary, 0.8),
+    borderColor: primary,
+    borderWidth: 1,
+  }];
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: config.labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => {
+              const n = Number(item.raw) || 0;
+              return n + (n === 1 ? ' game' : ' games');
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: config.ticks || { font: { size: 10 } } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+function renderMetaWhenHour(canvasId, bucket) {
+  const b = bucket || { hours: new Array(24).fill(0) };
+  const labels = [];
+  for (let h = 0; h < 24; h++) labels.push(formatHourLong(h));
+  return renderWhenBarChart(canvasId, {
+    labels,
+    recorded: b.hours || labels.map(() => 0),
+    ticks: {
+      maxRotation: 0,
+      autoSkip: true,
+      font: { size: 10 },
+      callback: (value) => {
+        const h = Number(value);
+        return Number.isFinite(h) ? formatHourTick(h) : '';
+      },
+    },
+  });
+}
+
+function combinedCounts(rec, extra, includeExtra) {
+  const out = (rec || []).slice();
+  if (!includeExtra) return out;
+  for (let i = 0; i < out.length; i++) out[i] += (extra && extra[i]) || 0;
+  return out;
+}
+
+function renderMetaWhenWeekday(canvasId, bucket) {
+  const b = bucket || { dowRec: new Array(7).fill(0), includeCommunity: false };
+  return renderWhenBarChart(canvasId, {
+    labels: WHEN_WEEKDAYS,
+    recorded: combinedCounts(b.dowRec, b.dowCom, b.includeCommunity),
+    ticks: { maxRotation: 0, autoSkip: false, font: { size: 11 } },
+  });
+}
+
+function renderMetaWhenMonth(canvasId, bucket) {
+  const b = bucket || { monthRec: new Map(), monthCom: new Map(), includeCommunity: false };
+  const keys = [];
+  if (b.monthRec) b.monthRec.forEach((_, k) => keys.push(k));
+  if (b.includeCommunity && b.monthCom) {
+    b.monthCom.forEach((_, k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  }
+  const yms = enumerateMonths(keys);
+  if (!yms.length) {
+    destroyChartOnCanvas(canvasId);
+    return null;
+  }
+  return renderWhenBarChart(canvasId, {
+    labels: yms.map(monthLabel),
+    recorded: yms.map(ym => ((b.monthRec && b.monthRec.get(ym)) || 0) + (b.includeCommunity && b.monthCom ? (b.monthCom.get(ym) || 0) : 0)),
+    ticks: { maxRotation: 60, minRotation: 0, autoSkip: true, font: { size: 10 } },
+  });
+}
+
+function renderMetaWhenWeeks(canvasId, bucket) {
+  const b = bucket || { weekRec: new Map(), weekCom: new Map(), includeCommunity: false };
+  const keys = [];
+  if (b.weekRec) b.weekRec.forEach((_, k) => keys.push(k));
+  if (b.includeCommunity && b.weekCom) {
+    b.weekCom.forEach((_, k) => { if (keys.indexOf(k) < 0) keys.push(k); });
+  }
+  keys.sort();
+  if (!keys.length) {
+    destroyChartOnCanvas(canvasId);
+    return null;
+  }
+  const values = keys.map(k => ((b.weekRec && b.weekRec.get(k)) || 0) + (b.includeCommunity && b.weekCom ? (b.weekCom.get(k) || 0) : 0));
+  return renderMetaOverTime(canvasId, keys, values);
 }
