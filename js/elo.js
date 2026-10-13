@@ -298,9 +298,9 @@
       return `<div class="alert alert-secondary py-2 px-3 mb-3 small">Could not load <code>elo_current_alpha${winsWeight}.json</code>. This preview stays empty until that file is present.</div>`;
     }
     const alpha = previewAlpha();
-    const common = 'This is not the published VTSR-T. The accuracy tests have not cleared folding wins into the published rating. Tiers use the same cuts. Player pages still show the published rating.';
+    const common = 'This is not the published VTSR-T. The accuracy tests have not cleared folding wins into the published rating. Player pages still show the published rating.';
     if (isWinsOnly(alpha)) {
-      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">The axes are off. This number is the wins ladder only. ${common} This ladder only spans the wins ratings, so those cuts land almost everyone in Tier 3 or Tier 4.</div>`;
+      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">The axes are off. This number is the wins ladder only. ${common}</div>`;
     }
     const pct = Math.round((alpha || 0) * 100);
     return `<div class="alert alert-secondary py-2 px-3 mb-3 small">${pct}% of this number is the wins ladder and ${100 - pct}% is the performance rating. ${common} The mix pulls the number toward 1500.</div>`;
@@ -336,6 +336,8 @@
     }
     const banner = document.getElementById('vtsr-preview-banner');
     if (banner) banner.innerHTML = previewBannerHtml();
+    const table = document.getElementById('vtsr-table');
+    if (table) table.classList.toggle('vt-vtsr-hide-tier', winsOn);
     const rankTh = document.querySelector('#vtsr-table thead th:first-child');
     const ratingTh = document.querySelector('#vtsr-table th[data-sort="vtsr"]');
     const lastTh = document.querySelector('#vtsr-table th[data-sort="last_delta"]');
@@ -906,7 +908,7 @@
           <i class="bi bi-chevron-right"></i>
         </button>
       </td>
-      <td class="text-center">${badge}</td>
+      <td class="text-center vt-vtsr-tier-col">${badge}</td>
       <td class="fw-semibold"${playerCellAttrs}>${playerLinkHtml(r.name, r.steam64)}${progressChip}</td>
       <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(winRateTip)}">${winRateStr}</td>
@@ -917,7 +919,7 @@
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
     </tr>
     <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-      <td colspan="11">${detailHtml}</td>
+      <td colspan="${preview ? 10 : 11}">${detailHtml}</td>
     </tr>`;
   }
 
@@ -983,7 +985,7 @@
         $unrankedWrap.innerHTML = `<div class="vt-vtsr-unranked">
           <h6 class="vt-vtsr-unranked-title">Unranked</h6>
           <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches, and a game within ${fmt(win)} days of the newest match (or ${fmt(need)} games after returning), to join the ladder. No rank is assigned here.</p>
-          <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+          <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2${ratingView === 'wins' ? ' vt-vtsr-hide-tier' : ''}" style="font-size: 0.85rem;">
             ${theadHtml}
             <tbody>${unranked.map(r => renderVtsrLadderRow(r, elo, null, noiseSigma)).join('')}</tbody>
           </table>
