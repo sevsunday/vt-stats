@@ -1093,6 +1093,19 @@
     if ($triggerSub)     $triggerSub.textContent = sub;
     if ($triggerSubAll)  $triggerSubAll.textContent = sub;
 
+    const onAll = resolved === '__all__';
+    const newest = newestOpenMatch();
+    const onRecent = !onAll && !!(newest && resolved && resolved.file === newest.file);
+    const markNavMatch = (id, on) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.toggle('active', on);
+      if (on) el.setAttribute('aria-current', 'page');
+      else el.removeAttribute('aria-current');
+    };
+    markNavMatch('nav-matches-all', onAll);
+    markNavMatch('nav-matches-recent', onRecent);
+
     // Active-card highlight in the grid.
     if ($pickerGrid) {
       const activeKey = resolved === '__all__'
@@ -3626,7 +3639,6 @@
         total_sentinel_damage_dropped: 0,
         matches_with_sentinel_damage: [],
       });
-      renderRecentMatches([]);
       // Clear downstream renders by passing an empty career list. Preserve
       // the user's `mode` preference (Totals vs Per match) across resets.
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
@@ -3682,7 +3694,6 @@
 
     renderAggMeta(data.meta);
     renderCommanderStandings(data);
-    renderRecentMatches(fileIds);
     renderVtsrTeaser(getActiveElo(), data.career_stats);
     renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
     initCareerColumnViewControls();
@@ -3699,8 +3710,7 @@
         // existing tab-pane stagger. Calling staggerEntrance on a parent
         // that contains both the hero and the tab content would double-
         // index the tab cards' delays, so we apply the entrance class
-        // manually to the single hero card. The recent-matches strip
-        // isn't a `.card`, so it just appears in-place.
+        // manually to the single hero card.
         if (heroCard) {
           heroCard.style.setProperty('--vt-delay', '0ms');
           heroCard.classList.add('vt-enter');
@@ -3722,11 +3732,6 @@
 
     registerTabRenderer('#all-tab-commanders', () => {
       const cs = data.commander_stats || { rows: [], head_to_head: [] };
-      // Cohort card sits above the leaderboard; reads canonical
-      // elo_current.json via getActiveElo(). Corpus-wide /
-      // picker-filter-unaware - same contract as the VTSR-T teaser.
-      wireCommanderCohortControls();
-      renderCommanderCohort(getActiveElo());
       renderCommanderLeaderboard(cs.rows);
       renderCommanderH2H(cs.head_to_head);
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
@@ -7771,9 +7776,9 @@
       </div>
       <div class="vt-hero-stat" id="hero-stat-community">
         <i class="bi bi-journal-text vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Community</span>
+        <a class="vt-hero-stat-label" id="hero-stat-community-label" href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber Matches</a>
         <span class="vt-hero-stat-value" id="hero-stat-community-value">\u2014</span>
-        <span class="vt-hero-stat-sub" id="hero-stat-community-sub">F9bomber ledger</span>
+        <span class="vt-hero-stat-sub" id="hero-stat-community-sub"></span>
       </div>
       <div class="vt-hero-stat">
         <i class="bi bi-clock-history vt-hero-stat-icon" aria-hidden="true"></i>
@@ -7795,61 +7800,28 @@
       </div>`;
   }
 
-  // Conditional chip strip below the cards. Career-roster chip is always
-  // shown when MIN_CAREER_MATCHES > 0; partial-coverage chips (positioning,
-  // T-key) auto-hide at 100% coverage. CSS `:empty` collapses the row when
-  // no chips qualify (e.g. zero-match filter scope).
-  function renderHeroChips(meta) {
-    const container = document.getElementById('hero-chips');
-    if (!container) return;
-    const chips = [];
-    const matchCount = meta.match_count || 0;
-    const minMatches = meta.min_career_matches || 0;
-    const dropped = meta.players_dropped_by_min_matches || 0;
-    if (minMatches > 0) {
-      const droppedSuffix = dropped > 0 ? ` &middot; ${dropped} hidden` : '';
-      chips.push(`<span class="vt-hero-chip"><i class="bi bi-people" aria-hidden="true"></i>Career roster: <strong>${minMatches}+ matches</strong>${droppedSuffix}</span>`);
-    }
-    const posCount = meta.matches_with_positioning || 0;
-    if (matchCount > 0 && posCount > 0 && posCount < matchCount) {
-      chips.push(`<span class="vt-hero-chip"><i class="bi bi-geo-alt" aria-hidden="true"></i>Positioning: <strong>${posCount} / ${matchCount}</strong></span>`);
-    }
-    const tlCount = meta.matches_with_target_lock_data || 0;
-    if (matchCount > 0 && tlCount > 0 && tlCount < matchCount) {
-      chips.push(`<span class="vt-hero-chip"><i class="bi bi-bullseye" aria-hidden="true"></i>T-key data: <strong>${tlCount} / ${matchCount}</strong></span>`);
-    }
-    if (matchCount > 0) {
-      const v4Count = meta.matches_with_resource_data || 0;
-      chips.push(`<span class="vt-hero-chip" title="Proto v4 resource telemetry. Economy highlight tiles count only these games."><i class="bi bi-cash-stack" aria-hidden="true"></i>Economy telemetry: <strong>${v4Count} / ${matchCount}</strong></span>`);
-    }
-    container.innerHTML = chips.join('');
-  }
-
   function paintHeroCommunity(comm) {
     const valueEl = document.getElementById('hero-stat-community-value');
     const subEl = document.getElementById('hero-stat-community-sub');
+    const labelEl = document.getElementById('hero-stat-community-label');
     if (!valueEl || !subEl) return;
+    const prov = (comm && comm.provider) || {};
+    if (labelEl) labelEl.href = prov.url || 'https://f9bomber.com';
     if (!comm || !(comm.duel_count > 0)) {
       valueEl.textContent = '\u2014';
-      subEl.textContent = 'Ledger unavailable';
+      subEl.textContent = '\u2014';
       return;
     }
     const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
-    const prov = comm.provider || {};
-    const href = prov.url || 'https://f9bomber.com';
-    const name = prov.name || 'F9bomber';
     const ledgerDay = (iso) => fmtShortDate(iso ? String(iso).slice(0, 10) + 'T12:00:00' : '');
     valueEl.textContent = comm.duel_count.toLocaleString();
-    subEl.innerHTML = `${esc(ledgerDay(range[0]))} \u2013 ${esc(ledgerDay(range[1]))} \u00b7 <a href="${esc(href)}" target="_blank" rel="noopener">${esc(name)}</a>`;
+    subEl.textContent = `${ledgerDay(range[0])} \u2013 ${ledgerDay(range[1])}`;
   }
 
-  // Public entry point used by loadAllMatches. Splits into the two render
-  // helpers above so callers can refresh stats without re-rendering chips
-  // (or vice-versa) in the future. The previous #agg-meta inline-text
-  // renderer was retired here in favour of #hero-stats / #hero-chips.
+  // Public entry point used by loadAllMatches. The previous #agg-meta
+  // inline-text renderer was retired in favour of #hero-stats.
   function renderAggMeta(meta) {
     renderHeroStats(meta);
-    renderHeroChips(meta);
     ensureF9CommunityLoaded().then(paintHeroCommunity);
   }
 
@@ -8157,35 +8129,6 @@
     ensureF9CommunityLoaded().then(paint);
   }
 
-  // Recent Matches strip. Reuses .vt-match-picker-card so a future styling
-  // change to picker cards picks up here for free. fileIds is the same
-  // filtered subset loadAllMatches() built; the strip therefore scopes
-  // consistently with the hero stats. Click delegates to selectMatch so
-  // URL state, view-transition, and trigger sync all flow through the
-  // existing path.
-  function renderRecentMatches(fileIds) {
-    const strip = document.getElementById('recent-matches-strip');
-    if (!strip) return;
-    const fileSet = new Set(fileIds || []);
-    // manifest is sorted newest-first earlier in this module (see the
-    // `manifest.sort` call after fetch); .filter preserves order.
-    const recent = manifest.filter(m => fileSet.has(m.file)).slice(0, 4);
-    if (recent.length === 0) {
-      strip.innerHTML = `<div class="vt-recent-matches-empty">
-        <i class="bi bi-inbox me-2" aria-hidden="true"></i>No matches in the current filter scope.
-      </div>`;
-      return;
-    }
-    strip.innerHTML = recent.map(buildMatchPickerCardHtml).join('');
-    strip.querySelectorAll('.vt-match-picker-card').forEach(el => {
-      el.addEventListener('click', () => {
-        const tgt = el.dataset.target;
-        const entry = manifest.find(m => m.file === tgt);
-        if (entry) selectMatch(entry);
-      });
-    });
-  }
-
   function careerWeaponsUsedCount(c) {
     const wb = c.weapon_breakdown || {};
     return Object.values(wb).filter(w => (w.dealt || 0) > 0).length;
@@ -8369,8 +8312,8 @@
   }
 
   // Per-axis metadata: label + formula + description per ELO axis.
-  // Consumed by the per-match leaderboard's top-axis-contributor labels
-  // and the Commander Cohort table. (The VTSR-T leaderboard's expand
+  // Consumed by the per-match leaderboard's top-axis-contributor labels.
+  // (The VTSR-T leaderboard's expand
   // panel, which also reads this catalog, now lives in js/elo.js on the
   // dedicated /elo/ page with its own copy.) Keys mirror the axis-name
   // keys in elo_current.json `weights` / `axis_means` / `axis_contributions`.
@@ -8401,159 +8344,8 @@
 
 
 
-  // -----------------------------------------------------------------------
-  // Commander Cohort card (All Matches -> Commanders tab, top of pane).
-  //
-  // Side-by-side career-axis comparison across players with a commander
-  // share at or above the active threshold. Two views toggle in place:
-  //   'z'       : per-axis z-score from axis_means (one cell per axis x player)
-  //   'contrib' : weight x z, with a highlighted Sum (~ mean P_i) footer row
-  //
-  // Data source is window.__vtElo (corpus-wide) - the table intentionally
-  // ignores the picker filter, matching the contract used by the dedicated
-  // VTSR-T leaderboard. Reuses VTSR_AXIS_META for axis labels and shares
-  // the --kb-success / --kb-danger color tokens used elsewhere.
-  // -----------------------------------------------------------------------
-
-  // Module-local state. Persist across re-renders within a single session;
-  // reset to defaults each fresh tab-state cycle (see resetTabState).
-  let commanderCohortShowAll = false;   // false -> >=40% only; true -> all rated cmdrs
-  let commanderCohortView    = 'z';     // 'z' | 'contrib'
-
-  const COMMANDER_COHORT_MIN_SHARE   = 0.40;
-  const COMMANDER_COHORT_MIN_MATCHES = 5;     // min matches_as_commander floor
-                                              // (mirrors MIN_CAREER_MATCHES convention)
-
-  // Compute commander share for one rating row. Returns 0 when the
-  // player has zero rated matches (defensive — pure spectators / debutants
-  // shouldn't be in the ratings array anyway).
-  function _cohortShare(r) {
-    const c = r.matches_as_commander || 0;
-    const t = r.matches_as_thug || 0;
-    const denom = c + t;
-    return denom > 0 ? c / denom : 0;
-  }
-
-  // Filter + sort the rating set for the cohort table. Provisional rows
-  // are always excluded (tiny-sample noise dominates the axis_means);
-  // the >=8 commander-match floor further filters players whose role
-  // average isn't yet stable enough to compare side-by-side.
-  function _cohortVisible(elo) {
-    if (!elo || !Array.isArray(elo.ratings)) return [];
-    const minShare = commanderCohortShowAll ? 0 : COMMANDER_COHORT_MIN_SHARE;
-    const out = elo.ratings.filter(r => {
-      if (r.matches_provisional) return false;                       // skip provisional ratings
-      const cmdr = r.matches_as_commander || 0;
-      if (cmdr < COMMANDER_COHORT_MIN_MATCHES) return false;         // need stable commander sample
-      return _cohortShare(r) >= minShare;
-    });
-    // Primary: commander share desc. Secondary: VTSR-T desc.
-    out.sort((a, b) => {
-      const sa = _cohortShare(a);
-      const sb = _cohortShare(b);
-      if (sb !== sa) return sb - sa;
-      return (b.vtsr || 0) - (a.vtsr || 0);
-    });
-    return out;
-  }
-
-  // Color-class helper mirroring the VTSR axis-bar convention.
-  // Returns one of 'is-positive' / 'is-negative' / '' (neutral band).
-  function _cohortValueClass(v) {
-    if (v == null || !isFinite(v)) return '';
-    if (Math.abs(v) < 0.005) return '';
-    return v > 0 ? 'vt-cohort-pos' : 'vt-cohort-neg';
-  }
-
-  // Format a signed numeric cell value with explicit + / - prefix.
-  function _cohortFmt(v, digits) {
-    if (v == null || !isFinite(v)) return '<span class="text-muted">&mdash;</span>';
-    const sign = v >= 0 ? '+' : '';
-    return `${sign}${v.toFixed(digits)}`;
-  }
-
-  // Commander-only axis means. Walks window.__vtEloHistory deltas and
-  // averages each axis's z-score using ONLY rows where the player was a
-  // commander. Commander rows are self-labeling via axis_contributions_meta
-  // (emitted only when v2.4 applied a role-fairness shift). For the three
-  // shifted axes (mobility, thug_kill_rate, net_damage_share)
-  // plus the locked shifted axis (pve_share), we pull
-  // z_pre_shift so the v2.4 commander cushion is reversed - that cushion
-  // exists to make VTSR-T fair across roles, but for commander-vs-commander
-  // comparison it artificially flattens gaps. Axes with no commander
-  // shift use axis_contributions[axis] as the raw value.
-  //
-  // Returns { [steam64|name]: { axisMeans: {axis: meanZ}, n: int } }
-  // where n is the count of commander matches contributing data for that
-  // player (max across axes - per-axis denominator can be smaller when
-  // an axis was unavailable in some match, mirroring elo.py).
-  function _commanderAxisMeans(eloHistory) {
-    const out = {};
-    if (!eloHistory || !Array.isArray(eloHistory.history)) return out;
-    for (const match of eloHistory.history) {
-      if (match.match_excluded) continue;
-      const deltas = match.deltas || [];
-      for (const d of deltas) {
-        const meta = d.axis_contributions_meta;
-        if (!meta) continue; // thug row in this match
-        const key = d.steam64 || d.name;
-        if (!key) continue;
-        const rec = out[key] || { sums: {}, counts: {}, n: 0 };
-        rec.n += 1;
-        const contribs = d.axis_contributions || {};
-        const seen = new Set([...Object.keys(meta), ...Object.keys(contribs)]);
-        for (const axis of seen) {
-          let z;
-          if (meta[axis] && typeof meta[axis].z_pre_shift === 'number') {
-            z = meta[axis].z_pre_shift;
-          } else if (axis in contribs) {
-            z = contribs[axis];
-          } else {
-            continue;
-          }
-          rec.sums[axis] = (rec.sums[axis] || 0) + z;
-          rec.counts[axis] = (rec.counts[axis] || 0) + 1;
-        }
-        out[key] = rec;
-      }
-    }
-    const result = {};
-    for (const key of Object.keys(out)) {
-      const rec = out[key];
-      const axisMeans = {};
-      for (const axis of Object.keys(rec.sums)) {
-        const c = rec.counts[axis] || 0;
-        if (c > 0) axisMeans[axis] = rec.sums[axis] / c;
-      }
-      result[key] = { axisMeans, n: rec.n };
-    }
-    return result;
-  }
-
-  // Weighted-contribution helper. For a single player, compute (weight x z)
-  // per axis using pro-rata weight redistribution over axes the player
-  // actually has (mirrors compute_performance_index() in scripts/elo.py).
-  // Returns { contribs: {axis: w*z}, sum: number }.
-  function _cohortWeightedContribs(axisMeans, weightsAll) {
-    const present = Object.keys(axisMeans || {})
-      .filter(a => axisMeans[a] != null && isFinite(axisMeans[a]));
-    if (!present.length) return { contribs: {}, sum: 0 };
-    const totalWeight = present.reduce((s, a) => s + (weightsAll[a] || 0), 0);
-    if (totalWeight <= 0) return { contribs: {}, sum: 0 };
-    const contribs = {};
-    let sum = 0;
-    for (const a of present) {
-      const w = (weightsAll[a] || 0) / totalWeight;
-      const c = w * axisMeans[a];
-      contribs[a] = c;
-      sum += c;
-    }
-    return { contribs, sum };
-  }
-
-  // Lazy one-shot fetch of the experimental VTSR-C commander ladder
-  // (elo_commander_current.json). Graceful 404: sentinel null keeps the
-  // cohort card exactly as it was pre-VTSR-C (no strip). Cached on
+  // Lazy one-shot fetch of the VTSR-C commander ladder
+  // (elo_commander_current.json). Graceful 404: sentinel null. Cached on
   // window so the ELO-page convention (__vtCmdrElo) carries over.
   let _cmdrEloFetchPromise = null;
   function ensureCommanderEloLoaded() {
@@ -8668,287 +8460,6 @@
       if (!document.getElementById('section-commander-standings')) return;
       paint(cmdr, comm);
     });
-  }
-
-  // Compact top-5 VTSR-C strip prepended above the cohort grid. Rank,
-  // player-linked name, rating, W-L-D record, provisional chip, plus a
-  // link to the full ladder on the ELO page. Empty string while the
-  // ladder file is absent/unloaded (the cohort renders unchanged).
-  // Top 5 is eligibility-filtered (schema 4) so a 2-game F9 spike
-  // cannot occupy a ranked slot.
-  function _cohortVtsrCStripHtml() {
-    const c = window.__vtCmdrElo;
-    const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
-    if (!ratings.length) return '';
-    const eligible = ratings.filter(r => _cmdrLadderEligible(r, c));
-    if (!eligible.length) return '';
-    const rows = eligible.slice(0, 5).map((r, i) => {
-      const prov = r.provisional
-        ? `<span class="vt-cohort-prov" title="Provisional \u2014 fewer than ${c.provisional_threshold ?? 5} rated commander games">Prov</span>`
-        : '';
-      return `<div class="vt-cohort-vtsrc-row">
-        <span class="vt-cohort-vtsrc-rank">${i + 1}</span>
-        <span class="vt-cohort-vtsrc-name">${vtPlayerLinkHtml(r.name, r.steam64)} ${prov}</span>
-        <span class="vt-cohort-vtsrc-rating">${Math.round(r.vtsr_c)}</span>
-        <span class="vt-cohort-vtsrc-record" title="Wins-Losses-Draws in rated commander duels">${r.wins}-${r.losses}-${r.draws}</span>
-      </div>`;
-    }).join('');
-    return `<div class="vt-cohort-vtsrc-strip mb-2">
-      <div class="vt-cohort-vtsrc-strip-head">
-        <span class="vt-cohort-vtsrc-strip-title"><i class="bi bi-trophy me-1"></i>VTSR-C ladder \u2014 top 5</span>
-        <span class="vt-cohort-vtsrc-strip-sub">win/loss rating over ${c.rated_match_count} verified duels \u00b7 experimental</span>
-        <a class="vt-cohort-vtsrc-strip-link" href="elo/?tab=vtsr-c">View full commander ladder <i class="bi bi-arrow-right-short"></i></a>
-      </div>
-      <div class="vt-cohort-vtsrc-rows">${rows}</div>
-    </div>`;
-  }
-
-  // Main renderer. `elo` is window.__vtElo (already loaded by
-  // ensureEloLoaded). When elo is missing / has no ratings, the card
-  // hides itself entirely.
-  function renderCommanderCohort(elo) {
-    const $card = document.getElementById('section-commander-cohort');
-    if (!$card) return;
-
-    const container = document.getElementById('commander-cohort-container');
-    if (!container) return;
-
-    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
-      $card.classList.add('d-none');
-      return;
-    }
-    $card.classList.remove('d-none');
-
-    // Kick off the lazy VTSR-C ladder fetch on first render; when it
-    // lands, re-render once so the top-5 strip appears. 404 caches null
-    // and this render path never re-enters.
-    if (window.__vtCmdrElo === undefined) {
-      ensureCommanderEloLoaded().then(json => {
-        if (json && document.getElementById('commander-cohort-container')) {
-          renderCommanderCohort(getActiveElo());
-        }
-      });
-    }
-
-    // Reflect current toggle state in the header controls.
-    document.querySelectorAll('#commander-cohort-view-toggle [data-cohort-view]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.cohortView === commanderCohortView);
-    });
-    const $showAllBtn = document.getElementById('commander-cohort-show-all');
-    if ($showAllBtn) {
-      $showAllBtn.dataset.showAll = String(commanderCohortShowAll);
-      $showAllBtn.textContent = commanderCohortShowAll
-        ? 'Show \u226540% only'
-        : 'Show all commanders';
-      $showAllBtn.classList.toggle('active', commanderCohortShowAll);
-    }
-
-    // Pre-compute commander-only axis means once per render from
-    // canonical elo_history.json.
-    const cmdrByKey = _commanderAxisMeans(getActiveEloHistory());
-
-    // Defensive: drop visible rows that have zero commander deltas in
-    // history. matches_as_commander >= 5 in elo_current should already
-    // cover this since the v2.4 corpus re-rate, but a stale history file
-    // would otherwise show empty rows.
-    const visibleAll = _cohortVisible(elo);
-    const visible = visibleAll.filter(r => {
-      const key = r.steam64 || r.name;
-      const c = cmdrByKey[key];
-      return c && c.n > 0;
-    });
-    if (visible.length === 0) {
-      const note = commanderCohortShowAll
-        ? `No non-provisional players with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet.`
-        : `No non-provisional players with \u226540% commander share and \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet. Try <em>Show all commanders</em>.`;
-      container.innerHTML = `<p class="text-center my-3" style="color:var(--kb-text-muted);">${note}</p>`;
-      return;
-    }
-
-    // Cap displayed players when "Show all" is on to keep the grid
-    // readable; sort already put the highest-cmdr-share players first.
-    const MAX_VISIBLE = 12;
-    const trimmed = visible.slice(0, MAX_VISIBLE);
-    const moreCount = Math.max(0, visible.length - trimmed.length);
-
-    // Axis order locked to weight desc so the heaviest axes lead -
-    // matches what the user sees in the methodology section.
-    const weightsAll = (elo.weights || {});
-    const axisOrder = Object.keys(weightsAll).sort((a, b) =>
-      (weightsAll[b] || 0) - (weightsAll[a] || 0)
-    );
-    // Fallback if elo.weights is missing for some reason: use VTSR_AXIS_META key order.
-    const axes = axisOrder.length ? axisOrder : Object.keys(VTSR_AXIS_META);
-
-    // Pre-compute weighted contribs per player (used by both the header
-    // VTSR-C-prev cell and, when in 'contrib' view, the body cells +
-    // Sum row). Reads commander-only axis means, never career means.
-    const contribByPlayer = {};
-    for (const r of trimmed) {
-      const key = r.steam64 || r.name;
-      const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
-      contribByPlayer[key] = _cohortWeightedContribs(cm, weightsAll);
-    }
-
-    // Header row: one cell per player. Columns are sized via CSS grid;
-    // the axis column lives in its own .vt-cohort-axis-cell column.
-    const headerCells = trimmed.map(r => {
-      const c = r.matches_as_commander || 0;
-      const t = r.matches_as_thug || 0;
-      const sharePct = (_cohortShare(r) * 100).toFixed(0);
-      const peak = Math.round(r.peak_vtsr || r.vtsr || 0);
-      const vtsr = Math.round(r.vtsr || 0);
-      const provBadge = r.matches_provisional
-        ? ' <span class="vt-cohort-prov" title="Provisional rating">Prov</span>'
-        : '';
-      const key = r.steam64 || r.name;
-      const cmdrN = (cmdrByKey[key] && cmdrByKey[key].n) || 0;
-      const composite = (contribByPlayer[key] || { sum: 0 }).sum;
-      const compositeCls = _cohortValueClass(composite);
-      const compositeTip = esc(
-        `Thug-axis form: \u03a3 w \u00d7 z\u0304 over the player's ${cmdrN} commander match${cmdrN === 1 ? '' : 'es'}. `
-        + `Performance space [-1, +1], not the VTSR-C rating. Scrap and build tempo are recorded on Economy Leaders and stay unscored until the commander mixer moves.`
-      );
-      return `<div class="vt-cohort-col-header">
-        <div class="vt-cohort-col-name">${esc(r.name)}${provBadge}</div>
-        <div class="vt-cohort-col-share">${sharePct}% <span class="vt-cohort-col-share-detail">(${c} C / ${t} T)</span></div>
-        <div class="vt-cohort-col-rating"><strong>${vtsr}</strong> <span class="vt-cohort-col-rating-label">VTSR-T</span></div>
-        <div class="vt-cohort-col-vtsrc ${compositeCls}"
-             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom"
-             title="${compositeTip}">
-          <strong>${_cohortFmt(composite, 2)}</strong>
-          <span class="vt-cohort-col-vtsrc-label">Thug axes</span>
-        </div>
-        <div class="vt-cohort-col-peak">${cmdrN} cmdr match${cmdrN === 1 ? '' : 'es'} \u00b7 Peak VTSR-T ${peak}</div>
-      </div>`;
-    }).join('');
-
-    // Body rows: one row per axis. Each cell shows either the z value
-    // (z view) or the weighted contribution (contrib view), drawing from
-    // the commander-matches-only means computed above.
-    const bodyRows = axes.map(axisKey => {
-      const meta = VTSR_AXIS_META[axisKey] || { label: axisKey, desc: '', formula: '' };
-      const weight = weightsAll[axisKey] || 0;
-      const axisLabel = commanderCohortView === 'contrib' && weight > 0
-        ? `${esc(meta.label)} <span class="vt-cohort-axis-weight">(w=${weight.toFixed(2)})</span>`
-        : esc(meta.label);
-
-      const tipDesc = meta.desc ? `<br><small>${esc(meta.desc)}</small>` : '';
-      const tipHtml = `<strong>${esc(meta.label)}</strong>${tipDesc}`;
-
-      const cells = trimmed.map(r => {
-        const key = r.steam64 || r.name;
-        const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
-        let raw;
-        if (commanderCohortView === 'contrib') {
-          const cb = contribByPlayer[key] || { contribs: {} };
-          raw = cb.contribs[axisKey];
-        } else {
-          raw = cm[axisKey];
-        }
-        const cls = _cohortValueClass(raw);
-        const txt = commanderCohortView === 'contrib'
-          ? _cohortFmt(raw, 4)
-          : _cohortFmt(raw, 2);
-        return `<div class="vt-cohort-cell ${cls}">${txt}</div>`;
-      }).join('');
-
-      return `<div class="vt-cohort-row">
-        <div class="vt-cohort-axis-cell"
-             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="right"
-             data-bs-custom-class="vt-axis-tooltip"
-             title="${esc(tipHtml)}">${axisLabel}</div>
-        ${cells}
-      </div>`;
-    }).join('');
-
-    // Footer sum row only in contrib view.
-    let footerRow = '';
-    if (commanderCohortView === 'contrib') {
-      const sumCells = trimmed.map(r => {
-        const key = r.steam64 || r.name;
-        const cb = contribByPlayer[key] || { sum: 0 };
-        const cls = _cohortValueClass(cb.sum);
-        return `<div class="vt-cohort-cell ${cls}"><strong>${_cohortFmt(cb.sum, 4)}</strong></div>`;
-      }).join('');
-      footerRow = `<div class="vt-cohort-row vt-cohort-sum-row">
-        <div class="vt-cohort-axis-cell"><strong>Sum (thug axes)</strong></div>
-        ${sumCells}
-      </div>`;
-    }
-
-    // CSS grid template: first column is the axis label, rest is one
-    // column per player. We set it inline so the grid scales with the
-    // visible cohort size without needing a stylesheet entry per N.
-    const colCount = trimmed.length;
-    const gridTemplate = `minmax(160px, 1.6fr) repeat(${colCount}, minmax(108px, 1fr))`;
-
-    // Source-note is the only subtitle now - it's dynamic (reflects the
-    // active filter / count). The view-mode explainer (z vs weighted +
-    // color coding) lives in the toggle-button tooltips and the
-    // info-icon tooltip on the card title.
-    const sourceNote = commanderCohortShowAll
-      ? (moreCount
-          ? `All non-provisional commanders with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches (showing first ${trimmed.length} of ${visible.length}, sorted by commander share).`
-          : `All ${visible.length} non-provisional commander${visible.length === 1 ? '' : 's'} with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches.`)
-      : `Showing ${trimmed.length} commander${trimmed.length === 1 ? '' : 's'} with \u226540% commander share &middot; minimum ${COMMANDER_COHORT_MIN_MATCHES} commander matches &middot; provisional ratings excluded.`;
-
-    const callout = `
-      <div class="vt-cohort-callout small mb-2">
-        <i class="bi bi-flask vt-cohort-callout-icon"></i>
-        <span><strong>Thug-axis comparison.</strong> Measures each commander's thug-axis performance over <em>only the matches they commanded</em>, with the v2.4 role-fairness cushion reversed so true commander-vs-commander gaps surface. The experimental <strong>VTSR-C ladder</strong> above rates wins and losses; commander-specific signals (economy, build tempo) join it once the collector records them &mdash; until then this grid is thug-performance only.</span>
-      </div>
-    `;
-
-    container.innerHTML = `
-      ${_cohortVtsrCStripHtml()}
-      ${callout}
-      <div class="vt-cohort-subtitle text-muted small mb-2">${sourceNote}</div>
-      <div class="vt-cohort-table-wrap">
-        <div class="vt-cohort-grid" style="grid-template-columns:${gridTemplate};">
-          <div class="vt-cohort-row vt-cohort-header-row">
-            <div class="vt-cohort-axis-cell"></div>
-            ${headerCells}
-          </div>
-          ${bodyRows}
-          ${footerRow}
-        </div>
-      </div>
-    `;
-
-    ensureTooltips(container);
-  }
-
-  // One-time wiring for the cohort card's two header controls. Idempotent
-  // via a dataset flag on the card element - safe to call from the tab
-  // renderer on every activation.
-  function wireCommanderCohortControls() {
-    const $card = document.getElementById('section-commander-cohort');
-    if (!$card || $card.dataset.cohortWired === '1') return;
-    $card.dataset.cohortWired = '1';
-
-    // View-mode toggle (z-scores vs weighted-contribution). Delegated so
-    // a future re-render that rebuilds the button group keeps working.
-    const $viewGroup = document.getElementById('commander-cohort-view-toggle');
-    if ($viewGroup) {
-      $viewGroup.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('[data-cohort-view]');
-        if (!btn) return;
-        const next = btn.dataset.cohortView;
-        if (!next || next === commanderCohortView) return;
-        commanderCohortView = next;
-        renderCommanderCohort(getActiveElo());
-      });
-    }
-
-    // "Show all rated commanders" toggle.
-    const $showAll = document.getElementById('commander-cohort-show-all');
-    if ($showAll) {
-      $showAll.addEventListener('click', () => {
-        commanderCohortShowAll = !commanderCohortShowAll;
-        renderCommanderCohort(getActiveElo());
-      });
-    }
   }
 
   // Look up a career row's VTSR-T record from elo_current.json. Joins
@@ -9149,7 +8660,9 @@
 
   function updateCareerColumnViewButtons() {
     document.querySelectorAll('#section-career [data-career-cols]').forEach(btn => {
-      btn.classList.toggle('active', btn.getAttribute('data-career-cols') === careerColumnView);
+      const on = btn.getAttribute('data-career-cols') === careerColumnView;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
     });
   }
 
@@ -9570,34 +9083,21 @@
     return _cmdrLadderEligible(rating, cmdr);
   }
 
-  function _commanderUnrankedBlurb(cmdr) {
-    const { minV4, minNonV4 } = _cmdrLadderMins(cmdr);
-    const win = (cmdr && cmdr.inactivity_window_days != null) ? cmdr.inactivity_window_days : 90;
-    const staleWin = (cmdr && cmdr.command_stale_window_days != null) ? cmdr.command_stale_window_days : 90;
-    const need = (cmdr && cmdr.comeback_games_required != null) ? cmdr.comeback_games_required : 3;
-    return `Need ${minV4} proto-v4 commander games or ${minNonV4} older games (pre-v4 recordings and F9Stats), a game within ${win} days of the newest match, and a command game within ${staleWin} days (or ${need} commander games after the ${staleWin}-day grace while still thugging). No rank is assigned here.`;
-  }
-
   function renderCommanderLeaderboard(rows) {
     const tbody = document.querySelector('#commander-table tbody');
-    const unrankedHost = document.getElementById('commander-unranked');
     if (!tbody) return;
     const list = rows || [];
     if (window.__vtCmdrElo === undefined) {
       tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">Loading commander ladder\u2026</td></tr>';
-      if (unrankedHost) {
-        unrankedHost.classList.add('d-none');
-        unrankedHost.innerHTML = '';
-      }
       ensureCommanderEloLoaded().then(() => {
         if (document.getElementById('commander-table')) renderCommanderLeaderboard(rows);
       });
       return;
     }
-    _paintCommanderLeaderboard(list, window.__vtCmdrElo, tbody, unrankedHost);
+    _paintCommanderLeaderboard(list, window.__vtCmdrElo, tbody);
   }
 
-  function _paintCommanderLeaderboard(list, cmdr, tbody, unrankedHost) {
+  function _paintCommanderLeaderboard(list, cmdr, tbody) {
     const wireSort = () => {
       document.querySelectorAll('#commander-table th[data-sort]').forEach(th => {
         th.classList.toggle('sort-active', th.dataset.sort === commanderSortState.key);
@@ -9609,67 +9109,26 @@
         };
       });
     };
-    const hideUnranked = () => {
-      if (!unrankedHost) return;
-      unrankedHost.classList.add('d-none');
-      unrankedHost.innerHTML = '';
-    };
     if (!list.length) {
       tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No commander data in the current scope.</td></tr>';
-      hideUnranked();
       wireSort();
       return;
     }
     const sorter = commanderSort(commanderSortState.key, commanderSortState.asc);
     const gateOn = !!(cmdr && Array.isArray(cmdr.ratings));
     const ranked = [];
-    const unranked = [];
     if (!gateOn) {
       ranked.push(...list);
     } else {
       for (const row of list) {
         if (_commanderRowEligible(row, cmdr)) ranked.push(row);
-        else unranked.push(row);
       }
     }
     ranked.sort(sorter);
-    unranked.sort(sorter);
     if (!ranked.length) {
       tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No ranked commanders in the current scope.</td></tr>';
     } else {
       tbody.innerHTML = ranked.map((r, i) => _commanderLeaderboardRowHtml(r, i + 1)).join('');
-    }
-    if (unrankedHost) {
-      if (!unranked.length) {
-        hideUnranked();
-      } else {
-        unrankedHost.classList.remove('d-none');
-        unrankedHost.innerHTML = `<div class="vt-vtsr-c-unranked">
-          <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
-          <p class="vt-vtsr-c-unranked-blurb">${esc(_commanderUnrankedBlurb(cmdr))}</p>
-          <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Player</th>
-                  <th class="text-end">Cmdr</th>
-                  <th class="text-end">Thug</th>
-                  <th class="text-end">W&ndash;L (cmdr)</th>
-                  <th class="text-end">Win % (cmdr)</th>
-                  <th class="text-end">Win % (thug)</th>
-                  <th class="text-end">Avg Dlt (cmdr)</th>
-                  <th class="text-end">Avg Dlt (thug)</th>
-                  <th class="text-end">Avg K (cmdr)</th>
-                  <th class="text-end">Avg K (thug)</th>
-                  <th class="text-center">Favored</th>
-                </tr>
-              </thead>
-              <tbody>${unranked.map(r => _commanderLeaderboardRowHtml(r, null)).join('')}</tbody>
-            </table>
-          </div>
-        </div>`;
-      }
     }
     wireSort();
     ensureTooltips(document.getElementById('section-commander-leaderboard'));
@@ -9786,7 +9245,7 @@
     container.innerHTML = '';
     rivalries.slice(0, 5).forEach(r => {
       const card = document.createElement('div');
-      card.className = 'rivalry-card d-flex align-items-center gap-3 p-3 mb-3 rounded';
+      card.className = 'rivalry-card d-flex align-items-center rounded';
       const info = document.createElement('div');
       info.className = 'flex-grow-1';
       info.innerHTML = `
@@ -9802,7 +9261,7 @@
       chartWrap.className = 'd-flex align-items-center';
       card.appendChild(chartWrap);
       container.appendChild(card);
-      renderRivalryDoughnut(chartWrap, r);
+      renderRivalryDoughnut(chartWrap, r, 56);
     });
   }
 
@@ -10218,12 +9677,16 @@
     });
   }
 
-  // --- Back-to-All-Matches Button ---
-  // Per-match banner shortcut for jumping back to the aggregate view.
-  // Lives inside #match-info which is hidden whenever the All Matches view
-  // is active, so the button is naturally per-match-only with no extra
-  // visibility wiring. selectMatch handles trigger sync + view-transition.
-  document.getElementById('info-back-to-all')?.addEventListener('click', () => selectMatch('__all__'));
+  // --- Matches menu ---
+  // Topnav dropdown (between Record and ODF). Most Recent opens
+  // newestOpenMatch(), which is also the no-URL landing. All Matches opens
+  // the aggregate. selectMatch no-ops when that target is already open.
+  // updateMatchPickerTriggers marks the matching item current.
+  document.getElementById('nav-matches-recent')?.addEventListener('click', () => {
+    const entry = newestOpenMatch();
+    if (entry) selectMatch(entry);
+  });
+  document.getElementById('nav-matches-all')?.addEventListener('click', () => selectMatch('__all__'));
 
   function restoreDashboardFromUrl(urlState) {
     pickerState = DEFAULT_PICKER_STATE();
@@ -10284,7 +9747,7 @@
   // match/tab/filter/team/players intent) always win. When no URL intent
   // is present we default to the most-recent match. The All Matches
   // aggregate stays reachable via ?match=all, the match picker, and the
-  // per-match banner's "All Matches" button.
+  // topnav Matches menu.
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team

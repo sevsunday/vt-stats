@@ -808,9 +808,8 @@ body::before {
 }
 
 /* Secondary-background variant of .vt-nav-icon-btn — uses --kb-bg-muted as a
-   clear surface tint without competing with the primary CTA. Paired with the
-   primary variant for stacked button pairs (e.g. the match-info banner's
-   All Matches + View Raw Data column). */
+   clear surface tint without competing with the primary CTA. Used by the
+   match-info banner's Raw / Map / VOD action chips. */
 .vt-nav-icon-btn--secondary {
     background: var(--kb-bg-muted);
     color: var(--kb-text-primary);
@@ -826,9 +825,9 @@ body::before {
     filter: brightness(0.95);
 }
 
-/* Match-info banner action cluster: 2×2 grey grid (All Matches · Raw
-   Data / Map Page · Watch VOD). Missing map/VOD cells hide, so 3 items
-   wrap 2+1 and 2 items sit on one row. */
+/* Match-info banner action cluster: 2-column grey grid (Raw Data ·
+   Map Page / Watch VOD). Missing map/VOD cells hide, so 3 items wrap
+   2+1 and 2 items sit on one row. */
 .vt-banner-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2833,17 +2832,22 @@ body::before {
    Larger doughnut charts, more whitespace
    ============================================================================ */
 
-/* All Matches global rivalries keep the roomy doughnut cards.
-   The per-match Top Rivalries list is a compact sidebar selector. */
+/* All Matches global rivalries use the same compact row as the per-match
+   Top Rivalries list so five pairs don't stretch the column. */
 #global-rivalries-container .rivalry-card {
-    padding: 1.25rem;
-    margin-bottom: 1rem;
-    border-radius: 10px;
+    padding: 0.4rem 0.55rem;
+    margin-bottom: 0.35rem;
+    gap: 0.5rem;
+    border-radius: 8px;
+}
+
+#global-rivalries-container .rivalry-card:last-child {
+    margin-bottom: 0;
 }
 
 #global-rivalries-container .rivalry-card canvas {
-    width: 100px !important;
-    height: 100px !important;
+    width: 56px !important;
+    height: 56px !important;
 }
 
 #rivalries-container .rivalry-card {
@@ -5032,12 +5036,9 @@ td.vt-col-split {
 }
 
 /* ============================================================================
-   ALL MATCHES HERO + RECENT MATCHES STRIP
+   ALL MATCHES HERO
    Markup in index.html (#all-matches-view): .vt-all-hero card + 5-up
-   .vt-hero-stats grid + conditional .vt-hero-chips chip strip, plus a
-   .vt-recent-matches block that reuses .vt-match-picker-card for each
-   recent-match tile. Renderers in js/app.js: renderHeroStats(),
-   renderHeroChips(), renderRecentMatches().
+   .vt-hero-stats grid. Renderer in js/app.js: renderHeroStats().
    ============================================================================ */
 
 .vt-all-hero-head {
@@ -5051,6 +5052,43 @@ td.vt-col-split {
 .vt-all-hero-head h4 {
     font-weight: 600;
     letter-spacing: -0.01em;
+}
+
+/* Primary fill. .card forces a glass background with !important, so this
+   has to win the same way. Stat tiles sit as translucent panels on it. */
+.vt-all-hero.card {
+    background: var(--kb-primary) !important;
+    color: var(--kb-primary-fg);
+    border-color: transparent !important;
+}
+
+.vt-all-hero.card:hover {
+    border-color: transparent !important;
+}
+
+.vt-all-hero .vt-hero-stat {
+    background: color-mix(in oklab, var(--kb-primary-fg) 12%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary-fg) 28%, transparent);
+}
+
+.vt-all-hero .vt-hero-stat-label,
+.vt-all-hero .vt-hero-stat-sub,
+.vt-all-hero .vt-hero-stat-icon {
+    color: color-mix(in oklab, var(--kb-primary-fg) 78%, transparent);
+}
+
+.vt-all-hero .vt-hero-stat-value,
+.vt-all-hero .vt-all-hero-head h4 {
+    color: var(--kb-primary-fg);
+}
+
+.vt-all-hero a.vt-hero-stat-label {
+    text-decoration: none;
+}
+
+.vt-all-hero a.vt-hero-stat-label:hover {
+    color: var(--kb-primary-fg);
+    text-decoration: underline;
 }
 
 .vt-hero-stats {
@@ -5161,77 +5199,21 @@ td.vt-col-split {
     text-overflow: ellipsis;
 }
 
-.vt-hero-chips {
+/* Side-by-side cards stretch with the row (h-100). The chart box has to
+   grow with the card body or a horizontal bar chart stays at min-height
+   while the sibling (rivalries, head-to-head) makes the card taller. */
+#section-global-weapon > .card-body,
+#section-commander-faction-picks > .card-body {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 1rem;
+    flex-direction: column;
+    min-height: 0;
 }
 
-.vt-hero-chips:empty {
-    display: none;
-}
-
-.vt-hero-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.7rem;
-    font-size: 0.78rem;
-    background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
-    border: 1px solid var(--kb-border-subtle);
-    border-radius: 999px;
-    color: var(--kb-text-muted);
-}
-
-.vt-hero-chip strong {
-    color: var(--kb-text-primary);
-    font-weight: 600;
-}
-
-.vt-recent-matches-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-    padding: 0 0.25rem;
-}
-
-.vt-recent-matches-viewall {
-    text-decoration: none;
-}
-
-.vt-recent-matches-strip {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-@media (max-width: 991.98px) {
-    .vt-recent-matches-strip {
-        display: flex;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 0.25rem;
-        scrollbar-width: thin;
-        scrollbar-color: var(--kb-border-subtle) transparent;
-    }
-
-    .vt-recent-matches-strip > .vt-match-picker-card {
-        flex: 0 0 280px;
-        scroll-snap-align: start;
-    }
-}
-
-.vt-recent-matches-empty {
-    padding: 1.5rem;
-    text-align: center;
-    color: var(--kb-text-muted);
-    background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
-    border: 1px dashed var(--kb-border-subtle);
-    border-radius: 0.55rem;
-    grid-column: 1 / -1;
+#section-global-weapon .chart-container,
+#section-commander-faction-picks .chart-container {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 320px;
 }
 
 /* ============================================================================

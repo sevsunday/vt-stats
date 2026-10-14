@@ -115,7 +115,7 @@ function renderInto(el, rated, tSec, snapSec, duel, onFocus) {
   if (duel && duel.commanders) {
     const c1 = duel.commanders[1] || duel.commanders['1'] || {};
     const c2 = duel.commanders[2] || duel.commanders['2'] || {};
-    foot = `<div class="elo-strip-cmdr">VTSR-C ${esc(c1.name || 'T1')} ${Math.round(c1.after || c1.before || 1500)} · ${esc(c2.name || 'T2')} ${Math.round(c2.after || c2.before || 1500)} · experimental</div>`;
+    foot = `<div class="elo-strip-cmdr">VTSR-C ${esc(c1.name || 'T1')} ${Math.round(c1.after || c1.before || 1500)} · ${esc(c2.name || 'T2')} ${Math.round(c2.after || c2.before || 1500)}</div>`;
   }
   el.innerHTML = `<div class="elo-strip-head">This match Δ</div>${rows}${foot}`;
   el.querySelectorAll('.elo-strip-row').forEach((row) => {

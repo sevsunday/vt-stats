@@ -2830,12 +2830,11 @@
       <div class="card-body">
         <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
           <i class="bi bi-person-badge me-1"></i>Commander rating
-          <span class="vt-cmdr-riv-tag">VTSR-C &middot; experimental</span>
         </h2>
         <p class="text-secondary small mb-3">
           ${escapeHtml(name)}&rsquo;s record <strong>as a commander</strong> in recorded games.
           Only matches with a verified outcome count toward the W-L-D.
-          Ratings come from the experimental
+          Ratings come from the
           <a href="${state.dataPrefix}elo/?tab=vtsr-c">VTSR-C ladder</a>.
         </p>
         ${headline}

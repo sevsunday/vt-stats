@@ -1683,7 +1683,7 @@
       {
         icon: 'bi-person-badge-fill', title: 'The commander ladder (VTSR-C)',
         body: `<p>Commanders now have a <strong>separate rating built purely on wins and losses</strong> &mdash; every match with a verified outcome is a 1v1 duel between the two commanders. Outcomes only count when they\u2019re <strong>proven</strong>: host-attested, reviewer-confirmed, or physically evident from the recording (base destroyed). Unverifiable matches simply don\u2019t move it.</p>`,
-        verdict: 'Experimental \u2014 outcome-pure. Full ladder on the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C Elo</a> tab.',
+        verdict: 'Outcome-pure. Full ladder on the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C Elo</a> tab.',
       },
       {
         icon: 'bi-cash-stack', title: 'Economy is recorded, not yet scored',
@@ -1899,7 +1899,7 @@
       }).join('');
       cmdrAccHtml = `<div class="vt-elo-acc-section">
         <h6>Commander ladder accuracy (VTSR-C)</h6>
-        <p class="vt-elo-acc-blurb">Replaying the commander ladder match-by-match: knowing only the two commanders\u2019 pre-match ratings and their teams\u2019 thug strength, how often did it pick the actual winner of the ${vc.n_scored ?? 0} rated duels (telemetry + community-logged)? (Coin flip = 50%. The ladder is <strong>experimental</strong> \u2014 expect this number to move.)</p>
+        <p class="vt-elo-acc-blurb">Replaying the commander ladder match-by-match: knowing only the two commanders\u2019 pre-match ratings and their teams\u2019 thug strength, how often did it pick the actual winner of the ${vc.n_scored ?? 0} rated duels (telemetry + community-logged)? (Coin flip = 50%.)</p>
         <div class="vt-elo-statgrid" style="margin-bottom: 0.85rem;">
           <div class="vt-elo-statcard">
             <div class="vt-elo-stat-head">
