@@ -1237,7 +1237,7 @@ function renderCommanderFactionPicks(canvasId, rows) {
 
 // --- Meta tab charts (Phase 8) ---
 
-// Faction win-rate vertical bar. Y-axis = win % (0-1); tooltip shows raw
+// Faction win-rate horizontal bar. X-axis = win % (0-1); tooltip shows raw
 // wins / determined.
 function renderMetaFactionWinrate(canvasId, winCounts) {
   applyThemeDefaults();
@@ -1269,6 +1269,7 @@ function renderMetaFactionWinrate(canvasId, winCounts) {
       }],
     },
     options: {
+      indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
@@ -1284,7 +1285,8 @@ function renderMetaFactionWinrate(canvasId, winCounts) {
         },
       },
       scales: {
-        y: { beginAtZero: true, max: 1, ticks: { callback: (v) => (v * 100).toFixed(0) + '%' } },
+        x: { beginAtZero: true, max: 1, ticks: { callback: (v) => (v * 100).toFixed(0) + '%' } },
+        y: { ticks: { font: { size: 11 } } },
       },
     },
   });
