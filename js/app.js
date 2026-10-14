@@ -7972,12 +7972,11 @@
     const h = bucket.busiestHour;
     const n = bucket.hours[h] || 0;
     const games = n === 1 ? 'game' : 'games';
-    const pct = Math.round((100 * bucket.evening) / bucket.recorded);
     const hourText = (typeof formatHourLong === 'function') ? formatHourLong(h) : String(h);
     const where = zoneLabel.indexOf('/') >= 0
       ? hourText + ' (' + zoneLabel + ', ' + n + ' ' + games + ')'
       : hourText + ' ' + zoneLabel + ' (' + n + ' ' + games + ')';
-    return 'Busiest hour is ' + where + '. 7:00\u201310:00 PM accounts for ' + pct + '% of recorded starts.';
+    return 'Busiest hour is ' + where + '.';
   }
 
   function paintWhenPlayed(startTimes, comm) {

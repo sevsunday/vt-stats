@@ -1544,7 +1544,6 @@ function bucketWhenPlayed(payload) {
     weekCom,
     recorded,
     busiestHour,
-    evening: hours[19] + hours[20] + hours[21],
     includeCommunity: !!p.includeCommunity,
   };
 }
