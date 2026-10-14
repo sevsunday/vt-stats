@@ -7884,6 +7884,7 @@
   let whenPlayedStartTimes = [];
   let whenPlayedBucket = null;
   let whenPlayedGen = 0;
+  let whenPlayedOverTimeMode = 'weeks';
 
   function viewerTimeZone() {
     try {
@@ -7982,6 +7983,7 @@
   function paintWhenPlayed(startTimes, comm) {
     if (typeof bucketWhenPlayed !== 'function') return;
     initWhenPlayedTimezone();
+    initOverTimeToggle();
     whenPlayedStartTimes = startTimes || [];
     const filtered = hasAnyFilterEngaged(pickerState);
     const playDates = (comm && Array.isArray(comm.play_dates)) ? comm.play_dates : [];
@@ -8001,9 +8003,30 @@
     renderMetaWhenHour('meta-when-hour-canvas', bucket);
     renderMetaWhenWeekday('meta-when-weekday-canvas', bucket);
     renderMetaWhenMonth('meta-when-month-canvas', bucket);
-    if (typeof renderMetaWhenWeeks === 'function') {
-      renderMetaWhenWeeks('meta-overtime-canvas', bucket);
-    }
+    renderOverTimeChart('meta-overtime-canvas');
+  }
+
+  function renderOverTimeChart(canvasId) {
+    if (!whenPlayedBucket || typeof renderMetaWhenOverTime !== 'function') return null;
+    return renderMetaWhenOverTime(canvasId || 'meta-overtime-canvas', whenPlayedBucket, whenPlayedOverTimeMode);
+  }
+
+  function initOverTimeToggle() {
+    const group = document.getElementById('meta-overtime-interval');
+    if (!group || group.dataset.wired === '1') return;
+    group.dataset.wired = '1';
+    group.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-overtime]');
+      if (!btn || !group.contains(btn)) return;
+      const mode = btn.getAttribute('data-overtime');
+      if (mode !== 'weeks' && mode !== 'months') return;
+      if (mode === whenPlayedOverTimeMode) return;
+      whenPlayedOverTimeMode = mode;
+      group.querySelectorAll('[data-overtime]').forEach(el => {
+        el.classList.toggle('active', el === btn);
+      });
+      renderOverTimeChart('meta-overtime-canvas');
+    });
   }
 
   function renderWhenPlayed(startTimes) {
@@ -10099,8 +10122,7 @@
       return whenPlayedBucket ? renderMetaWhenMonth(canvasId, whenPlayedBucket) : null;
     });
     registerChartRenderer('section-meta-over-time', (canvasId) => {
-      return whenPlayedBucket && typeof renderMetaWhenWeeks === 'function'
-        ? renderMetaWhenWeeks(canvasId, whenPlayedBucket) : null;
+      return renderOverTimeChart(canvasId);
     });
   }
 

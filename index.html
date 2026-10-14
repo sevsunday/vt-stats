@@ -1672,7 +1672,13 @@
             <div class="card h-100" id="section-meta-over-time">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Matches Over Time</h5>
-                <button class="btn btn-sm" data-expand="section-meta-over-time" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="btn-group btn-group-sm" role="group" id="meta-overtime-interval" aria-label="Matches over time interval">
+                    <button type="button" class="btn btn-outline-secondary active" data-overtime="weeks">Weeks</button>
+                    <button type="button" class="btn btn-outline-secondary" data-overtime="months">Months</button>
+                  </div>
+                  <button class="btn btn-sm" data-expand="section-meta-over-time" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
               </div>
               <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-overtime-canvas"></canvas></div></div>
             </div>

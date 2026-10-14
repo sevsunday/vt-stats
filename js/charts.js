@@ -1626,6 +1626,19 @@ function renderMetaWhenWeekday(canvasId, bucket) {
 }
 
 function renderMetaWhenMonth(canvasId, bucket) {
+  const series = combinedMonthSeries(bucket);
+  if (!series.labels.length) {
+    destroyChartOnCanvas(canvasId);
+    return null;
+  }
+  return renderWhenBarChart(canvasId, {
+    labels: series.labels,
+    recorded: series.values,
+    ticks: { maxRotation: 60, minRotation: 0, autoSkip: true, font: { size: 10 } },
+  });
+}
+
+function combinedMonthSeries(bucket) {
   const b = bucket || { monthRec: new Map(), monthCom: new Map(), includeCommunity: false };
   const keys = [];
   if (b.monthRec) b.monthRec.forEach((_, k) => keys.push(k));
@@ -1633,15 +1646,10 @@ function renderMetaWhenMonth(canvasId, bucket) {
     b.monthCom.forEach((_, k) => { if (keys.indexOf(k) < 0) keys.push(k); });
   }
   const yms = enumerateMonths(keys);
-  if (!yms.length) {
-    destroyChartOnCanvas(canvasId);
-    return null;
-  }
-  return renderWhenBarChart(canvasId, {
+  return {
     labels: yms.map(monthLabel),
-    recorded: yms.map(ym => ((b.monthRec && b.monthRec.get(ym)) || 0) + (b.includeCommunity && b.monthCom ? (b.monthCom.get(ym) || 0) : 0)),
-    ticks: { maxRotation: 60, minRotation: 0, autoSkip: true, font: { size: 10 } },
-  });
+    values: yms.map(ym => ((b.monthRec && b.monthRec.get(ym)) || 0) + (b.includeCommunity && b.monthCom ? (b.monthCom.get(ym) || 0) : 0)),
+  };
 }
 
 function renderMetaWhenWeeks(canvasId, bucket) {
@@ -1658,4 +1666,16 @@ function renderMetaWhenWeeks(canvasId, bucket) {
   }
   const values = keys.map(k => ((b.weekRec && b.weekRec.get(k)) || 0) + (b.includeCommunity && b.weekCom ? (b.weekCom.get(k) || 0) : 0));
   return renderMetaOverTime(canvasId, keys, values);
+}
+
+function renderMetaWhenOverTime(canvasId, bucket, mode) {
+  if (mode === 'months') {
+    const series = combinedMonthSeries(bucket);
+    if (!series.labels.length) {
+      destroyChartOnCanvas(canvasId);
+      return null;
+    }
+    return renderMetaOverTime(canvasId, series.labels, series.values);
+  }
+  return renderMetaWhenWeeks(canvasId, bucket);
 }
