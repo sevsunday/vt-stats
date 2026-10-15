@@ -131,6 +131,7 @@
     overview:          'all-tab-overview-btn',
     'weapons-rivalries': 'all-tab-weapons-btn',
     commanders:        'all-tab-commanders-btn',
+    players:           'all-tab-players-btn',
     meta:              'all-tab-meta-btn',
   };
 
@@ -147,6 +148,7 @@
   //   ?team=1|2         (only when filter=team)
   //   ?players=<csv>    (only when filter=player; tokens may be canonical names or Steam64 IDs)
   //   ?tab=<slug>       (omitted or 'overview' => default)
+  //   ?who=<slug>       (All Matches Experimental tab; omitted when nobody is selected)
   //   ?t=<tick>         (initial-load Replay seek target — see comment below)
   //
   // Picker filter axis (separate from per-match filter/team/players above).
@@ -174,6 +176,7 @@
       team: p.get('team'),
       players: (p.get('players') || '').split(',').map(s => s.trim()).filter(Boolean),
       tab: p.get('tab'),
+      who: p.get('who'),
       // `?t=<tick>` — initial-load-only Replay seek target, produced by the
       // Raw Data Browser's event-stream table row click (see
       // js/raw-browser.js `onEventsBodyClick`). Honored exactly once when
@@ -340,6 +343,10 @@
 
     const slug = getActiveTabSlug();
     if (slug && slug !== 'overview') params.set('tab', slug);
+    if (isAllMatchesView && slug === 'players' && window.VTPlayersTab) {
+      const who = VTPlayersTab.selectedSlug();
+      if (who) params.set('who', who);
+    }
 
     const qs = paramsToString(params);
     return window.location.pathname + (qs ? '?' + qs : '');
@@ -362,6 +369,8 @@
     else history.pushState(null, '', next);
     shownUrl = next;
   }
+
+  window.vtSyncShareUrl = function () { syncUrl(); };
 
   // Live Sync off: opening a match after All Matches must not keep
   // ?match=all, or a refresh would jump back to the aggregate. Picker
@@ -3566,6 +3575,25 @@
   }
   window.vtSteam64FromName = vtSteam64FromName;
 
+  function registerPlayersTab() {
+    registerTabRenderer('#all-tab-players', () => {
+      if (window.VTPlayersTab) VTPlayersTab.holdWho();
+      Promise.all([
+        ensureCommanderEloLoaded(),
+        ensureCommanderEloHistoryLoaded(),
+      ]).then(() => {
+        if (window.VTPlayersTab) VTPlayersTab.render();
+      });
+    });
+    registerChartRenderer('section-players-schedule', (canvasId) => {
+      return window.VTPlayersTab ? VTPlayersTab.mountSchedule(canvasId) : null;
+    });
+    registerDomRenderer('section-players-form', (body) => {
+      if (!window.VTPlayersTab) return { destroy() {} };
+      return VTPlayersTab.mountFormModal(body);
+    });
+  }
+
   async function loadAllMatches(urlState) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
@@ -3654,6 +3682,7 @@
         renderGlobalRivalries([]);
         renderCareerAccuracyTable([]);
       });
+      registerPlayersTab();
       const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
       if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
         const allOverviewBtn = document.getElementById('all-tab-overview-btn');
@@ -3737,6 +3766,8 @@
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
       renderCommanderEconomyLeaders(cs.rows);
     });
+
+    registerPlayersTab();
 
     registerTabRenderer('#all-tab-meta', () => {
       const mc = data.meta_charts || {
@@ -9716,6 +9747,9 @@
       applyFilter();
     }
     const slugMap = currentTarget === '__all__' ? ALL_TAB_SLUGS : MATCH_TAB_SLUGS;
+    if (currentTarget === '__all__' && window.VTPlayersTab) {
+      VTPlayersTab.applyWho(urlState.who || '');
+    }
     if (!activateTabFromSlug(urlState.tab, slugMap)) {
       const id = currentTarget === '__all__' ? 'all-tab-overview-btn' : 'tab-overview-btn';
       const btn = document.getElementById(id);

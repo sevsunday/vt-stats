@@ -8852,3 +8852,67 @@ html.vt-cursor-active * {
     width: auto;
     max-width: 22rem;
 }
+
+/* All Matches → Players. Small samples stay readable but quieter than
+   an 8-game row. The hollow swatch marks a 1–2 game quarter on the
+   form charts. */
+.vt-players-schedule-scroll {
+    max-height: 520px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+#vt-players-schedule-table th[data-vt-sort] {
+    cursor: pointer;
+}
+
+#vt-players-schedule-table td[data-bs-toggle="tooltip"] {
+    cursor: help;
+}
+
+#vt-players-schedule-table th.is-sorted::after {
+    content: " \2193";
+    color: var(--kb-text-muted);
+}
+
+#vt-players-schedule-table th.is-sorted.is-asc::after {
+    content: " \2191";
+}
+
+.vt-players-row-small td {
+    opacity: 0.55;
+}
+
+.vt-players-row-selected {
+    background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+}
+
+.vt-players-thin-mark {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    margin-right: 0.35rem;
+    border: 2px solid var(--kb-primary);
+    border-radius: 2px;
+    vertical-align: -1px;
+}
+
+.vt-players-search-menu {
+    position: absolute;
+    z-index: 5;
+    width: 100%;
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+#all-tab-players .list-group-item {
+    background: transparent;
+    color: var(--kb-text-primary);
+    border-color: var(--kb-border-subtle);
+}
+
+#all-tab-players .list-group-item:hover,
+#all-tab-players .list-group-item:focus {
+    background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+    color: var(--kb-text-primary);
+}
