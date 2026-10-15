@@ -10596,9 +10596,10 @@ def main():
         # The map browser plan extends registry coverage to the full
         # vsrmaplist catalog (143 maps) so /map/ can show every VSR map,
         # not just the ones with sessions. discover_all_maps() unions
-        # the played-map config_mods with every vsrmaplist key (unplayed
-        # entries get config_mod=None and fall through to the existing
-        # VSR_MOD_ID / STOCK_MOD_ID chain). On first run this triggers
+        # the played-map config_mods with map-catalog-extra.json, then
+        # every vsrmaplist key (unplayed website entries get config_mod=None
+        # and fall through to the existing VSR_MOD_ID / STOCK_MOD_ID chain).
+        # On first run this triggers
         # ~109 net-new image downloads; INTER_MAP_REQUEST_DELAY_SEC adds
         # a polite 2s pause between non-cached maps so we don't hammer
         # iondriver. Cached runs skip every sleep.

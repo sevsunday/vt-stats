@@ -64,6 +64,10 @@ BZ2API_JS_PATH = PROJECT_ROOT / "js" / "bz2api.js"
 # canonical size, base-to-base, pools, loose scrap, tags, and image URL.
 # Refresh manually via `scripts/refresh_vsrmaplist.py` when a new map ships.
 VSRMAPLIST_PATH = PROJECT_ROOT / "data" / "vsrmaplist.json"
+# Strategy maps the website catalog does not list. Committed so a
+# vsrmaplist refresh cannot drop them. discover_all_maps() unions this
+# after played maps and before the website index.
+CATALOG_EXTRA_PATH = PROJECT_ROOT / "data" / "map-catalog-extra.json"
 
 IONDRIVER_BASE = "https://gamelistassets.iondriver.com/bzcc"
 USER_AGENT = (
@@ -216,6 +220,61 @@ def load_vsrmaplist() -> dict[str, dict]:
         if key:
             out[key] = entry
     return out
+
+
+def load_catalog_extra() -> dict[str, dict]:
+    """Read `data/map-catalog-extra.json` and return `{file_lower: record}`.
+
+    Each record carries `mod` (iondriver mod to try first) plus `author`,
+    `pools`, and `loose` only when that map's own description stated them.
+    Soft-fails with an empty dict so a missing file leaves the website
+    catalog as the sole unplayed source.
+    """
+    if not CATALOG_EXTRA_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(CATALOG_EXTRA_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"WARNING: map-catalog-extra parse failed: {e}")
+        return {}
+    if not isinstance(raw, list):
+        print("WARNING: map-catalog-extra root is not an array")
+        return {}
+    out: dict[str, dict] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = (entry.get("file") or "").lower()
+        if not key:
+            continue
+        mod = entry.get("mod")
+        rec: dict = {"mod": str(mod) if mod else None}
+        if entry.get("author"):
+            rec["author"] = entry["author"]
+        if entry.get("pools") is not None:
+            rec["pools"] = int(entry["pools"])
+        if entry.get("loose") is not None:
+            rec["loose"] = int(entry["loose"])
+        out[key] = rec
+    return out
+
+
+def _extra_as_catalog_row(extra: dict) -> dict | None:
+    """Shape an extra-catalog record like a vsrmaplist row so the existing
+    pools / loose / author merge fills the same registry fields. None when
+    the description stated none of those. `_catalog_extra` keeps the
+    attribution line from crediting the website index.
+    """
+    row: dict = {"_catalog_extra": True}
+    if extra.get("author"):
+        row["Author"] = extra["author"]
+    if extra.get("pools") is not None:
+        row["Pools"] = extra["pools"]
+    if extra.get("loose") is not None:
+        row["Loose"] = extra["loose"]
+    if len(row) == 1:
+        return None
+    return row
 
 
 def _normalize_vsrmaplist_tags(raw: str | None) -> list[str]:
@@ -550,7 +609,10 @@ def build_per_map(
     if resp:
         sources.append("iondriver.com / gamelistassets")
     if vsrmaplist_entry:
-        sources.append("battlezonescrapfield.github.io (vsrmaplist)")
+        if vsrmaplist_entry.get("_catalog_extra"):
+            sources.append("data/map-catalog-extra.json")
+        else:
+            sources.append("battlezonescrapfield.github.io (vsrmaplist)")
     if not sources and vsr_entry:
         sources.append("js/bz2api.js (VSR_MAP_DATA legacy)")
     attribution_source = " + ".join(sources) if sources else None
@@ -640,12 +702,12 @@ def discover_all_maps(
     `played_map_mods` (or `discover_map_files()`'s output when omitted).
 
     Played maps keep their `config_mod` so the iondriver fallback chain
-    targets the correct mod first. Unplayed maps from vsrmaplist get
-    `None` and fall through to the existing VSR_MOD_ID / STOCK_MOD_ID
-    chain in `build_per_map()`. The map browser plan extends the
-    registry to all 143 vsrmaplist entries (was: ~34 played-only) so
-    `/map/` can show the full VSR catalog including never-recorded
-    maps.
+    targets the correct mod first. `data/map-catalog-extra.json` is
+    unioned next (its mod id is tried first; unplayed website maps still
+    get `None` and fall through to the VSR_MOD_ID / STOCK_MOD_ID chain).
+    The map browser plan extends the registry to every vsrmaplist entry
+    plus those extra stems so `/map/` can show strategy maps the website
+    catalog never published.
 
     If vsrmaplist isn't vendored or fails to parse, the universe
     collapses gracefully to played-maps-only (the helper returns
@@ -654,6 +716,7 @@ def discover_all_maps(
     `generate_map_pages.py`'s slug normalization, not here.
     """
     vsrmaplist = load_vsrmaplist()
+    extra = load_catalog_extra()
     played: dict[str, str | None] = {}
     if played_map_mods is not None:
         for k, mod in played_map_mods.items():
@@ -668,6 +731,9 @@ def discover_all_maps(
     # Play maps first so their config_mod survives any vsrmaplist
     # collision; unplayed entries default to None.
     merged.update(played)
+    for extra_key, rec in extra.items():
+        if extra_key not in merged:
+            merged[extra_key] = rec.get("mod")
     for vsrmaplist_key in vsrmaplist.keys():
         if vsrmaplist_key not in merged:
             merged[vsrmaplist_key] = None
@@ -698,6 +764,7 @@ def build_registry(
     """
     vsr_data = load_vsr_map_data()
     vsrmaplist = load_vsrmaplist()
+    extra = load_catalog_extra()
     entries = (
         map_mod_entries if map_mod_entries is not None else discover_all_maps()
     )
@@ -722,6 +789,8 @@ def build_registry(
     for idx, (map_file, primary_mod) in enumerate(entries):
         vsr_entry = vsr_data.get(map_file)
         vsrmaplist_entry = vsrmaplist.get(map_file)
+        if vsrmaplist_entry is None and map_file in extra:
+            vsrmaplist_entry = _extra_as_catalog_row(extra[map_file])
         try:
             per_map, from_cache = build_per_map(
                 map_file,
