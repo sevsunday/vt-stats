@@ -2227,7 +2227,8 @@ body::before {
 
 /* ============================================================================
    FACTION SCOREBOARD — Player-first compact layout
-   Roster chips lead; team combat/economy totals sit in a quiet strip below.
+   Each team panel is a quieter theme fill. Roster chips lead; team
+   combat/economy totals sit in a quiet strip below.
    ============================================================================ */
 
 #section-faction .card-body {
@@ -2363,25 +2364,34 @@ body::before {
     gap: 0.5rem;
 }
 
+/* Team color as a background-only mix, not a solid fill. The second
+   declaration mixes toward black when the team text is light and toward
+   white when it is dark, so a bright theme color gets darker under white
+   text and stays a light tint under dark text. The transparent mix is the
+   fallback where contrast-color() is missing. Opacity on the panel would
+   fade the text too. --vt-faction-fg is that text; --vt-faction-ink is the
+   color used for text sitting on an inverted player chip. */
 .vt-faction-panel {
-    padding: 1rem 1.1rem;
-    border-radius: 0;
-    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    border-left-width: 5px;
-    border-left-style: solid;
+    padding: 1.1rem;
+    border-radius: 0.55rem;
+    border: none;
     transition: box-shadow 0.2s ease;
 }
 
 .vt-faction-panel--t1 {
-    border-left-color: var(--kb-primary);
-    background: color-mix(in oklab, var(--kb-primary) 8%, color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent));
+    background: color-mix(in oklab, var(--kb-primary) 58%, transparent);
+    background: color-mix(in oklab, var(--kb-primary) 58%, contrast-color(var(--kb-primary-fg)));
+    color: var(--kb-primary-fg);
+    --vt-faction-fg: var(--kb-primary-fg);
+    --vt-faction-ink: var(--kb-primary);
 }
 
 .vt-faction-panel--t2 {
-    border-left-color: var(--kb-accent);
-    background: color-mix(in oklab, var(--kb-accent) 8%, color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent));
+    background: color-mix(in oklab, var(--kb-accent) 58%, transparent);
+    background: color-mix(in oklab, var(--kb-accent) 58%, contrast-color(var(--kb-accent-fg)));
+    color: var(--kb-accent-fg);
+    --vt-faction-fg: var(--kb-accent-fg);
+    --vt-faction-ink: var(--kb-accent);
 }
 
 .vt-faction-panel:hover {
@@ -2395,20 +2405,15 @@ body::before {
     flex-wrap: wrap;
     gap: 0.45rem;
     margin-bottom: 0.65rem;
-}
-
-.vt-faction-panel--t1 .vt-faction-heading {
-    color: var(--kb-primary);
-}
-
-.vt-faction-panel--t2 .vt-faction-heading {
-    color: var(--kb-accent);
+    /* Bootstrap sets h6 color to body text. The title has to use the
+       panel foreground the fill was mixed for, at full strength. */
+    color: inherit;
 }
 
 .vt-faction-subset-note {
     font-size: 0.75rem;
     font-weight: 400;
-    color: var(--kb-text-secondary);
+    color: color-mix(in oklab, var(--vt-faction-fg) 78%, transparent);
 }
 
 .vt-faction-roster {
@@ -2420,21 +2425,21 @@ body::before {
 }
 
 .vt-faction-roster-empty {
-    color: var(--kb-text-muted);
+    color: color-mix(in oklab, var(--vt-faction-fg) 70%, transparent);
     font-size: 0.85rem;
 }
 
 .vt-faction-player-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.28rem 0.7rem;
-    font-size: 0.92rem;
-    font-weight: 600;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 1rem;
+    font-weight: 650;
     line-height: 1.25;
-    color: var(--kb-text-primary);
-    background: color-mix(in oklab, var(--kb-bg-muted) 70%, transparent);
-    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 25%);
+    color: var(--vt-faction-ink);
+    background: color-mix(in oklab, var(--vt-faction-fg) 62%, transparent);
+    border: 1px solid transparent;
     border-radius: 999px;
     white-space: nowrap;
     max-width: 100%;
@@ -2442,24 +2447,25 @@ body::before {
     text-overflow: ellipsis;
 }
 
+.vt-faction-player-chip--cmdr {
+    background: var(--vt-faction-fg);
+}
+
+.vt-faction-player-chip .vt-player-link:hover,
+.vt-faction-player-chip .vt-player-link:focus-visible,
+.vt-faction-player-chip .vt-player-link-fallback:hover,
+.vt-faction-player-chip .vt-player-link-fallback:focus-visible {
+    color: inherit;
+    border-bottom-color: currentColor;
+}
+
 .vt-faction-player-chip .vt-nick-inline {
     font-weight: 400;
-}
-
-.vt-faction-player-chip--cmdr {
-    background: color-mix(in oklab, var(--kb-bg-muted) 55%, transparent);
-}
-
-.vt-faction-panel--t1 .vt-faction-player-chip--cmdr {
-    border-color: color-mix(in oklab, var(--kb-primary) 55%, var(--kb-border-subtle));
-}
-
-.vt-faction-panel--t2 .vt-faction-player-chip--cmdr {
-    border-color: color-mix(in oklab, var(--kb-accent) 55%, var(--kb-border-subtle));
+    color: color-mix(in oklab, var(--vt-faction-ink) 72%, transparent);
 }
 
 .vt-faction-cmdr-pip {
-    color: var(--kb-warning);
+    color: currentColor;
     font-size: 0.78em;
     line-height: 1;
 }
@@ -2467,19 +2473,19 @@ body::before {
 .vt-faction-elo {
     font-weight: 500;
     font-size: 0.78em;
-    color: var(--kb-text-secondary);
+    color: color-mix(in oklab, var(--vt-faction-ink) 72%, transparent);
     font-variant-numeric: tabular-nums;
 }
 
 .vt-faction-elo--t {
-    color: var(--kb-text-muted);
+    color: color-mix(in oklab, var(--vt-faction-ink) 55%, transparent);
 }
 
 .vt-faction-avg {
     margin-left: auto;
     font-size: 0.75rem;
     font-weight: 500;
-    color: var(--kb-text-secondary);
+    color: color-mix(in oklab, var(--vt-faction-fg) 78%, transparent);
     font-variant-numeric: tabular-nums;
 }
 
@@ -2490,47 +2496,41 @@ body::before {
     height: 100%;
 }
 
+/* Padding, not margin. These rows are subgrid tracks with height: 100%,
+   and a top margin sits outside that height and eats the panel's
+   bottom padding. */
 .vt-faction-stats + .vt-faction-stats {
-    margin-top: 0.65rem;
+    margin-top: 0;
+    padding-top: 0.65rem;
 }
 
 .vt-faction-stat {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.12rem;
+    gap: 0.08rem;
     min-width: 0;
-    padding: 0.55rem 0.65rem;
-    background: color-mix(in oklab, var(--kb-bg-muted) 45%, transparent);
-    border-left: 2px solid transparent;
+    padding: 0.4rem 0.55rem;
+    background: color-mix(in oklab, var(--vt-faction-fg) 12%, transparent);
+    border-radius: 0.35rem;
     cursor: help;
 }
 
-.vt-faction-panel--t1 .vt-faction-stat {
-    border-left-color: var(--kb-primary);
-    background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
-}
-
-.vt-faction-panel--t2 .vt-faction-stat {
-    border-left-color: var(--kb-accent);
-    background: color-mix(in oklab, var(--kb-accent) 16%, transparent);
-}
-
 .vt-faction-stat-label {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     font-weight: 500;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--kb-text-muted);
+    color: color-mix(in oklab, var(--vt-faction-fg) 62%, transparent);
 }
 
 .vt-faction-stat-value {
     font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
-    font-size: 0.95rem;
-    font-weight: 600;
+    font-size: 0.78rem;
+    font-weight: 500;
     letter-spacing: -0.02em;
-    color: var(--kb-text-primary);
+    color: color-mix(in oklab, var(--vt-faction-fg) 78%, transparent);
 }
 
 /* Muted state — team is outside the current filter scope.
@@ -2546,7 +2546,7 @@ body::before {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 0;
+    border-radius: inherit;
     background: color-mix(in oklab, var(--kb-bg-body) 35%, transparent);
     pointer-events: none;
 }
@@ -2565,16 +2565,16 @@ body::before {
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--kb-text-muted);
-    background: color-mix(in oklab, var(--kb-bg-muted) 70%, transparent);
-    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 40%);
+    color: color-mix(in oklab, var(--vt-faction-fg) 78%, transparent);
+    background: color-mix(in oklab, var(--vt-faction-fg) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--vt-faction-fg) 28%, transparent);
     border-radius: 999px;
 }
 
 /* Faction badge — derived from match.team_factions (schema_version 3+).
-   Sits next to Team N in faction scoreboard headers. Color is keyed by
-   data-faction-code: i = ISDF, e = Hadean, f = Scion. All colors come
-   from existing --kb-* tokens; no hardcoded values. */
+   Color is keyed by data-faction-code: i = ISDF, e = Hadean, f = Scion.
+   The Outcome team panels override this to one foreground wash so the
+   trophy is the only accent there. All colors come from --kb-* tokens. */
 .vt-faction-badge {
     display: inline-flex;
     align-items: center;
@@ -2607,6 +2607,15 @@ body::before {
 
 .vt-faction-badge[data-faction-code="f"] {
     color: var(--kb-faction-f);
+}
+
+/* Outcome team panels: one quiet foreground pill so ISDF / Scion / Hadean
+   do not compete with the winner trophy. Other surfaces keep the
+   per-faction colors above. */
+.vt-faction-panel .vt-faction-badge[data-faction-code] {
+    color: color-mix(in oklab, var(--vt-faction-fg) 78%, transparent);
+    background: color-mix(in oklab, var(--vt-faction-fg) 12%, transparent);
+    border-color: color-mix(in oklab, var(--vt-faction-fg) 28%, transparent);
 }
 
 /* All Matches → Meta faction matchup table. Neutral cells: the number is
@@ -2924,9 +2933,8 @@ body::before {
    --winner class is still attached to the winning team's panel so other
    contexts (e.g. fullscreen modal, future per-section selectors) can
    target it, but we deliberately leave its visual treatment to the
-   trophy icon alone -- no border / box-shadow accent on the panel
-   itself. The team-color border-left and existing hover shadow stay
-   exactly as-is so the visual hierarchy is unchanged. */
+   trophy icon alone -- no extra border or box-shadow on the panel.
+   The trophy is the only saturated accent on the solid theme fill. */
 .vt-faction-winner-icon {
     color: var(--kb-warning);
     font-size: 0.95em;
