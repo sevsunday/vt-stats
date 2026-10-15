@@ -418,6 +418,130 @@ body::before {
     border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent) !important;
 }
 
+/* World clocks: a full-width secondary bar flush under the dashboard navbar.
+   Five equal rectangles by default. A sixth leading cell appears only when
+   the viewer's timezone is not already one of the five. */
+.vt-site-header {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent);
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+}
+
+.vt-world-clocks {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+}
+
+.vt-world-clocks--extra {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.vt-world-clock {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    margin: 0;
+    padding: 0.28rem 0.4rem;
+    border-radius: 0;
+    border-right: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    background: transparent;
+    color: var(--kb-text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+.vt-world-clock:last-child {
+    border-right: none;
+}
+
+.vt-world-clock--local {
+    background: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+}
+
+.vt-world-clock--local .vt-world-clock-time {
+    color: var(--kb-primary);
+}
+
+.vt-world-clock-time {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+.vt-world-clock-place {
+    display: contents;
+}
+
+.vt-world-clock-city::before,
+.vt-world-clock-offset::before {
+    content: "\00b7";
+    margin-right: 0.35rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-world-clock-offset:empty {
+    display: none;
+}
+
+/* Stack once a cell is too narrow for "4:42 PM · Los Angeles · UTC−7".
+   Five columns fit that line from about 1100px. Six need about 1320px. */
+@media (max-width: 1319.98px) {
+    .vt-world-clocks--extra .vt-world-clock {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.05rem;
+        white-space: normal;
+        text-align: center;
+        padding: 0.28rem 0.15rem;
+    }
+
+    .vt-world-clocks--extra .vt-world-clock-place {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        column-gap: 0.25rem;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vt-world-clocks--extra .vt-world-clock-city::before {
+        content: none;
+        margin: 0;
+    }
+}
+
+@media (max-width: 1099.98px) {
+    .vt-world-clock {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.05rem;
+        white-space: normal;
+        text-align: center;
+        padding: 0.28rem 0.15rem;
+    }
+
+    .vt-world-clock-place {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        column-gap: 0.25rem;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vt-world-clock-city::before {
+        content: none;
+        margin: 0;
+    }
+}
+
 .modal-content {
     background: color-mix(in oklab, var(--kb-bg-card) 92%, transparent) !important;
     backdrop-filter: blur(var(--vt-glass-blur));
@@ -3387,7 +3511,7 @@ body.vt-replay-expand-active {
     overflow: hidden;
 }
 
-body.vt-replay-expand-active > nav.navbar,
+body.vt-replay-expand-active > .vt-site-header,
 body.vt-replay-expand-active #match-info,
 body.vt-replay-expand-active .vt-tab-scroll-wrap {
     display: none !important;

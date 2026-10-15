@@ -21,8 +21,10 @@
 </head>
 <body>
 
-  <!-- Navbar -->
-  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+  <!-- Navbar and the world-clock bar share one sticky header so the clocks
+       stay pinned under the nav on both the match view and All Matches. -->
+  <header class="vt-site-header sticky-top">
+    <nav class="navbar navbar-expand-md border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="index.html" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
@@ -163,7 +165,52 @@
         </div>
       </div>
     </div>
-  </nav>
+    </nav>
+    <div class="vt-world-clocks" role="group" aria-label="World clocks">
+      <span class="vt-world-clock" data-zone="local" data-city="Local" hidden>
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">Local</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+      <span class="vt-world-clock" data-zone="America/Los_Angeles" data-city="Los Angeles">
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">Los Angeles</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+      <span class="vt-world-clock" data-zone="America/Chicago" data-city="Chicago">
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">Chicago</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+      <span class="vt-world-clock" data-zone="America/New_York" data-city="New York">
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">New York</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+      <span class="vt-world-clock" data-zone="Europe/Berlin" data-city="Berlin">
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">Berlin</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+      <span class="vt-world-clock" data-zone="Australia/Sydney" data-city="Sydney">
+        <time class="vt-world-clock-time vt-mono">—</time>
+        <span class="vt-world-clock-place">
+          <span class="vt-world-clock-city">Sydney</span>
+          <span class="vt-world-clock-offset"></span>
+        </span>
+      </span>
+    </div>
+  </header>
 
   <!-- Loading -->
   <div id="loading">
@@ -2221,6 +2268,8 @@
        only on the Combat Timeline; see js/charts.js renderTimeline(). -->
   <script src="vendor/chartjs/chartjs-plugin-zoom.umd.min.js"></script>
   <script src="js/theme.js"></script>
+  <!-- Live world-clock pills above the navbar. Dashboard only. -->
+  <script src="js/world-clocks.js"></script>
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/charts-radar.js"></script>

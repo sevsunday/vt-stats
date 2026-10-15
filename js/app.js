@@ -2847,12 +2847,12 @@
     if (isReplayCompactViewport() || replayExpandActive) return;
     // The replay renderer is async (ensureReplayManifest().then), so rAF-poll
     // until the iframe wrap exists with real height, then scroll its top flush
-    // under the sticky navbar so the transport bar + event feed are in view.
+    // under the sticky header (clocks + navbar) so the transport bar + event feed are in view.
     let tries = 0;
     const tick = () => {
       const wrap = getReplayWrap();
       if (wrap && wrap.getBoundingClientRect().height > 100) {
-        const nav = document.querySelector('nav.navbar');
+        const nav = document.querySelector('.vt-site-header') || document.querySelector('nav.navbar');
         const navH = nav ? nav.getBoundingClientRect().height : 0;
         const top = window.scrollY + wrap.getBoundingClientRect().top - navH;
         window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
