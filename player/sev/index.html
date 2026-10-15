@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sev — VT Stats</title>
-  <meta name="description" content="Tier 3 · VTSR-T 1575 · Peak 1688 · 127 career matches · Thug">
+  <meta name="description" content="Tier 3 · VTSR-T 1602 · Peak 1688 · 128 career matches · Thug">
 
   <link rel="canonical" href="https://vtstats.bz/player/sev/">
 
   <!-- Open Graph (Facebook, LinkedIn, Slack, Discord) -->
   <meta property="og:type" content="profile">
   <meta property="og:title" content="Sev — VT Stats">
-  <meta property="og:description" content="Tier 3 · VTSR-T 1575 · Peak 1688 · 127 career matches · Thug">
+  <meta property="og:description" content="Tier 3 · VTSR-T 1602 · Peak 1688 · 128 career matches · Thug">
   <meta property="og:url" content="https://vtstats.bz/player/sev/">
   <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
   <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
   <!-- Twitter card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Sev — VT Stats">
-  <meta name="twitter:description" content="Tier 3 · VTSR-T 1575 · Peak 1688 · 127 career matches · Thug">
+  <meta name="twitter:description" content="Tier 3 · VTSR-T 1602 · Peak 1688 · 128 career matches · Thug">
   <meta name="twitter:image" content="https://vtstats.bz/data/og/player-card.png">
 
   <link rel="stylesheet" href="../../vendor/bootstrap/css/bootstrap.min.css">
@@ -168,6 +168,19 @@
                      placeholder="Search players…" autocomplete="off">
             </div>
 
+            <!-- View mode stays outside the filter drawer so it remains
+                 visible on phones. Layout only; not a filter. -->
+            <div class="btn-group btn-group-sm vt-player-view-toggle" role="group" aria-label="View mode">
+              <button type="button" class="btn vt-player-view-btn" data-view="grid"
+                      aria-pressed="true" title="Grid view" aria-label="Grid view">
+                <i class="bi bi-grid-3x3-gap-fill"></i>
+              </button>
+              <button type="button" class="btn vt-player-view-btn" data-view="list"
+                      aria-pressed="false" title="List view" aria-label="List view">
+                <i class="bi bi-list-ul"></i>
+              </button>
+            </div>
+
             <button type="button" class="vt-player-filter-toggle d-md-none ms-auto"
                     data-bs-toggle="offcanvas" data-bs-target="#vt-player-filter-offcanvas"
                     aria-controls="vt-player-filter-offcanvas" aria-label="Open filters">
@@ -304,6 +317,34 @@
         </div>
       </div>
     </section>
+
+    <div class="modal fade" id="vt-player-view-pref-modal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-eye me-2"></i>Set your default view</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-3">Always open Players in this layout from now on?</p>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="vt-player-view-pref-dismiss" checked>
+              <label class="form-check-label" for="vt-player-view-pref-dismiss">
+                Don't ask me again
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-pref="grid">
+              <i class="bi bi-grid-3x3-gap-fill me-1"></i>Default to Gallery
+            </button>
+            <button type="button" class="btn btn-primary" data-pref="list">
+              <i class="bi bi-list-ul me-1"></i>Default to List
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
   </main>
 
