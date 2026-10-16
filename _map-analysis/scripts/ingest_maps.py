@@ -15,11 +15,11 @@ What this script does, in order:
    intent: a VSR-mod override of `vsrabundance.bzn` should win over a base
    game copy of the same file.
 3b. **Scope filter (default ON)**: drop .bzn stems that aren't in
-   `data/vsrmaplist.json`. Production only cares about the curated VSR
-   subset (~143 maps). Pass `--include-custom` to ingest campaign /
-   base-game / third-party-workshop maps too. The matching pre-existing
-   "prune" step (below) keeps the on-disk corpus aligned with the same
-   filter.
+   `data/vsrmaplist.json` or `data/map-catalog-extra.json`. Production
+   cares about the curated VSR subset plus that committed supplement.
+   Pass `--include-custom` to ingest campaign / base-game /
+   third-party-workshop maps too. The matching pre-existing "prune"
+   step (below) keeps the on-disk corpus aligned with the same filter.
 4. **Destination naming**: prefer the official `Name` field from
    `data/vsrmaplist.json` (with `XYZ:` prefix iteratively stripped to match
    `scripts/generate_map_pages.py::map_title_resolver`), then the source
@@ -81,6 +81,10 @@ from _paths import (  # noqa: E402
     THIS_DIR as SCRIPT_DIR,
 )
 
+# Stems the map browser keeps even though BZCC-Website's catalog omits them.
+# Same file scripts/build_map_registry.py unions into the registry.
+CATALOG_EXTRA_PATH = VSRMAPLIST_MANIFEST.parent / "map-catalog-extra.json"
+
 
 # Pre-restructure layout had test-maps/ as sibling of vsrmaplist/.
 # Kept here so the migration code in this file still works on any future
@@ -105,6 +109,28 @@ ILLEGAL_FS_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # ---------------------------------------------------------------------------
 # vsrmaplist.json lookup
 # ---------------------------------------------------------------------------
+
+def load_catalog_extra_stems() -> set[str]:
+    """Stems in data/map-catalog-extra.json. Soft-fails to an empty set."""
+    if not CATALOG_EXTRA_PATH.is_file():
+        return set()
+    try:
+        data = json.loads(CATALOG_EXTRA_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"WARN: map-catalog-extra.json parse failed: {e}", file=sys.stderr)
+        return set()
+    out: set[str] = set()
+    if not isinstance(data, list):
+        return out
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get("file") or entry.get("File") or ""
+        key = str(raw).lower().removesuffix(".bzn").strip()
+        if key:
+            out.add(key)
+    return out
+
 
 def load_vsrmaplist() -> dict[str, dict[str, Any]]:
     """Returns {bzn_stem_lower: vsrmaplist_entry} or {} if missing."""
@@ -410,15 +436,16 @@ def prune_custom_folders(
     vsrmaplist_lookup: dict[str, dict[str, Any]],
     *,
     dry_run: bool = False,
+    extra_stems: set[str] | None = None,
 ) -> tuple[int, int, int]:
     """Clean up `vsrmaplist/` so each on-disk folder corresponds to a
-    canonical vsrmaplist entry.
+    canonical vsrmaplist entry, or a stem in map-catalog-extra.json.
 
     Two passes:
 
     1. **Custom drop**: remove folders whose primary `.bzn` isn't in
-       `data/vsrmaplist.json` (campaign / base-game MP / third-party
-       workshop maps).
+       `data/vsrmaplist.json` or `data/map-catalog-extra.json`
+       (campaign / base-game MP / third-party workshop maps).
     2. **Wrong-name drop**: for folders whose `.bzn` *is* in the
        manifest, check the folder name matches the canonical
        `Name` (with the same `strip_title_prefixes` + `clean_fs_name`
@@ -439,6 +466,7 @@ def prune_custom_folders(
     deleted = 0
     kept_with_cal = 0
     kept_no_bzn = 0
+    allowed_extra = extra_stems or set()
     for folder in sorted(VSRMAPLIST_DIR.iterdir(), key=lambda p: p.name.lower()):
         if not folder.is_dir():
             continue
@@ -453,8 +481,10 @@ def prune_custom_folders(
         primary_stem = bzns[0].stem.lower()
         has_cal = (folder / "calibration.json").exists()
 
-        # Pass 1: in vsrmaplist?
+        # Pass 1: in vsrmaplist, or the committed catalog supplement?
         entry = vsrmaplist_lookup.get(primary_stem)
+        if entry is None and primary_stem in allowed_extra:
+            continue
         if entry is None:
             # Custom map.
             if has_cal:
@@ -530,17 +560,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--include-custom", action="store_true",
                     help=(
                         "Also ingest .bzn files whose stem isn't in "
-                        "data/vsrmaplist.json (campaign maps, base-game MP, "
-                        "third-party workshop maps, etc.). Off by default "
-                        "since the production catalog only covers the "
-                        "vsrmaplist subset."
+                        "data/vsrmaplist.json or data/map-catalog-extra.json "
+                        "(campaign maps, base-game MP, third-party workshop "
+                        "maps, etc.). Off by default."
                     ))
     ap.add_argument("--no-prune", action="store_true",
                     help=(
                         "Skip the cleanup that deletes vsrmaplist/<folder>/ "
-                        "entries which aren't in data/vsrmaplist.json. "
-                        "Folders with calibration.json are NEVER deleted "
-                        "regardless of this flag."
+                        "entries which aren't in data/vsrmaplist.json or "
+                        "data/map-catalog-extra.json. Folders with "
+                        "calibration.json are NEVER deleted regardless of "
+                        "this flag."
                     ))
     args = ap.parse_args(argv)
 
@@ -557,14 +587,17 @@ def main(argv: list[str]) -> int:
     # 1. vsrmaplist lookup (needed by prune + discovery filter).
     print("Loading vsrmaplist.json manifest...")
     vsrmaplist = load_vsrmaplist()
-    print(f"  manifest entries: {len(vsrmaplist)}\n")
+    extra_stems = load_catalog_extra_stems()
+    print(f"  manifest entries: {len(vsrmaplist)}")
+    print(f"  catalog supplement: {len(extra_stems)}\n")
 
     # 2. Prune existing custom folders (non-vsrmaplist) unless opted out.
-    #    Folders with calibration.json are always preserved.
-    if not args.no_prune and not args.include_custom and vsrmaplist:
+    #    Folders with calibration.json are always preserved. Stems in
+    #    map-catalog-extra.json are kept too.
+    if not args.no_prune and not args.include_custom and (vsrmaplist or extra_stems):
         print("Pruning non-vsrmaplist folders from vsrmaplist/...")
         n_pruned, n_kept_cal, n_kept_no_bzn = prune_custom_folders(
-            vsrmaplist, dry_run=args.dry_run,
+            vsrmaplist, dry_run=args.dry_run, extra_stems=extra_stems,
         )
         print(f"  pruned: {n_pruned}"
               f"  kept (has calibration): {n_kept_cal}"
@@ -582,12 +615,14 @@ def main(argv: list[str]) -> int:
     found = discover_bzns(roots)
     print(f"  unique .bzn stems: {len(found)}")
 
-    # 5. Filter to vsrmaplist subset (default; --include-custom bypasses).
-    if not args.include_custom and vsrmaplist:
+    # 5. Filter to vsrmaplist + catalog supplement (default;
+    #    --include-custom bypasses).
+    allowed = set(vsrmaplist) | extra_stems
+    if not args.include_custom and allowed:
         before = len(found)
-        found = {k: v for k, v in found.items() if k in vsrmaplist}
+        found = {k: v for k, v in found.items() if k in allowed}
         n_filtered_out = before - len(found)
-        print(f"  filtered to vsrmaplist: {len(found)} of {before} kept "
+        print(f"  filtered to vsrmaplist + catalog supplement: {len(found)} of {before} kept "
               f"({n_filtered_out} custom dropped; pass --include-custom to keep)")
     print()
 
