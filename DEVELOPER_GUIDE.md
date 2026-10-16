@@ -1752,7 +1752,7 @@ The book is built by the **standalone** `scripts/extract_console_reference.py` (
 
 ### Weapons Lab (`weapons/index.html`)
 
-A standalone, purely client-side calculator, 4th item of the ODF dropdown. It answers "what does weapon X do to target Y when fired from ship Z": per hit, DPS, sustained DPS, time to kill, ammo per second, shots per tank, range, splash, pulses and charge levels, each labelled with how directly it follows from the ODF. Corpus-wide, picker-unaware, NOT in the pipeline cache key.
+A standalone, purely client-side calculator, 4th item of the ODF dropdown. It answers "what does weapon X do to target Y when fired from ship Z": per hit, burst DPS, time to kill, ammo per second, damage per ammo, regen-limited DPS, shots per tank, range, splash, pulses and charge levels, each labelled with how directly it follows from the ODF. Corpus-wide, picker-unaware, NOT in the pipeline cache key.
 
 | File | Role |
 |---|---|
@@ -1813,7 +1813,9 @@ With a shooter, the matching hardpoints are those of the family's category. The 
 | Ammo per second | `ammoCost × (salvoCount / cycle) × g`; continuous weapons `ammoCost × g` |
 | Rounds / shots per tank | `floor(maxAmmo / ammoCost)` / `floor(maxAmmo / (ammoCost × roundsPerShot))`. The second row is shown only when it differs |
 | Time to empty | `maxAmmo / (ammo per second − addAmmo)`; never when regen covers the drain. A `SpecialItemClass` toggle (Phantom VIR, RED Field, SITE Camera, force field; `variant.toggle`) drains `ammoCost` every second it is on |
-| Sustained DPS | `min(DPS, addAmmo / ammoCost × per hit)`; continuous `DPS × min(1, addAmmo / ammo per second)` |
+| Burst DPS | Full fire-rate DPS while the ammo tank lasts (Damage panel). Renamed from plain "DPS" when a ship is selected so it is not confused with the regen ceiling |
+| Damage per ammo | `per hit / ammoCost` (Ammo panel). How much punch each ammo point buys |
+| Regen-limited DPS | Ammo panel (not Damage). `min(burst DPS, addAmmo / ammoCost × per hit)`; continuous `burst DPS × min(1, addAmmo / ammo per second)`. Long-run rate if you only fire as fast as regen allows — high ammoCost weapons fall well below burst |
 | Hits / shots to kill | `ceil(maxHealth / per hit)` / `ceil(hits / roundsPerShot)`. `roundsPerShot = salvoCount × barrels`, and `barrels` is 1 when `shotAlternate` and `g > 1`, otherwise `g`. Hits stay the technical damage-event count; a shot is one trigger pull. The hits row is hidden when the two counts match |
 | Time to kill | `InitialShotDelay + (shots − 1) × interval` (`InitialShotDelay` defaults to 0); continuous weapons `maxHealth / DPS` |
 | Ammo used | `hits × ammoCost / maxAmmo` (a warning above 100%) |

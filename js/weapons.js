@@ -1262,9 +1262,16 @@
         } else {
             damageRows.push(statRow('Per hit' + vs, num(r.perHit), ex.perHit, { lead: true }));
         }
-        damageRows.push(statRow(g > 1 ? 'DPS, ' + g + ' hardpoints' : 'DPS', num(r.dps), ex.dps || ex.dpsPerHardpoint, { lead: d.kind !== 'field' }));
+        {
+            const dpsLabel = sh
+                ? (g > 1 ? 'Burst DPS, ' + g + ' hardpoints' : 'Burst DPS')
+                : (g > 1 ? 'DPS, ' + g + ' hardpoints' : 'DPS');
+            damageRows.push(statRow(dpsLabel, num(r.dps), ex.dps || ex.dpsPerHardpoint, Object.assign(
+                { lead: d.kind !== 'field' },
+                sh ? { labelTip: 'Full fire rate while the ammo tank lasts — ignores regen.' } : null
+            )));
+        }
         if (g > 1) damageRows.push(statRow('DPS per hardpoint', num(r.dpsPerHardpoint), ex.dpsPerHardpoint));
-        if (sh) damageRows.push(statRow('Sustained DPS', num(r.ammo.sustainedDps), ex.sustainedDps, { labelTip: 'What ammo regen alone can keep firing' }));
         if (tg) {
             damageRows.push(statRow('Time to kill', num(r.ttk.seconds, 2, 's'), ex.ttk, { lead: true }));
             if (r.ttk.shotsToKill != null) {
@@ -1307,6 +1314,21 @@
         }
         // A no-damage item drops the rate rows it has no number for.
         if (lead !== 'none' && (!noDamage || r.ammo.perSec != null)) ammoRows.push(statRow('Ammo per second', num(r.ammo.perSec), ex.ammoPerSec));
+        // Damage-per-ammo + regen-limited DPS live under Ammo (economy), not
+        // Damage — so a high ammoCost weapon's combat punch isn't undercut by
+        // a peer "sustained" number next to burst DPS.
+        if (sh && !noDamage && v.ammoMode === 'perShot' && r.perHit != null && r.ammo.perShot > 0) {
+            const dmgPerAmmo = r.perHit / r.ammo.perShot;
+            ammoRows.push(statRow('Damage per ammo', num(dmgPerAmmo),
+                fmt(r.perHit) + ' per hit / ' + fmt(r.ammo.perShot) + ' ammo = ' + fmt(dmgPerAmmo), {
+                    labelTip: 'How much punch each ammo point buys — why regen-limited DPS differs between weapons.',
+                }));
+        }
+        if (sh && r.ammo.sustainedDps != null) {
+            ammoRows.push(statRow('Regen-limited DPS', num(r.ammo.sustainedDps), ex.sustainedDps, {
+                labelTip: 'Long-run damage rate if you only fire as fast as ammo regen allows. High ammoCost weapons fall well below burst.',
+            }));
+        }
         if (sh) {
             if (v.ammoMode === 'perShot') {
                 const roundName = unit === 'shot' ? 'Rounds per tank' : cap(unit) + 's per tank';

@@ -1541,8 +1541,8 @@
                     if (dps != null && perHit != null) {
                         ammo.sustainedDps = shotCost > 0 ? Math.min(dps, sh.addAmmo / shotCost * perHit) : dps;
                         explain.sustainedDps = shotCost > 0
-                            ? 'min(DPS ' + fmt(dps) + ', regen ' + fmt(sh.addAmmo) + ' / ' + fmt(shotCost) + ' x ' + fmt(perHit) + ') = ' + fmt(ammo.sustainedDps)
-                            : 'No ammo cost: sustained = burst.';
+                            ? 'min(burst DPS ' + fmt(dps) + ', regen ' + fmt(sh.addAmmo) + ' / ' + fmt(shotCost) + ' x ' + fmt(perHit) + ') = ' + fmt(ammo.sustainedDps)
+                            : 'No ammo cost: regen-limited = burst.';
                     }
                 }
             } else if (v.ammoMode === 'perSecond' && shotCost != null) {
@@ -1556,7 +1556,7 @@
                         : 'Regen ' + fmt(sh.addAmmo) + '/s covers the ' + fmt(ammo.perSec) + '/s drain.';
                     if (dps != null) {
                         ammo.sustainedDps = ammo.perSec > 0 ? dps * Math.min(1, sh.addAmmo / ammo.perSec) : dps;
-                        explain.sustainedDps = 'DPS ' + fmt(dps) + ' x min(1, regen ' + fmt(sh.addAmmo) + ' / ' + fmt(ammo.perSec) + ') = ' + fmt(ammo.sustainedDps);
+                        explain.sustainedDps = 'burst DPS ' + fmt(dps) + ' x min(1, regen ' + fmt(sh.addAmmo) + ' / ' + fmt(ammo.perSec) + ') = ' + fmt(ammo.sustainedDps);
                     }
                 }
             }
