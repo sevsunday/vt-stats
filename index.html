@@ -1133,17 +1133,6 @@
       </button>
     </div>
 
-    <!-- Hero band: title + 5-up stat cards. Stat cards (#hero-stats) are
-         populated by renderHeroStats() in js/app.js. -->
-    <div class="vt-all-hero card mb-4">
-      <div class="card-body">
-        <div class="vt-all-hero-head">
-          <h4 class="mb-0">All Matches Overview</h4>
-        </div>
-        <div class="vt-hero-stats" id="hero-stats"></div>
-      </div>
-    </div>
-
     <!-- All Matches Tab Navigation -->
     <div class="vt-tab-scroll-wrap mb-4">
       <ul class="nav nav-pills" id="all-tabs" role="tablist">
@@ -1170,6 +1159,18 @@
 
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
+
+        <!-- Hero band: title + 5-up stat cards. Lives inside Overview so it
+             hides with the other Overview cards on tab switch. Stat cards
+             (#hero-stats) are populated by renderHeroStats() in js/app.js. -->
+        <div class="vt-all-hero card mb-4">
+          <div class="card-body">
+            <div class="vt-all-hero-head">
+              <h4 class="mb-0">All Matches Overview</h4>
+            </div>
+            <div class="vt-hero-stats" id="hero-stats"></div>
+          </div>
+        </div>
 
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">

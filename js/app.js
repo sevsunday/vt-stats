@@ -3733,7 +3733,7 @@
 
     if (window.VTFx) {
       const allOverviewPane = document.getElementById('all-tab-overview');
-      const heroCard = document.querySelector('#all-matches-view > .vt-all-hero');
+      const heroCard = document.querySelector('#all-tab-overview > .vt-all-hero');
       requestAnimationFrame(() => {
         // Animate the hero card directly with a 0ms delay, then run the
         // existing tab-pane stagger. Calling staggerEntrance on a parent
