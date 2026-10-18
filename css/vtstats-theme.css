@@ -2263,6 +2263,13 @@ body::before {
     #faction-content.vt-faction-has-econ > .vt-faction-panel {
         grid-row: span 4;
     }
+
+    /* Fills the shared combat / scrap tracks. Below this breakpoint the
+       panels are ordinary blocks, and 100% would stretch the first row
+       to the whole card. */
+    .vt-faction-stats {
+        height: 100%;
+    }
 }
 
 #outcome-read:empty,
@@ -2493,7 +2500,6 @@ body::before {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.65rem;
-    height: 100%;
 }
 
 /* Padding, not margin. These rows are subgrid tracks with height: 100%,
