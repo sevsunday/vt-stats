@@ -5978,10 +5978,25 @@ td.vt-col-split {
     transform: translateX(-50%);
     border-radius: 999px;
     background: radial-gradient(ellipse at center,
-        var(--vt-band-color, var(--kb-primary)) 0%,
-        color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 45%, transparent) 35%,
-        transparent 72%);
+        color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 40%, var(--kb-text-primary)) 0%,
+        color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 40%, var(--kb-text-primary)) 10%,
+        var(--vt-band-color, var(--kb-primary)) 22%,
+        color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 45%, transparent) 40%,
+        transparent 74%);
     pointer-events: none;
+}
+/* Exact position: a thin pin that reads against the lit segment in either mode. */
+.vt-band-bar-marker::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 2px;
+    height: 100%;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 40%, var(--kb-text-primary));
+    box-shadow: 0 0 3px color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 70%, transparent);
 }
 
 .vt-verdict-chip {
