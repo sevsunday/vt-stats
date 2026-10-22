@@ -1173,12 +1173,23 @@
     // The status (Good game / Slight edge / PLAYEDathon / ...) renders
     // inside the meter itself, so the head carries only the headline.
     const meter = B ? B.meterHtml({ probT1: state.probT1 }) : '';
+    const reason = (B && B.mainReason && state.teams[1].length && state.teams[2].length)
+      ? B.mainReasonHtml(B.mainReason({
+        cmdrGap: Number.isFinite(state.cmdrGap) ? state.cmdrGap : null,
+        thugGap: Number.isFinite(state.thugGap) ? state.thugGap : null,
+        lambda: state.lambda,
+        scale: state.scale,
+        cmdrName: (side) => (state.cmdrs[side] ? state.cmdrs[side].displayName : null),
+        validation: validationSummary || null,
+      }), { bsTooltip: false })
+      : '';
 
     return `
       <div class="vt-tools-balonce-played-meter">
         <div class="vt-tools-balonce-meter-head">
           <span class="vt-tools-balonce-meter-headline">${headline}</span>
         </div>
+        ${reason}
         ${meter}
         <div class="vt-balonce-parts">${parts.join('')}</div>
         ${renderMeterFooter(state)}

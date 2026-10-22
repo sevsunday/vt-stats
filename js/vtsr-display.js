@@ -114,7 +114,8 @@
     return ` title="${esc(title)}" data-bs-toggle="tooltip" data-bs-placement="top"`;
   }
 
-  // opts: { compact (roman + half initial), title (override), bsTooltip }
+  // opts: { compact (roman + half caret), muted (one subtle tone),
+  //         title (override), bsTooltip }
   function bandChipHtml(band, opts) {
     opts = opts || {};
     if (!band) return '<span class="text-muted">&mdash;</span>';
@@ -130,7 +131,7 @@
     const half = opts.compact
       ? `<span class="vt-band-half vt-band-half--compact" data-half="${band.half}">${band.half === 'upper' ? '▲' : '▼'}</span>`
       : `<span class="vt-band-half" data-half="${band.half}">${band.halfLabel}</span>`;
-    return `<span class="vt-band-chip" data-tier="${band.tier}"${tooltipAttrs(t, opts)}>`
+    return `<span class="vt-band-chip${opts.muted ? ' vt-band-chip--muted' : ''}" data-tier="${band.tier}"${tooltipAttrs(t, opts)}>`
       + `<span class="vt-tier-badge vt-tier-${band.tier}">${band.roman}</span>${half}</span>`;
   }
 

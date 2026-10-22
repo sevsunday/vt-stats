@@ -610,14 +610,24 @@
     return `${winner.name} won as the underdog.`;
   }
 
-  function vtsrcHandicapClause(duel) {
-    const h = duel.team_handicap;
-    if (!h || h.diff == null) return '';
-    const mag = Math.abs(h.diff);
-    if (mag < HANDICAP_GAP_MIN) return '';
+  // Same main-reason line as the Outcome card (VTBalonce.mainReason):
+  // commander edge, thug edge, stacked, or both.
+  function vtsrcReason(duel, c1, c2) {
+    const h = duel.team_handicap || {};
+    if (window.VTBalonce && window.VTBalonce.mainReason) {
+      const consts = window.VTBalonce.cmdrConstants ? window.VTBalonce.cmdrConstants() : {};
+      return window.VTBalonce.mainReason({
+        cmdrGap: (c1.before != null && c2.before != null) ? c1.before - c2.before : null,
+        thugGap: (h.t1_thug_mean != null && h.t2_thug_mean != null) ? h.t1_thug_mean - h.t2_thug_mean : null,
+        lambda: h.lambda != null ? h.lambda : consts.lambda,
+        scale: consts.scale,
+        cmdrName: (side) => (side === 1 ? c1.name : c2.name) || null,
+      });
+    }
+    if (h.diff == null || Math.abs(h.diff) < HANDICAP_GAP_MIN) return null;
     const team = h.diff > 0 ? 1 : 2;
-    const shift = VTSRDisplay.gapToWinShift(mag);
-    return ` Team ${team}\u2019s thugs were stronger going in (about ${VTSRDisplay.winShiftText(shift)} win chance).`;
+    const shift = VTSRDisplay.gapToWinShift(Math.abs(h.diff));
+    return { label: 'Thugs', text: `Team ${team}\u2019s thugs were stronger going in (about ${VTSRDisplay.winShiftText(shift)} win chance).`, tip: '' };
   }
 
   function paintVtsrc(joined, matchId) {
@@ -673,10 +683,20 @@
         <span class="vt-match-elo-vtsrc-range vt-mono">${before} \u2192 ${after}</span>
       </div>`;
     }).join('');
-    const verdict = vtsrcVerdict(duel, c1, c2) + vtsrcHandicapClause(duel);
+    const verdict = vtsrcVerdict(duel, c1, c2);
+    const reason = vtsrcReason(duel, c1, c2);
+    const reasonHtml = reason && window.VTBalonce && window.VTBalonce.mainReasonHtml && reason.key
+      ? window.VTBalonce.mainReasonHtml(reason)
+      : (reason ? `<p class="vt-match-elo-vtsrc-verdict mb-2">${esc(reason.text)}</p>` : '');
     body.innerHTML = `
-      <p class="vt-match-elo-vtsrc-verdict mb-3">${esc(verdict)}</p>
+      <p class="vt-match-elo-vtsrc-verdict mb-2">${esc(verdict)}</p>
+      ${reasonHtml}
       ${rows}`;
+    if (window.bootstrap && bootstrap.Tooltip) {
+      body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
+        bootstrap.Tooltip.getOrCreateInstance(el);
+      });
+    }
     card.classList.remove('d-none');
   }
 

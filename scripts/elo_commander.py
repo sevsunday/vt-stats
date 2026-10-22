@@ -726,8 +726,17 @@ def compute_commander_elo(all_match_data: list[dict],
     peak_date: dict[str, str] = {}
     last_match: dict[str, str] = {}
     last_delta: dict[str, float] = {}
+    # Last 10 VTSR-C changes in walk order (display-only sparkline; mirrors
+    # elo.py's win_history).
+    win_history: dict[str, list[float]] = {}
     display_name: dict[str, str] = {}
     steam64_out: dict[str, str | None] = {}
+
+    def _push_history(k: str, dr: float) -> None:
+        wh = win_history.setdefault(k, [])
+        wh.append(round(dr, 2))
+        if len(wh) > 10:
+            del wh[: len(wh) - 10]
 
     def _key(row: dict) -> str:
         s64 = row.get("steam64")
@@ -913,6 +922,7 @@ def compute_commander_elo(all_match_data: list[dict],
                     peak_date[k] = duel.get("date", "")
                 last_match[k] = sentinel
                 last_delta[k] = dr
+                _push_history(k, dr)
                 duel_commanders_ext[str(side)] = {
                     "steam64": steam64_out.get(k),
                     "name": display_name.get(k, ""),
@@ -1111,6 +1121,7 @@ def compute_commander_elo(all_match_data: list[dict],
                 peak_date[k] = entry.get("match_date", "")
             last_match[k] = match_id
             last_delta[k] = dr
+            _push_history(k, dr)
             duel_commanders[str(t)] = {
                 "steam64": steam64_out.get(k),
                 "name": display_name.get(k, ""),
@@ -1188,6 +1199,7 @@ def compute_commander_elo(all_match_data: list[dict],
             "peak_date": peak_date.get(k, ""),
             "last_match_id": last_match.get(k, ""),
             "last_delta": round(last_delta.get(k, 0.0), 2),
+            "win_history": list(win_history.get(k, [])),
             "provisional": g < CMDR_PROVISIONAL_THRESHOLD,
             # v2: duels where the economy composite had telemetry (both
             # v4 flags true). 0 for every pre-v4-era commander.

@@ -5934,9 +5934,19 @@ td.vt-col-split {
     color: var(--kb-text-secondary);
 }
 .vt-band-half[data-half="upper"] { color: var(--kb-text-primary); }
-.vt-band-half--compact {
+.vt-band-half.vt-band-half--compact {
     font-size: 0.6rem;
     color: var(--vt-band-color, var(--kb-text-secondary));
+}
+/* Muted chip (e.g. the ladder's Peak column): one subtle tone for the
+   badge, numeral and caret so it never competes with the current band. */
+.vt-band-chip--muted .vt-tier-badge {
+    background: color-mix(in oklab, var(--kb-text-muted) 22%, transparent);
+    color: var(--kb-text-muted);
+}
+.vt-band-chip--muted .vt-band-half,
+.vt-band-chip--muted .vt-band-half.vt-band-half--compact {
+    color: var(--kb-text-muted);
 }
 
 .vt-band-bar {
@@ -5951,7 +5961,7 @@ td.vt-col-split {
     /* Keep the soft marker inside the track ends; it may overhang vertically. */
     clip-path: inset(-6px 0);
 }
-.vt-band-bar--compact { max-width: 5rem; height: 4px; }
+.vt-band-bar--compact { max-width: 8rem; height: 6px; }
 .vt-band-bar-seg {
     display: block;
     height: 100%;
@@ -7764,48 +7774,7 @@ html.vt-cursor-active * {
     font-weight: 400;
 }
 
-/* --- narrative ------------------------------------------------ */
-.vt-story-narrative {
-    font-size: 1.02rem;
-    line-height: 1.75;
-    color: var(--kb-text-primary);
-}
-.vt-story-narrative b { font-variant-numeric: tabular-nums; }
-/* Commander names in the narrative: bold only. Team coloring was removed
-   here by user call — colored names read as noise in running prose; the
-   verdict cards, lanes and beat chips keep the team-color coding. */
-.vt-story-t1,
-.vt-story-t2 { font-weight: 600; }
-.vt-story-beatref { color: var(--kb-warning); font-weight: 600; }
 .vt-story-name { font-weight: 600; }
-
-/* --- cast chips ------------------------------------------------ */
-.vt-story-cast {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-.vt-story-cast-chip {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 0.45rem;
-    padding: 0.35rem 0.7rem;
-    border: 1px solid var(--kb-border-subtle);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--kb-bg-card) 75%, transparent);
-    font-size: 0.8rem;
-}
-.vt-story-cast-chip i { color: var(--kb-warning); }
-.vt-story-cast-chip--t1 i { color: var(--kb-primary); }
-.vt-story-cast-chip--t2 i { color: var(--kb-success); }
-.vt-story-cast-role {
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--kb-text-muted);
-    font-weight: 600;
-}
-.vt-story-cast-chip small { color: var(--kb-text-muted); }
 
 /* --- verdict grid ---------------------------------------------- */
 .vt-story-vcell {
@@ -8472,6 +8441,33 @@ html.vt-cursor-active * {
     color: var(--kb-primary);
     font-weight: 700;
 }
+/* Main reason a side is favored (VTBalonce.mainReason). */
+.vt-balonce-reason {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    margin: 0.35rem 0 0.5rem;
+    font-size: 0.82rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-reason-label {
+    flex: 0 0 auto;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--vt-reason-color, var(--kb-primary));
+    background: color-mix(in oklab, var(--vt-reason-color, var(--kb-primary)) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--vt-reason-color, var(--kb-primary)) 40%, transparent);
+}
+.vt-balonce-reason[data-reason="commander_edge"] { --vt-reason-color: var(--vt-tier-1); }
+.vt-balonce-reason[data-reason="stacked"]        { --vt-reason-color: var(--kb-warning); }
+.vt-balonce-reason[data-reason="thug_edge"]      { --vt-reason-color: var(--vt-tier-2); }
+.vt-balonce-reason[data-reason="both"]           { --vt-reason-color: var(--kb-primary); }
+.vt-balonce-reason[data-reason="even"]           { --vt-reason-color: var(--kb-text-muted); }
+.vt-balonce-reason[title] { cursor: help; }
 
 /* ---- Pre-match team columns ---- */
 
@@ -8706,6 +8702,41 @@ html.vt-cursor-active * {
     font-size: 0.72rem;
     color: var(--kb-text-muted);
 }
+.vt-balonce-zone--played > .vt-balonce-sub {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.vt-balonce-duel-line {
+    margin: 0 0 0.4rem;
+    font-size: 0.88rem;
+    color: var(--kb-text-primary);
+}
+.vt-balonce-econ { margin-top: 0.5rem; }
+.vt-balonce-econ-head {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--kb-text-secondary);
+    margin-bottom: 0.2rem;
+    cursor: help;
+}
+.vt-balonce-econ-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.8rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-econ-list li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.25rem 0.75rem;
+    padding: 0.15rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+.vt-balonce-econ-list li:last-child { border-bottom: 0; }
+.vt-balonce-econ-axis { color: var(--kb-text-primary); }
 
 .vt-balonce-axis-row {
     /* Fixed label column so the bar keeps the room on a wide card —

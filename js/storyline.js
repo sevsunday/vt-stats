@@ -4,8 +4,7 @@
 // bucketed lanes + wire-enum band segments + curated beats + typed facts +
 // archetype) as the per-match Storyline tab: attributed verdict cards, a
 // synced multi-lane timeline with drag-zoom + hover tooltips + beat flags,
-// a key-moments rail that deep-links into the Replay player, and the
-// auto-generated narrative paragraph at the bottom.
+// and a key-moments rail that deep-links into the Replay player.
 //
 // Contract notes:
 // - The block is match-global and ALWAYS unfiltered (highlights passthrough
@@ -157,217 +156,6 @@
       detail: () => '',
     },
   };
-
-  // Cast role -> chip copy.
-  const ROLE_COPY = {
-    decisive_killer: {
-      icon: 'bi-lightning-charge-fill', label: 'The Finisher',
-      // "Killing blow" is the factually exact claim — structure kills are
-      // team efforts and the feed records only the last hit.
-      line: (e) => `landed the killing blow on the ${esc(e.structure)} at ${clock(e.sec)}`,
-    },
-    extractor_hunter: {
-      icon: 'bi-gem', label: 'The Harasser',
-      line: (e) => `${e.count} enemy extractors/upgrades destroyed`,
-    },
-    heaviest_attrition: {
-      icon: 'bi-heartbreak', label: 'The Frontliner',
-      line: (e) => `${e.ships_lost} ships lost (${fmtInt(e.ship_value_lost)} scrap) — never out of the fight`,
-    },
-    top_damage: {
-      icon: 'bi-graph-up-arrow', label: 'The Powerhouse',
-      line: (e) => `${fmtInt(e.dealt)} damage dealt — most in the lobby`,
-    },
-  };
-
-  // ---- narrative clause builders. Each returns an HTML string or null
-  // (a null clause is skipped -- data gates, not rhetoric). ctx carries
-  // side1/side2 name spans, facts, and formatting helpers.
-
-  // Commander name in running prose. First mention of each side in a
-  // narrative pass appends the team's faction so the opening sentence
-  // reads "mort (Scion) opened on …; Domakus (Hadean) went …" — later
-  // mentions stay bare. Missing / unresolved factions omit the paren.
-  function nameSpan(ctx, side) {
-    const named = ctx._named || (ctx._named = new Set());
-    const key = String(side);
-    const name = esc(ctx.leader(side));
-    let extra = '';
-    if (!named.has(key)) {
-      named.add(key);
-      const fac = typeof ctx.faction === 'function' ? ctx.faction(side) : '';
-      if (fac) extra = ` (${esc(fac)})`;
-    }
-    return `<span class="vt-story-t${side}">${name}${extra}</span>`;
-  }
-
-  const CLAUSES = {
-    // Every clause is deliberately SHORT — one fact, one sentence fragment.
-    // The verdict cards carry the exact number pairs; the paragraph tells
-    // the story. Keep it punchy (user-ratified voice).
-    opening(ctx) {
-      const o1 = ctx.facts.opening && ctx.facts.opening['1'];
-      const o2 = ctx.facts.opening && ctx.facts.opening['2'];
-      const lead = (o) => {
-        const fb = (o && o.first_builds) || [];
-        if (!fb.length) return null;
-        const b = fb[0];
-        return `${esc(b.name || b.odf)}${b.count > 1 ? ` ×${b.count}` : ''}`;
-      };
-      const d1 = lead(o1);
-      const d2 = lead(o2);
-      if (!d1 || !d2) return null;
-      // Name both commanders BEFORE the tempo clause so first-mention
-      // factions land on "mort (Scion) opened …; Domakus (Hadean) went …"
-      // rather than on a later "hit 3 pools first" re-mention (JS evaluates
-      // the tempo interpolations first if they sit above this return).
-      const n1 = nameSpan(ctx, 1);
-      const n2 = nameSpan(ctx, 2);
-      let tempo = '';
-      const t1 = o1.time_to_3_pools_sec;
-      const t2 = o2.time_to_3_pools_sec;
-      if (t1 != null && t2 != null && Math.abs(t1 - t2) >= 5) {
-        const fast = t1 < t2 ? 1 : 2;
-        tempo = ` — ${nameSpan(ctx, fast)} hit 3 pools first (${clock(Math.min(t1, t2))} vs ${clock(Math.max(t1, t2))})`;
-      }
-      return `${n1} opened on ${d1}; ${n2} went ${d2}${tempo}.`;
-    },
-    economy(ctx) {
-      const inc = ctx.facts.income || {};
-      const i1 = inc['1'] || 0;
-      const i2 = inc['2'] || 0;
-      if (!i1 && !i2) return null;
-      const lead = i1 >= i2 ? 1 : 2;
-      const hi = Math.max(i1, i2);
-      const lo = Math.min(i1, i2);
-      const pct = lo > 0 ? Math.round(100 * (hi / lo - 1)) : null;
-      const incBit = pct != null
-        ? `<b>+${pct}% scrap income</b>`
-        : `<b>${fmtInt(hi)}</b> scrap income to <b>${fmtInt(lo)}</b>`;
-      // Extractor exchange, stated neutrally: enemy mining structures
-      // (extractors + pool upgrades) destroyed by each side. No verdict
-      // verbs — the numbers speak (user-ratified).
-      const ex = ctx.facts.extractor_war || {};
-      const exOwn = ex[String(lead)] || 0;
-      const exOpp = ex[String(lead === 1 ? 2 : 1)] || 0;
-      const exBit = (exOwn || exOpp)
-        ? `, destroying <b>${exOwn}</b> enemy extractors/upgrades against <b>${exOpp}</b>`
-        : '';
-      return `${nameSpan(ctx, lead)} ran the richer war: ${incBit}${exBit}.`;
-    },
-    map(ctx) {
-      const fm = ctx.facts.front_mean || {};
-      const f1 = fm['1'];
-      const f2 = fm['2'];
-      if (f1 == null || f2 == null) return null;
-      // Push toward the enemy base: side 1 pushes toward 1.0, side 2 toward 0.0.
-      const push1 = f1;
-      const push2 = 1 - f2;
-      const pinned = push1 >= push2 ? 2 : 1;
-      return `The front line lived in ${nameSpan(ctx, pinned)}&#39;s half of the map.`;
-    },
-    attrition(ctx) {
-      const lost = ctx.facts.materiel_lost || {};
-      const l1 = lost['1'] || 0;
-      const l2 = lost['2'] || 0;
-      if (!l1 && !l2) return null;
-      const bleeder = l1 >= l2 ? 1 : 2;
-      const saver = bleeder === 1 ? 2 : 1;
-      return `But the attrition ledger quietly favored ${nameSpan(ctx, saver)}: ` +
-        `${nameSpan(ctx, bleeder)} lost <b>${fmtInt(Math.max(l1, l2))} scrap</b> of combat ships ` +
-        `against <b>${fmtInt(Math.min(l1, l2))}</b>.`;
-    },
-    climax(ctx) {
-      // TEAM attribution, not last-hit: structure kills are focus-fired
-      // and the kill feed's killer field only names whoever landed the
-      // final shot (no assist tracking on structures).
-      const d = ctx.facts.decisive;
-      if (!d) return null;
-      const victim = d.victim_team === 1 ? 1 : 2;
-      const attacker = victim === 1 ? 2 : 1;
-      return `<span class="vt-story-beatref">${clock(d.sec)} — ${nameSpan(ctx, attacker)}&#39;s team ` +
-        `destroyed ${nameSpan(ctx, victim)}&#39;s ${esc(d.structure)}.</span>`;
-    },
-    result(ctx) {
-      const w = ctx.facts.winner || {};
-      if (!w.team) {
-        const c = decidedByCopy(w.decided_by);
-        if (w.decided_by === 'draw') return 'The host called it a draw.';
-        if (w.decided_by === 'cancelled') return 'The match was cancelled.';
-        return `The recording ends at ${clock(ctx.duration)} without a determined winner (${esc(c.label)}).`;
-      }
-      // "N minutes of mop-up later" when the decisive blow landed well
-      // before the end — the old preview's flavor, computed not written.
-      const d = ctx.facts.decisive;
-      const gapMin = d ? Math.round((ctx.duration - d.sec) / 60) : 0;
-      if (d && gapMin >= 2) {
-        return `${gapMin} minutes of mop-up later, ${nameSpan(ctx, w.team)} took the ${esc(decidedByCopy(w.decided_by).label)} win.`;
-      }
-      return `${nameSpan(ctx, w.team)} took the ${esc(decidedByCopy(w.decided_by).label)} win at ${clock(ctx.duration)}.`;
-    },
-    divergencePunch(ctx) {
-      const inc = ctx.facts.income || {};
-      const econLeader = (inc['1'] || 0) >= (inc['2'] || 0) ? 1 : 2;
-      const w = ctx.facts.winner || {};
-      if (!w.team || w.team === econLeader) return null;
-      return `${nameSpan(ctx, econLeader)} won the economy; ${nameSpan(ctx, w.team)} won the war.`;
-    },
-  };
-
-  // Archetype -> ordered clause plan + optional framing sentence. Unknown
-  // archetypes fall through to `even`, so pipeline-side additions are
-  // forward-safe.
-  const ARCH_COPY = {
-    divergence: {
-      frame: null,
-      clauses: ['opening', 'economy', 'map', 'attrition', 'climax', 'result', 'divergencePunch'],
-    },
-    comeback: {
-      frame: (ctx) => {
-        const w = ctx.facts.winner || {};
-        return w.team ? `${nameSpan(ctx, w.team)} spent most of this match behind on materiel — and turned it around.` : null;
-      },
-      clauses: ['opening', 'economy', 'attrition', 'climax', 'result'],
-    },
-    stomp: {
-      frame: (ctx) => {
-        const w = ctx.facts.winner || {};
-        return w.team ? `${nameSpan(ctx, w.team)} controlled every ledger of this one.` : null;
-      },
-      clauses: ['opening', 'economy', 'map', 'attrition', 'climax', 'result'],
-    },
-    attrition_grind: {
-      frame: (ctx) => `A long war of near-equal economies, decided by attrition.`,
-      clauses: ['opening', 'economy', 'map', 'attrition', 'climax', 'result'],
-    },
-    even: {
-      frame: null,
-      clauses: ['opening', 'economy', 'map', 'attrition', 'climax', 'result'],
-    },
-    unclear: {
-      frame: null,
-      clauses: ['opening', 'economy', 'map', 'attrition', 'climax', 'result'],
-    },
-  };
-
-  function buildNarrative(ctx) {
-    // Fresh first-mention tracking so a reused ctx (tests, re-render)
-    // does not skip the faction paren on the next pass.
-    ctx._named = new Set();
-    const plan = ARCH_COPY[ctx.facts.archetype] || ARCH_COPY.even;
-    const parts = [];
-    if (plan.frame) {
-      const f = plan.frame(ctx);
-      if (f) parts.push(f);
-    }
-    for (const key of plan.clauses) {
-      const builder = CLAUSES[key];
-      if (!builder) continue;
-      const html = builder(ctx);
-      if (html) parts.push(html);
-    }
-    return parts.join(' ');
-  }
 
   // ------------------------------------------------------------ lane copy
 
@@ -985,19 +773,6 @@
 
   // ------------------------------------------------------------ narrative + cast
 
-  function renderNarrative(sl, ctx) {
-    const p = document.getElementById('story-narrative');
-    if (p) p.innerHTML = buildNarrative(ctx);
-    // Cast chips (The Finisher / The Harasser / …) are not rendered —
-    // Overview Match Highlights already covers those standouts. Pipeline
-    // still emits facts.cast; ROLE_COPY stays for the template gate.
-    const castHolder = document.getElementById('story-cast');
-    if (castHolder) {
-      castHolder.classList.add('d-none');
-      castHolder.innerHTML = '';
-    }
-  }
-
   // ------------------------------------------------------------ beats rail
 
   function beatSubRowsHtml(b) {
@@ -1119,7 +894,7 @@
   function render(currentData) {
     const sl = currentData && currentData.storyline;
     const match = (currentData && currentData.match) || {};
-    const cards = ['story-narrative-card', 'story-verdict-card', 'story-timeline-card', 'story-beats-card'];
+    const cards = ['story-verdict-card', 'story-timeline-card', 'story-beats-card'];
     if (!sl) {
       cards.forEach((id) => {
         const el = document.getElementById(id);
@@ -1157,7 +932,6 @@
       if (el) el.classList.remove('d-none');
     });
 
-    renderNarrative(sl, ctx);
     renderVerdict(sl, ctx);
 
     // Lane titles + explainers.
@@ -1230,12 +1004,10 @@
   window.VTStoryline = { render, destroy };
 
   // Test handle for _investigation/check_story_templates.mjs: renders every
-  // archetype paragraph and beat/role template against fixture facts so an
-  // unfilled slot or accidental `undefined` can never ship silently (most
-  // archetypes are untestable on the current 1-match v4 corpus). Not part
-  // of the public surface.
+  // beat, decided-by and lane template against fixture facts so an
+  // unfilled slot or accidental `undefined` can never ship silently. Not
+  // part of the public surface.
   window.VTStoryline._testables = {
-    BEAT_COPY, ROLE_COPY, ARCH_COPY, CLAUSES, DECIDED_BY_COPY, LANE_TITLES,
-    buildNarrative, decidedByCopy,
+    BEAT_COPY, DECIDED_BY_COPY, LANE_TITLES, decidedByCopy,
   };
 })();

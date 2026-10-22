@@ -598,7 +598,6 @@
       : `${band.label}. ${VTSRDisplay.BAND_EXPLAINER}`;
     const badge = VTSRDisplay.bandChipHtml(band, { title: bandTip });
     const bar = VTSRDisplay.positionBarHtml(r, noiseSigma, { band, compact: true });
-    const lastDelta = r.last_delta || 0;
     const rowKey = vtsrRowKey(r);
     const detailId = `vtsr-detail-${rowKey}`;
     const expanded = expandedVtsrRows.has(rowKey);
@@ -649,11 +648,6 @@
       ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T.`
       : 'No decided rated matches';
 
-    const verdict = VTSRDisplay.deltaVerdict(lastDelta);
-    const lastTip = r.last_match_id
-      ? `${verdict ? verdict.label : 'No change'} in match ${r.last_match_id}`
-      : 'No rated matches yet';
-
     const peakBand = VTSRDisplay.rawBandFor(r.peak_vtsr || r.vtsr);
     const peakAt = r.peak_at || '';
     const peakTip = peakAt
@@ -664,7 +658,7 @@
 
     const detailHtml = buildVtsrDetailPanel(r, careerRow);
     const progressChip = showProgress ? vtsrProgressChipHtml(r, elo) : '';
-    const colSpan = 10;
+    const colSpan = 9;
 
     return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
       <td class="vt-vtsr-expand-col">
@@ -681,8 +675,7 @@
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(winRateTip)}">${winRateStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
-      <td class="text-end">${VTSRDisplay.verdictChipHtml(lastDelta, { title: lastTip })}</td>
-      <td class="text-end">${VTSRDisplay.bandChipHtml(peakBand, { compact: true, title: peakTip })}</td>
+      <td class="text-end">${VTSRDisplay.bandChipHtml(peakBand, { compact: true, muted: true, title: peakTip })}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
     </tr>
     <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
@@ -695,7 +688,7 @@
   // sub-groups, names A-Z inside each; any other column sort reorders
   // rows inside the tier group instead.
   function renderVtsrGroupedRows(ranked, elo, noiseSigma) {
-    const colSpan = 10;
+    const colSpan = 9;
     const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
     const bandSort = vtsrSortState.key === 'band';
 
@@ -761,9 +754,7 @@
     const $banner = document.getElementById('vtsr-ladder-banner');
     if ($banner) {
       $banner.innerHTML = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
-        Players on the ladder have at least ${fmt(minMatches)} rated matches and have played within ${fmt(win)} days of the newest match.
-        Returning players rejoin after ${fmt(need)} games. Players with fewer than ${fmt(ELO_PROVISIONAL_THRESHOLD)} still show Provisional.
-        Grouped by tier and half. A label only moves after a clear margin, so one game rarely changes it.
+        VTSR-T is a performance rating, not a win/loss Elo. It moves when you play better or worse than expected, and winning the game does not move it.
       </div>`;
     }
 
@@ -1529,6 +1520,34 @@
     return v || fallback;
   }
 
+  // Main-reason record from validate_elo.py (latest_detail.vtsr_c.drivers):
+  // how often the favored side won, by why it was favored. The Outcome
+  // card's main-reason line uses the same classes.
+  function driversTableHtml(drivers) {
+    if (!drivers || !drivers.classes) return '';
+    const c = drivers.classes;
+    const gap = drivers.gap_min != null ? Math.round(drivers.gap_min) : 50;
+    const rate = (row) => (row && row.n
+      ? `${row.favored_wins} of ${row.n} (${Math.round((row.favored_wins / row.n) * 100)}%)`
+      : '\u2014');
+    const rows = [
+      ['Commander edge', 'The stronger commander is the bigger term.', c.commander_edge],
+      ['\u2026 against stronger thugs', 'The stronger commander faced the stronger thugs and still counted for more.', c.commander_edge && c.commander_edge.vs_stronger_thugs],
+      ['Stacked', `A commander at least ${gap} VTSR-C weaker, carried by thugs that outweigh the gap.`, c.stacked],
+      ['Thug edge', 'The thugs are the bigger term; the commanders are close.', c.thug_edge],
+      ['Both edges', 'One side has the stronger commander and the stronger thugs.', c.both],
+      ['Even', 'Neither term gives a real edge.', c.even],
+    ].map(([label, desc, row]) => `<tr>
+        <td><strong>${label}</strong><div class="text-muted small">${desc}</div></td>
+        <td class="text-end">${rate(row)}</td>
+      </tr>`).join('');
+    return `<p class="vt-elo-acc-blurb mb-2 mt-3"><strong>Why the favorite was favored.</strong> Each rated duel is filed under its main reason (the bigger of the commander gap and the thug term), and the favored side's record is counted. The match page's Outcome card shows the same label for every game:</p>
+      <table class="vt-elo-gap-table">
+        <thead><tr><th>Main reason</th><th class="text-end">Favored side won</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
   function renderAccuracyTab() {
     const pane = document.getElementById('elo-tab-accuracy');
     if (!pane) return;
@@ -1727,6 +1746,7 @@
           <thead><tr><th>Handicap weight</th><th class="text-end">Prediction accuracy</th><th class="text-end">Log-loss</th></tr></thead>
           <tbody>${lamRows}</tbody>
         </table>
+        ${driversTableHtml(vc.drivers)}
       </div>`;
     }
 

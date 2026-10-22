@@ -642,11 +642,21 @@
         </div>
       </div>
 
-      <!-- Tab: Elo (per-match VTSR-T + compact VTSR-C strip when a
-           commander duel exists). Rendered by js/match-elo.js
-           (window.VTMatchElo). Match-global, always unfiltered
-           (highlights passthrough); the player filter only preselects. -->
+      <!-- Tab: Elo (commander duel first when one exists, then per-match
+           VTSR-T). Rendered by js/match-elo.js (window.VTMatchElo).
+           Match-global, always unfiltered (highlights passthrough); the
+           player filter only preselects. -->
       <div class="tab-pane fade" id="tab-elo" role="tabpanel" aria-labelledby="tab-elo-btn">
+        <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">Commander ladder this match</h5>
+            <span class="vt-match-elo-why">win/loss rating — not the 4-axis composite</span>
+          </div>
+          <div class="card-body" id="match-elo-vtsrc-body"></div>
+          <div class="card-footer">
+            <a class="small" href="elo/?tab=vtsr-c">How VTSR-C works</a>
+          </div>
+        </div>
         <div class="card mb-4 d-none" id="match-elo-empty">
           <div class="card-body text-muted" id="match-elo-empty-body"></div>
         </div>
@@ -678,16 +688,6 @@
                 <div class="vt-match-elo-scatter-wrap"><canvas id="match-elo-scatter"></canvas></div>
               </div>
             </div>
-          </div>
-        </div>
-        <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Commander ladder this match</h5>
-            <span class="vt-match-elo-why">win/loss rating — not the 4-axis composite</span>
-          </div>
-          <div class="card-body" id="match-elo-vtsrc-body"></div>
-          <div class="card-footer">
-            <a class="small" href="elo/?tab=vtsr-c">How VTSR-C works</a>
           </div>
         </div>
         <p class="text-muted small d-none mb-0" id="match-elo-footer">
@@ -1093,16 +1093,6 @@
           </div>
           <div class="card-body">
             <div class="vt-story-beats" id="story-beats"></div>
-          </div>
-        </div>
-
-        <div class="card mb-4 d-none" id="story-narrative-card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>The Story</h5>
-          </div>
-          <div class="card-body">
-            <p class="vt-story-narrative mb-0" id="story-narrative"></p>
-            <div class="vt-story-cast d-none mt-3" id="story-cast"></div>
           </div>
         </div>
       </div>

@@ -766,9 +766,131 @@
         title="How much the two thug teams alone tilt the prediction, as win chance. Each side's thugs are rated going into the match; commanders are left out.">${label}</span>`;
   }
 
+  // ---- Main reason a side is favored --------------------------------
+  // The commander gap and lambda x the thug-mean gap are rating points
+  // inside the same logistic, so the bigger one is the main reason.
+  // Mirrors classify_driver() in scripts/validate_elo.py, whose emitted
+  // thresholds win over these fallbacks.
+  const DRIVER_EVEN_PTS_FALLBACK = 25;
+  const DRIVER_GAP_MIN_FALLBACK = 50;
+
+  const REASON_LABELS = {
+    even: 'Even going in',
+    commander_edge: 'Commander edge',
+    thug_edge: 'Thug edge',
+    stacked: 'Stacked',
+    both: 'Both edges',
+  };
+
+  function driverRecord(validation) {
+    const v = validation || window.__vtValidation;
+    const d = v && v.latest_detail && v.latest_detail.vtsr_c && v.latest_detail.vtsr_c.drivers;
+    return d && d.classes ? d : null;
+  }
+
+  function classifyDriver(cmdrTerm, thugTerm, evenPts, gapMin) {
+    const ac = Math.abs(cmdrTerm);
+    const at = Math.abs(thugTerm);
+    if (ac < evenPts && at < evenPts) return 'even';
+    if (ac < evenPts) return 'thug_edge';
+    if (at < evenPts) return 'commander_edge';
+    if ((cmdrTerm > 0) === (thugTerm > 0)) return 'both';
+    if (ac >= at) return 'commander_edge';
+    return ac >= gapMin ? 'stacked' : 'thug_edge';
+  }
+
+  function recordLine(key, cls, opposed) {
+    const rate = (row) => (row && row.n ? `${row.favored_wins} of ${row.n} (${Math.round((row.favored_wins / row.n) * 100)}%)` : null);
+    if (key === 'stacked' && rate(cls)) return `Stacked teams have won ${rate(cls)} of rated commander games.`;
+    if (key === 'commander_edge' && opposed && rate(opposed)) {
+      return `When the stronger commander faced stronger thugs, the commander's side won ${rate(opposed)}.`;
+    }
+    if (rate(cls)) return `The favored side won ${rate(cls)} of rated commander games like this.`;
+    return '';
+  }
+
+  /**
+   * Why one side is favored.
+   * @param {{cmdrGap: ?number, thugGap: ?number, lambda?: number, scale?: number,
+   *          teamLabel: (side: 1|2) => string, cmdrName: (side: 1|2) => ?string,
+   *          validation?: object}} opts
+   *   cmdrGap = Rc1 - Rc2 (null when the commander term is not in play);
+   *   thugGap = T1 - T2 (mean pre-match thug VTSR-T, null when unknown).
+   * @returns {{key, label, favored: 1|2|null, text, tip}}
+   */
+  function mainReason(opts) {
+    const o = opts || {};
+    const rec = driverRecord(o.validation);
+    const evenPts = rec && isNum(rec.even_pts) ? rec.even_pts : DRIVER_EVEN_PTS_FALLBACK;
+    const gapMin = rec && isNum(rec.gap_min) ? rec.gap_min : DRIVER_GAP_MIN_FALLBACK;
+    const lambda = isNum(o.lambda) ? o.lambda : DEFAULT_LAMBDA;
+    const scale = isNum(o.scale) && o.scale > 0 ? o.scale : DEFAULT_SCALE;
+    const cmdrTerm = isNum(o.cmdrGap) ? o.cmdrGap : 0;
+    const thugTerm = isNum(o.thugGap) ? lambda * o.thugGap : 0;
+    const key = classifyDriver(cmdrTerm, thugTerm, evenPts, gapMin);
+    const total = cmdrTerm + thugTerm;
+    const favored = total > 0 ? 1 : (total < 0 ? 2 : null);
+    const other = favored === 1 ? 2 : 1;
+    const team = (side) => (o.teamLabel ? o.teamLabel(side) : `Team ${side}`);
+    const cmdr = (side) => (o.cmdrName && o.cmdrName(side)) || `${team(side)}'s commander`;
+    const thugPct = Math.round(Math.abs(1 / (1 + Math.pow(10, -thugTerm / scale)) - 0.5) * 100);
+    const cmdrPts = Math.round(Math.abs(cmdrTerm));
+    const thugSide = thugTerm > 0 ? 1 : 2;
+    const cmdrSide = cmdrTerm > 0 ? 1 : 2;
+
+    let text;
+    if (key === 'even' || !favored) {
+      text = 'Neither the commanders nor the thugs give either side a real edge.';
+    } else if (key === 'commander_edge') {
+      text = Math.abs(thugTerm) >= evenPts && thugSide !== cmdrSide
+        ? `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} VTSR-C) outweighs ${team(thugSide)}'s stronger thugs (+${thugPct}% win chance).`
+        : `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} VTSR-C) is the main edge.`;
+    } else if (key === 'thug_edge') {
+      text = `${team(thugSide)}'s stronger thugs are the main edge (+${thugPct}% win chance); the commanders are close.`;
+    } else if (key === 'stacked') {
+      text = `${team(thugSide)}'s thugs (+${thugPct}% win chance) outweigh their weaker commander (\u2212${cmdrPts} VTSR-C).`;
+    } else {
+      text = `${team(favored)} has the stronger commander (+${cmdrPts} VTSR-C) and the stronger thugs (+${thugPct}% win chance).`;
+    }
+    const cls = rec && rec.classes ? rec.classes[key] : null;
+    const opposed = rec && rec.classes && rec.classes.commander_edge
+      ? rec.classes.commander_edge.vs_stronger_thugs : null;
+    const tip = recordLine(key, cls, key === 'commander_edge' && Math.abs(thugTerm) >= evenPts && thugSide !== cmdrSide ? opposed : null);
+    return { key, label: REASON_LABELS[key], favored: key === 'even' ? null : favored, text, tip, other };
+  }
+
+  function mainReasonHtml(reason, opts) {
+    if (!reason) return '';
+    const bs = !(opts && opts.bsTooltip === false);
+    const tipAttr = reason.tip
+      ? ` title="${esc(reason.tip)}"${bs ? ' data-bs-toggle="tooltip" data-bs-placement="top"' : ''}`
+      : '';
+    return `<div class="vt-balonce-reason" data-reason="${esc(reason.key)}"${tipAttr}>
+        <span class="vt-balonce-reason-label">${esc(reason.label)}</span>
+        <span class="vt-balonce-reason-text">${esc(reason.text)}</span>
+      </div>`;
+  }
+
+  function matchReason(joined) {
+    const hasCmdr = isNum(joined.cmdrBefore[1]) || isNum(joined.cmdrBefore[2]);
+    const cmdrGap = hasCmdr
+      ? (isNum(joined.cmdrBefore[1]) ? joined.cmdrBefore[1] : ANCHOR)
+        - (isNum(joined.cmdrBefore[2]) ? joined.cmdrBefore[2] : ANCHOR)
+      : null;
+    const thugGap = (isNum(joined.t1Mean) && isNum(joined.t2Mean)) ? joined.t1Mean - joined.t2Mean : null;
+    return mainReason({
+      cmdrGap,
+      thugGap,
+      lambda: joined.consts.lambda,
+      scale: joined.consts.scale,
+      teamLabel: (side) => teamPhrase(joined, side),
+      cmdrName: (side) => commanderName(joined, side),
+    });
+  }
+
   // ---- Zone 1: pre-match -------------------------------------------
   // Ratings live on the team panels (rosterRatings). This strip is the
-  // gauge, the favored line, and the two gap chips.
+  // gauge, the favored line, the main reason, and the two gap chips.
 
   function zonePrematchHtml(joined) {
     const fav = favoriteOf(joined.probT1);
@@ -809,6 +931,7 @@
           <div class="vt-balonce-headline">${headline}</div>
           ${chip}
         </div>
+        ${mainReasonHtml(matchReason(joined))}
         ${meterHtml({
           probT1: joined.probT1,
           leftLabel: `${teamPhrase(joined, 1)} disadv`,
@@ -893,7 +1016,7 @@
   /**
    * "How it was going" — the shadow read on a cancelled match.
    *
-   * The result was lost, but the 5-axis composite still measured the whole
+   * The result was lost, but the 4-axis composite still measured the whole
    * game, so this answers the question the crash left hanging: who was
    * actually out-playing their rating when the plug got pulled. Every
    * number comes from the never-applied `shadow` block in elo_history
@@ -916,7 +1039,7 @@
         : diff < -0.05 ? 'was under-performing'
           : 'was playing to form';
       return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Mean of this side\u2019s players: what the 5-axis composite measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
+        title="Mean of this side\u2019s players: what the 4-axis composite measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
         <span class="vt-balonce-perf-team">${phrase}</span>
         <span class="vt-balonce-perf-verdict">${verdict}</span>
         <span class="vt-mono">${fmtSigned(diff, 2)}</span>
@@ -1182,26 +1305,6 @@
     </div>`;
   }
 
-  function econChipHtml(joined) {
-    const perf = joined.duel && joined.duel.performance;
-    if (!perf || !perf.available || !isNum(perf.p)) return '';
-    // `p` is the team-1-perspective economy composite. Positive favors
-    // team 1. Recorded, NOT scored: alpha_c is 1.0, so this never moved
-    // the rating (see critique/decisions/vtsr-c-v2-composite.md).
-    const side = perf.p > 0 ? 1 : 2;
-    const mag = Math.abs(perf.p);
-    const strength = mag < 0.15 ? 'a narrow' : mag < 0.4 ? 'a clear' : 'a commanding';
-    const axes = perf.axes || {};
-    const best = Object.entries(axes)
-      .filter(([, v]) => v && isNum(v.z) && v.weight !== 0)
-      .sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z))[0];
-    const bestTxt = best ? ` Biggest gap: ${esc(econAxisLabel(best[0]))}.` : '';
-    return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-      title="The commander opening read (pool tempo, combat conversion, regen tempo). Loose share is the whole match and is not scored. The rating stays win/loss until a fresh sample clears the promote rule.${esc(bestTxt)}">
-      <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Economy: ${strength} edge to ${esc(teamPhrase(joined, side))}
-      <span class="vt-mono">${fmtSigned(perf.p, 2)}</span></span>`;
-  }
-
   function econAxisLabel(axis) {
     switch (axis) {
       case 'pool_tempo': return 'pool tempo';
@@ -1233,6 +1336,71 @@
     return `<div class="vt-balonce-chiprow">${bits.join('')}</div>`;
   }
 
+  // Commander duel, first in "How it actually played out": the result
+  // against the pre-match call, whether the main reason held, and the
+  // VTSR-C moves.
+  const REASON_HELD = {
+    commander_edge: ['the commander edge held', 'the commander edge did not hold'],
+    thug_edge: ['the thug edge held', 'the thug edge did not hold'],
+    stacked: ['the stacked side won', 'the stacked side lost'],
+    both: ['the side with both edges won', 'the side with both edges lost'],
+  };
+
+  function commanderDuelLineHtml(joined) {
+    const win = joined.winnerTeam;
+    if (joined.isDraw) return '<p class="vt-balonce-duel-line">The commanders drew.</p>';
+    if (win !== 1 && win !== 2) {
+      return '<p class="vt-balonce-duel-line text-muted">No decided winner, so the commander ladder did not move.</p>';
+    }
+    const fav = favoriteOf(joined.probT1);
+    const name = esc(commanderName(joined, win) || `Team ${win}`);
+    const reason = matchReason(joined);
+    let line;
+    if (!fav.team) {
+      line = `${name} won a game the ratings called even`;
+    } else if (fav.team === win) {
+      line = `${name} was favored (${fmtPct(fav.prob)}) and won`;
+    } else {
+      line = `${name} won as the underdog (${fmtPct(1 - fav.prob)})`;
+    }
+    const held = REASON_HELD[reason.key];
+    const tail = held && reason.favored ? `; ${held[reason.favored === win ? 0 : 1]}` : '';
+    return `<p class="vt-balonce-duel-line">${line}${tail}.</p>`;
+  }
+
+  // Per-axis commander economy from duel.performance.axes. Recorded, not
+  // scored (alpha_c = 1): it never moved the rating.
+  const ECON_AXIS_COPY = {
+    pool_tempo: 'Pool tempo (sooner to 3 pools)',
+    combat_conversion: 'Combat conversion (opening scrap into combat ships)',
+    regen_tempo: 'Regen tempo (opening time in fast regen)',
+  };
+
+  function commanderEconHtml(joined) {
+    const perf = joined.duel && joined.duel.performance;
+    if (!perf || !perf.available || !perf.axes) return '';
+    const rows = Object.entries(perf.axes)
+      .filter(([, v]) => v && isNum(v.z) && v.weight !== 0)
+      .map(([axis, v]) => {
+        const mag = Math.abs(v.z);
+        const label = esc(ECON_AXIS_COPY[axis] || econAxisLabel(axis));
+        if (mag < 0.1) {
+          return `<li><span class="vt-balonce-econ-axis">${label}</span><span class="text-muted">even</span></li>`;
+        }
+        const side = v.z > 0 ? 1 : 2;
+        const strength = mag < 0.4 ? 'narrow' : mag < 0.8 ? 'clear' : 'commanding';
+        return `<li><span class="vt-balonce-econ-axis">${label}</span>
+          <span>${strength} edge to <strong>${esc(commanderName(joined, side) || `Team ${side}`)}</strong></span></li>`;
+      }).join('');
+    if (!rows) return '';
+    return `<div class="vt-balonce-econ">
+        <div class="vt-balonce-econ-head" data-bs-toggle="tooltip" data-bs-placement="top"
+          title="The commanders' opening economy read from match telemetry. Recorded, not scored: the commander rating stays win/loss until a fresh sample clears the promote rule.">
+          Commander economy <span class="text-muted">\u00b7 recorded, not scored</span></div>
+        <ul class="vt-balonce-econ-list">${rows}</ul>
+      </div>`;
+  }
+
   function zonePlayedHtml(joined) {
     const m1 = teamMeans(joined, 1);
     const m2 = teamMeans(joined, 2);
@@ -1246,16 +1414,18 @@
       const cls = diff > 0.05 ? 'is-positive' : diff < -0.05 ? 'is-negative' : '';
       const verdict = diff > 0.05 ? 'over-performed' : diff < -0.05 ? 'under-performed' : 'played to form';
       return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Mean of this side\u2019s rated players: what the 5-axis composite measured this match, against what their pre-match ratings predicted for this lobby.">
+        title="Mean of this side\u2019s rated players: what the 4-axis composite measured this match, against what their pre-match ratings predicted for this lobby.">
         <span class="vt-balonce-perf-team">${phrase}</span>
         <span class="vt-balonce-perf-verdict">${verdict}</span>
         <span class="vt-mono">${fmtSigned(diff, 2)}</span>
       </div>`;
     };
 
-    const chips = [];
-    const econ = econChipHtml(joined);
-    if (econ) chips.push(econ);
+    const duelBlock = joined.duel ? `
+        <div class="vt-balonce-sub">Commander duel</div>
+        ${commanderDuelLineHtml(joined)}
+        ${cmdrMoveHtml(joined)}
+        ${commanderEconHtml(joined)}` : '';
 
     return `
       <div class="vt-balonce-zone vt-balonce-zone--played">
@@ -1263,13 +1433,13 @@
           <h6 class="vt-balonce-zone-title">How it actually played out</h6>
           <a class="vt-balonce-link" href="?tab=elo" data-vt-balonce-elo-link="1">Full breakdown <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
         </div>
+        ${duelBlock}
+        <div class="vt-balonce-sub">Thugs</div>
         <div class="vt-balonce-perfs">
           ${sideCopy(1, m1)}
           ${sideCopy(2, m2)}
         </div>
         ${axisStoryHtml(joined)}
-        ${chips.length ? `<div class="vt-balonce-chiprow">${chips.join('')}</div>` : ''}
-        ${cmdrMoveHtml(joined)}
       </div>`;
   }
 
@@ -1382,6 +1552,8 @@
     computeWinProb,
     bandFor,
     favoriteOf,
+    mainReason,
+    mainReasonHtml,
     meterHtml,
     fmtPct,
     cmdrConstants,

@@ -471,14 +471,20 @@
     for (const c of ((state.cmdrElo && state.cmdrElo.ratings) || [])) {
       if (c.steam64) cmdrBySteam.set(String(c.steam64), c);
     }
+    // The directory lists ranked players only: on the VTSR-T ladder or the
+    // VTSR-C ladder. Profiles, stubs and compare links still resolve anyone.
+    const isRanked = (r, cmdr) => vtsrLadderEligible(r, state.elo)
+      || !!(cmdr && cmdrLadderEligible(cmdr, state.cmdrElo));
     return ratings.map((r) => {
-      const c = careerBySteam.get(String(r.steam64)) || null;
       const cmdr = cmdrBySteam.get(String(r.steam64)) || null;
+      if (!isRanked(r, cmdr)) return null;
+      const c = careerBySteam.get(String(r.steam64)) || null;
       return {
         ...r,
         vtsr_c:           cmdr && Number.isFinite(cmdr.vtsr_c) ? cmdr.vtsr_c : null,
         vtsr_c_provisional: !!(cmdr && cmdr.provisional),
         vtsr_c_games:     cmdr ? (cmdr.matches_commanded_rated || 0) : 0,
+        vtsr_c_history:   cmdr && Array.isArray(cmdr.win_history) ? cmdr.win_history : [],
         career: c,
         primary_ship: c && c.career_loadout && c.career_loadout.primary_ship
           ? c.career_loadout.primary_ship.name
@@ -487,7 +493,7 @@
         accuracy:     c && c.total_shots_fired > 0 ? (c.total_shots_hit / c.total_shots_fired) : null,
         slug:         slugFor(r.steam64),
       };
-    });
+    }).filter(Boolean);
   }
 
   // ---- Sparkline (inline SVG) ------------------------------------------
@@ -647,8 +653,16 @@
         ${shipHtml}
       </div>
 
-      <div class="vt-player-card-spark">
-        ${sparkSvg(row.win_history, 240, 44)}
+      <div class="vt-player-card-sparks">
+        <div class="vt-player-card-spark-row" title="Last 10 VTSR-T games: above or below what the rating expected">
+          <span class="vt-player-card-spark-label">T</span>
+          <div class="vt-player-card-spark">${sparkSvg(row.win_history, 240, 28)}</div>
+        </div>
+        ${row.vtsr_c_history && row.vtsr_c_history.length ? `
+        <div class="vt-player-card-spark-row" title="Last 10 VTSR-C commander games: rating won or lost">
+          <span class="vt-player-card-spark-label">C</span>
+          <div class="vt-player-card-spark">${sparkSvg(row.vtsr_c_history, 240, 28)}</div>
+        </div>` : ''}
       </div>
 
       <div class="vt-player-card-foot">

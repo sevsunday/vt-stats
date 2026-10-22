@@ -1497,6 +1497,84 @@ def _cmdr_duel_key(commander: dict[str, Any]) -> str:
     return f"name:{commander.get('name') or ''}"
 
 
+# Main-reason classes for a duel's pre-match call. Both terms are rating
+# points inside the same logistic, so they compare directly. Mirrored by
+# VTBalonce.mainReason in js/balonce-meter.js, which reads these two
+# thresholds from validation_summary.json (fallbacks equal to these).
+DRIVER_EVEN_PTS = 25.0
+DRIVER_STACK_GAP_MIN = 50.0
+
+
+def classify_driver(cmdr_term: float, thug_term: float) -> str:
+    """'even' | 'commander_edge' | 'thug_edge' | 'stacked' | 'both'.
+
+    Stacked = a weaker commander (gap >= DRIVER_STACK_GAP_MIN) whose
+    thugs outweigh that gap, so their side is favored anyway.
+    """
+    ac, at = abs(cmdr_term), abs(thug_term)
+    if ac < DRIVER_EVEN_PTS and at < DRIVER_EVEN_PTS:
+        return "even"
+    if ac < DRIVER_EVEN_PTS:
+        return "thug_edge"
+    if at < DRIVER_EVEN_PTS:
+        return "commander_edge"
+    if (cmdr_term > 0) == (thug_term > 0):
+        return "both"
+    if ac >= at:
+        return "commander_edge"
+    return "stacked" if ac >= DRIVER_STACK_GAP_MIN else "thug_edge"
+
+
+def duel_drivers(duels: list[dict[str, Any]], lam: float) -> dict[str, Any]:
+    """How often the favored side won, split by the main reason it was
+    favored. Uses each duel's emitted pre-match commander ratings and team
+    thug means (no replay). Non-draw duels with both thug means only.
+    ``commander_edge`` also reports the subset where the stronger commander
+    faced stronger thugs (both terms past the even threshold, opposed).
+    """
+    classes: dict[str, dict[str, Any]] = {
+        k: {"n": 0, "favored_wins": 0}
+        for k in ("even", "commander_edge", "thug_edge", "stacked", "both")
+    }
+    opposed = {"n": 0, "favored_wins": 0}
+    for duel in duels:
+        outcome = duel.get("outcome")
+        if outcome not in ("team1", "team2"):
+            continue
+        th = duel.get("team_handicap") or {}
+        t1, t2 = th.get("t1_thug_mean"), th.get("t2_thug_mean")
+        c1 = (duel.get("commanders") or {}).get("1") or {}
+        c2 = (duel.get("commanders") or {}).get("2") or {}
+        b1, b2 = c1.get("before"), c2.get("before")
+        if None in (t1, t2, b1, b2):
+            continue
+        cmdr_term = float(b1) - float(b2)
+        thug_term = lam * (float(t1) - float(t2))
+        total = cmdr_term + thug_term
+        if total == 0:
+            continue
+        favored = 1 if total > 0 else 2
+        won = (outcome == "team1") == (favored == 1)
+        cls = classify_driver(cmdr_term, thug_term)
+        classes[cls]["n"] += 1
+        classes[cls]["favored_wins"] += int(won)
+        if (cls == "commander_edge" and abs(thug_term) >= DRIVER_EVEN_PTS
+                and (cmdr_term > 0) != (thug_term > 0)):
+            opposed["n"] += 1
+            opposed["favored_wins"] += int(won)
+    for row in list(classes.values()) + [opposed]:
+        n, k = row["n"], row["favored_wins"]
+        row["favored_win_rate"] = (k / n) if n else None
+        row["favored_win_ci"] = list(wilson_ci(k, n)) if n else None
+    classes["commander_edge"]["vs_stronger_thugs"] = opposed
+    return {
+        "even_pts": DRIVER_EVEN_PTS,
+        "gap_min": DRIVER_STACK_GAP_MIN,
+        "lambda": lam,
+        "classes": classes,
+    }
+
+
 def metric_vtsr_c(cmdr_history: dict[str, Any] | None) -> dict[str, Any]:
     """Chronological replay of the VTSR-C ladder predicting each duel's
     winner from PRE-match state, at each lambda in CMDR_LAMBDA_ABLATION
@@ -1599,6 +1677,7 @@ def metric_vtsr_c(cmdr_history: dict[str, Any] | None) -> dict[str, Any]:
     canonical_row = next(r for r in per_lambda if r["canonical"])
     return {
         "available": True,
+        "drivers": duel_drivers(duels, lam_canonical),
         "n_duels": len(duels),
         "n_scored": canonical_row["n"],
         "n_draws": canonical_row["n_draws"],
