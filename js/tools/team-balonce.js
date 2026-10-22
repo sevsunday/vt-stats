@@ -373,6 +373,7 @@
         ? thugMeans[1] - thugMeans[2]
         : null,
       lambda: consts.lambda,
+      scale: consts.scale,
       /** {active, extra, shortSide, rating} — empty-seat rule descriptor. */
       seatRule: padded.seatRule,
       probT1,
@@ -998,7 +999,10 @@
     const opts = playingRoster().map((p) => {
       const key = playerKey(p);
       const sel = key === currentKey ? ' selected' : '';
-      return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - T${p.tier || '?'}</option>`;
+      const rating = Number.isFinite(p.vtsrC)
+        ? `C${Math.round(p.vtsrC)}`
+        : (p.band ? p.band.shortLabel : '?');
+      return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - ${escapeHtml(rating)}</option>`;
     }).join('');
     return `
       <select class="form-select form-select-sm vt-tools-balonce-cmdr-select"
@@ -1012,8 +1016,6 @@
     const state = balanceState();
     const team1 = state.teams[1];
     const team2 = state.teams[2];
-    const team1Sum = state.sums[1];
-    const team2Sum = state.sums[2];
     // Disadvantage is now keyed to the model's win probability, not the
     // raw rating sum — a side can carry more total VTSR-T and still be
     // the underdog once the commander gap is in play.
@@ -1035,7 +1037,6 @@
       <div class="vt-tools-balonce-team-column" data-team="1" data-vt-balonce-droptarget="1">
         <div class="vt-tools-balonce-team-header">
           <span class="vt-tools-balonce-team-name">Team 1</span>
-          <span class="vt-tools-balonce-team-sum">${Math.round(team1Sum)}</span>
           ${team1Disadv}
         </div>
         <div class="vt-tools-balonce-team-list">
@@ -1047,7 +1048,6 @@
       <div class="vt-tools-balonce-team-column" data-team="2" data-vt-balonce-droptarget="2">
         <div class="vt-tools-balonce-team-header">
           <span class="vt-tools-balonce-team-name">Team 2</span>
-          <span class="vt-tools-balonce-team-sum">${Math.round(team2Sum)}</span>
           ${team2Disadv}
         </div>
         <div class="vt-tools-balonce-team-list">
@@ -1068,15 +1068,18 @@
     const isCmdr = (team === 1 && commanderSetup.team1 === key)
                 || (team === 2 && commanderSetup.team2 === key);
     const cmdrChip = isCmdr ? '<span class="vt-tools-balonce-row-cmdrchip">CMDR</span>' : '';
-    const tierBadge = p.tier ? `<span class="vt-tools-balonce-row-tier">T${p.tier}</span>` : '';
-    // Commanders carry TWO ratings and the row shows both: VTSR-C is the
-    // one in the prediction, VTSR-T (the trailing number every row has)
-    // is their thug rating, shown for context only.
+    // VTSR-T shows as a band chip, never a number.
+    const band = p.band || (p.tier && window.VTSRDisplay ? VTSRDisplay.rawBandFor(p.vtsr) : null);
+    const tierBadge = (band && window.VTSRDisplay)
+      ? `<span class="vt-tools-balonce-row-tier">${VTSRDisplay.bandChipHtml(band, { compact: true, bsTooltip: false, title: `VTSR-T ${band.label}` })}</span>`
+      : '';
+    // Commanders carry TWO ratings: VTSR-C (numeric) is the one in the
+    // prediction; their VTSR-T band is shown for context only.
     const cmdrEloChip = isCmdr
       ? `<span class="vt-tools-balonce-row-cmdrelo${p.vtsrCUnrated ? ' is-unrated' : ''}"
              title="${escapeHtml(p.vtsrCUnrated
-               ? `No rated commander games yet — the model debuts ${p.displayName} at ${ANCHOR}. The number after their name is their thug rating (VTSR-T), which is not part of the prediction.`
-               : `Commander rating (VTSR-C) over ${p.vtsrCGames} rated duel${p.vtsrCGames === 1 ? '' : 's'}. This is the term the prediction uses; the trailing number is their thug rating (VTSR-T).`)}">C ${Math.round(vtsrCOf(p))}${p.vtsrCUnrated ? '*' : ''}</span>`
+               ? `No rated commander games yet — the model debuts ${p.displayName} at ${ANCHOR}. Their VTSR-T band is not part of the prediction.`
+               : `Commander rating (VTSR-C) over ${p.vtsrCGames} rated duel${p.vtsrCGames === 1 ? '' : 's'}. This is the term the prediction uses; their VTSR-T band is context only.`)}">C ${Math.round(vtsrCOf(p))}${p.vtsrCUnrated ? '*' : ''}</span>`
       : '';
     const provisionalChip = p.isProvisional
       ? `<span class="vt-tools-balonce-row-provisional" title="${escapeHtml(p.isCustom ? 'Custom entry' : 'Provisional / unrated')}">${p.isCustom ? 'cust' : 'prov'}</span>`
@@ -1102,7 +1105,6 @@
         ${tierBadge}
         ${provisionalChip}
         ${slotChip}
-        <span class="vt-tools-balonce-row-vtsr">${Math.round(p.vtsr)}</span>
       </div>
     `;
   }
@@ -1150,18 +1152,19 @@
     const B = window.VTBalonce;
     const fav = state.fav;
 
-    const sumDelta = state.sumDelta;
     const parts = [];
     if (Number.isFinite(state.cmdrGap)) {
       parts.push(`<span class="vt-balonce-part" title="Commander rating gap (VTSR-C), Team 1 minus Team 2. The strongest single term in the prediction.">Cmdr gap <span class="vt-mono">${signed(state.cmdrGap)}</span></span>`);
     }
     if (Number.isFinite(state.thugGap)) {
       const seatNote = state.seatRule && state.seatRule.active
-        ? ` Seat-adjusted: Team ${state.seatRule.shortSide} is ${state.seatRule.extra} player${state.seatRule.extra === 1 ? '' : 's'} short, and each empty seat counts as a ${Math.round(state.seatRule.rating)}-rated thug.`
+        ? ` Seat-adjusted: Team ${state.seatRule.shortSide} is ${state.seatRule.extra} player${state.seatRule.extra === 1 ? '' : 's'} short, and each empty seat counts as a floor-rated thug.`
         : '';
-      parts.push(`<span class="vt-balonce-part" title="Thug-team strength gap (mean VTSR-T, commanders excluded), weighted at lambda = ${state.lambda}.${escapeHtml(seatNote)}">Thug gap <span class="vt-mono">${signed(state.thugGap)}</span></span>`);
+      const shift = 1 / (1 + Math.pow(10, -((state.lambda || 1) * state.thugGap) / (state.scale || 400))) - 0.5;
+      const pct = Math.round(Math.abs(shift) * 100);
+      const label = pct === 0 ? 'Thugs: even' : `Thugs: Team ${shift > 0 ? 1 : 2} +${pct}%`;
+      parts.push(`<span class="vt-balonce-part" title="How much the two thug teams alone tilt the prediction, as win chance (commanders excluded).${escapeHtml(seatNote)}">${label}</span>`);
     }
-    parts.push(`<span class="vt-balonce-part" title="Total roster VTSR-T difference. Material weight, not the prediction \u2014 shown because it is the number the lobby has always eyeballed.">\u0394\u03a3VTSR <span class="vt-mono">${signed(sumDelta)}</span></span>`);
 
     const headline = fav.team
       ? `Team ${fav.team} favored <span class="vt-balonce-prob vt-mono">${Math.round(fav.prob * 100)}%</span>`
@@ -1235,12 +1238,11 @@
     const n2 = state.teams[2].length;
     const seatActive = !!(state.seatRule && state.seatRule.active);
     if (n1 !== n2 && n1 > 0 && n2 > 0) {
-      const floor = seatActive ? Math.round(state.seatRule.rating) : null;
       const tip = seatActive
-        ? `Teams are ${n1}v${n2}. The validated formula compares AVERAGE thug rating and would call this fair; here each empty seat on the short side is scored as a ${floor}-rated thug (the VTSR-T floor). Only ${SEAT_RULE_UNEVEN_GAMES_SEEN} rated games so far were uneven, so this is a house rule, not a validated term — the accuracy figure below is for even teams.`
+        ? `Teams are ${n1}v${n2}. The validated formula compares AVERAGE thug rating and would call this fair; here each empty seat on the short side is scored as a thug at the VTSR-T floor. Only ${SEAT_RULE_UNEVEN_GAMES_SEEN} rated games so far were uneven, so this is a house rule, not a validated term — the accuracy figure below is for even teams.`
         : `Teams are ${n1}v${n2}. The prediction compares AVERAGE thug rating, so the extra body on the larger side is not reflected in the percentage.`;
       const label = seatActive
-        ? `${n1}v${n2} \u2014 empty seat scored as a ${floor}-rated thug`
+        ? `${n1}v${n2} \u2014 empty seat scored as a floor-rated thug`
         : `${n1}v${n2} \u2014 material edge not in the %`;
       bits.push(`<span class="vt-balonce-confidence vt-balonce-confidence--medium"
         title="${escapeHtml(tip)}">

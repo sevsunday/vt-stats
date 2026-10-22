@@ -424,24 +424,12 @@
 
 .vt-player-card-rating {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
   margin: 0.15rem 0 0.6rem;
 }
-.vt-player-card-rating-big {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: 1.8rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--kb-text-primary);
-  line-height: 1;
-}
-.vt-player-card-rating-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--kb-text-muted);
-}
+.vt-player-card-rating .vt-band-bar { flex: 1 1 5rem; }
 
 .vt-player-card-meta {
   display: flex;
@@ -465,7 +453,8 @@
   color: var(--kb-text-primary);
   font-weight: 600;
 }
-.vt-player-card-pill--peak { color: var(--kb-success); }
+.vt-player-card-pill--vtsrc { color: var(--vt-tier-1); }
+.vt-player-card-pill--vtsrc.is-provisional { opacity: 0.7; border-style: dashed; }
 .vt-player-card-pill--role-c { color: var(--vt-tier-1); }
 .vt-player-card-pill--role-t { color: var(--vt-tier-2); }
 
@@ -563,21 +552,13 @@
   font-size: 0.98rem;
 }
 [data-player-view="list"] .vt-player-card-rating {
-  flex: 0 0 3.4rem;
-  width: 3.4rem;
+  flex: 0 0 11rem;
+  width: 11rem;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-end;
   margin: 0;
-  gap: 0;
+  gap: 0.5rem;
 }
-[data-player-view="list"] .vt-player-card-rating-big {
-  font-size: 1.15rem;
-  width: 100%;
-  min-width: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-[data-player-view="list"] .vt-player-card .vt-player-card-rating-label { display: none; }
 [data-player-view="list"] .vt-player-card-meta {
   flex: 0 0 auto;
   width: auto;
@@ -597,7 +578,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-[data-player-view="list"] .vt-player-card-pill--peak,
 [data-player-view="list"] .vt-player-card-pill--ship { display: none; }
 [data-player-view="list"] .vt-player-card-spark {
   flex: 0 1 16rem;
@@ -753,13 +733,18 @@
   margin-bottom: 0.5rem;
 }
 .vt-player-single-vtsr {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: clamp(2.4rem, 3vw + 1.5rem, 3.6rem);
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  color: var(--kb-text-primary);
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
 }
+.vt-player-single-vtsr .vt-band-chip .vt-tier-badge {
+  font-size: 1.15rem;
+  min-width: 2.8rem;
+  padding: 0.2rem 0.6rem;
+}
+.vt-player-single-vtsr .vt-band-half { font-size: 1.15rem; }
+.vt-player-single-vtsr .vt-band-bar { flex: 1 1 10rem; max-width: 16rem; height: 8px; }
 .vt-player-single-peak {
   font-size: 0.85rem;
   color: var(--kb-text-muted);
@@ -1343,19 +1328,11 @@
   color: var(--vt-compare-accent, var(--kb-primary));
 }
 .vt-compare-mini-vtsr {
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: 1.7rem;
-  font-weight: 700;
-  color: var(--vt-compare-accent, var(--kb-primary));
-  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
   margin-bottom: 0.5rem;
-}
-.vt-compare-mini-vtsr-label {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--kb-text-muted);
-  margin-left: 0.4rem;
-  letter-spacing: 0.05em;
 }
 .vt-compare-mini-stats {
   display: flex;

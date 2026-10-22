@@ -316,28 +316,47 @@
     max-width: 52rem;
 }
 
-/* Leaderboard rating preview. Performance is the published number.
-   Wins weighted reveals 10/25/50 and Wins only. Colors stay on --kb-*. */
-.vt-vtsr-seg > .btn {
-    color: var(--kb-text-secondary);
-    background: transparent;
-    border-color: var(--kb-border-subtle);
-    font-size: 0.78rem;
-    font-weight: 500;
+/* Tier group header rows on the VTSR-T ladder (no # ranks). */
+.vt-vtsr-tier-group td {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 85%, var(--kb-primary) 15%);
+    border-top: 1px solid color-mix(in oklab, var(--kb-border-subtle) 70%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-border-subtle) 70%, transparent);
+    padding: 0.45rem 0.75rem;
+    vertical-align: middle;
 }
-.vt-vtsr-seg > .btn:hover,
-.vt-vtsr-seg > .btn:focus-visible {
+.vt-vtsr-tier-group-badge {
+    display: inline-block;
+    margin-right: 0.45rem;
+    vertical-align: middle;
+}
+.vt-vtsr-tier-group-label {
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
     color: var(--kb-text-primary);
-    background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
-    border-color: var(--kb-border-subtle);
+    margin-right: 0.45rem;
 }
-.vt-vtsr-seg > .btn.active {
-    color: var(--kb-primary-fg);
-    background: var(--kb-primary);
-    border-color: var(--kb-primary);
+.vt-vtsr-tier-group-count {
+    font-size: 0.76rem;
+    color: var(--kb-text-secondary);
 }
 
-/* Tier is a published-rating cut. The wins preview hides the column. */
-.vt-vtsr-hide-tier .vt-vtsr-tier-col {
-    display: none;
+/* Upper / Lower sub-group rows inside a tier (default band sort). */
+.vt-vtsr-half-group td {
+    padding: 0.2rem 0.75rem 0.2rem 2.4rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-border-subtle) 50%, transparent);
+}
+.vt-vtsr-half-group-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--kb-text-secondary);
+    margin-right: 0.45rem;
+}
+
+.vt-vtsr-position-col {
+    min-width: 5.5rem;
+    width: 6rem;
 }

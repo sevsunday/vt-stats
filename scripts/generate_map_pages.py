@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import identity_aliases
+import vtsr_bands
 
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
@@ -737,10 +738,13 @@ def _build_insights(bucket: list[dict], elo_index: dict, f9_duels: list | None =
             name = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid) or delta["name"]
             row = players.get(sid)
             if row is None:
-                row = {"steam64": sid, "name": name, "delta_sum": 0.0, "matches": 0}
+                row = {"steam64": sid, "name": name, "delta_sum": 0.0, "matches": 0, "beat": 0}
                 players[sid] = row
             row["delta_sum"] += delta["delta"]
             row["matches"] += 1
+            # Same "Beat expectation" rule the UI applies (vtsr_bands).
+            if delta["delta"] >= vtsr_bands.ON_PAR_DELTA:
+                row["beat"] += 1
             row["name"] = name
     best_players = [
         {
@@ -748,6 +752,7 @@ def _build_insights(bucket: list[dict], elo_index: dict, f9_duels: list | None =
             "name": r["name"],
             "delta_sum": round(r["delta_sum"], 2),
             "matches": r["matches"],
+            "beat": r["beat"],
         }
         for r in players.values()
         if r["matches"] >= INSIGHT_BEST_PLAYERS_MIN

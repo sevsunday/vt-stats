@@ -34,7 +34,7 @@
 
   const EXPECTED_TIP_HTML =
     '<div><strong>Played vs expected</strong></div>' +
-    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 5-axis composite versus everyone here. Above the dashed line means you outperformed that prediction \u2014 that is what moved the number, win or lose.</div>';
+    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 4-axis composite versus everyone here. Above the dashed line means you beat that prediction \u2014 that is what moves VTSR-T, win or lose.</div>';
 
   const VTSR_AXIS_META = {
     net_damage_share: {
@@ -351,8 +351,7 @@
           : `right:50%; width:${pct.toFixed(2)}%;`;
         trackInner = `<span class="vt-match-elo-track-center"></span>
           <span class="vt-match-elo-track-fill ${fillCls}" style="${fillStyle}"></span>`;
-        const deltaCls = v > 0 ? 'vt-vtsr-delta-positive' : v < 0 ? 'vt-vtsr-delta-negative' : '';
-        deltaHtml = `<span class="vt-match-elo-delta ${deltaCls}">${signedDelta(v)}</span>`;
+        deltaHtml = `<span class="vt-match-elo-delta">${VTSRDisplay.verdictChipHtml(v, { bsTooltip: false })}</span>`;
       } else {
         trackInner = '<span class="vt-match-elo-track-center"></span>';
       }
@@ -399,11 +398,11 @@
     } else {
       verdict = 'About as expected for this lobby.';
     }
-    const deltaCls = (d.delta || 0) > 0
-      ? 'vt-vtsr-delta-positive'
-      : (d.delta || 0) < 0 ? 'vt-vtsr-delta-negative' : '';
-    const before = Math.round(d.before);
-    const after = Math.round(d.after);
+    const bandIn = VTSRDisplay.rawBandFor(d.before);
+    const bandOut = VTSRDisplay.rawBandFor(d.after);
+    const bandMove = (bandIn && bandOut && bandIn.index !== bandOut.index)
+      ? `${VTSRDisplay.bandChipHtml(bandIn, { compact: true, bsTooltip: false, title: bandIn.label })} \u2192 ${VTSRDisplay.bandChipHtml(bandOut, { compact: true, bsTooltip: false, title: bandOut.label })}`
+      : (bandOut ? VTSRDisplay.bandChipHtml(bandOut, { bsTooltip: false, title: `${bandOut.label}, unchanged` }) : '');
     const weights = redistributedWeights(d.axis_contributions || {});
     const sentence = axisSentence(d.axis_contributions || {}, weights);
     const cmdrNote = d.axis_contributions_meta
@@ -414,8 +413,8 @@
       : '';
     body.innerHTML = `
       <div class="vt-match-elo-headline mb-2">
-        <span class="vt-match-elo-headline-delta ${deltaCls}">${signedDelta(d.delta)}</span>
-        <span class="vt-match-elo-headline-range vt-mono">${before} \u2192 ${after}</span>
+        <span class="vt-match-elo-headline-delta">${VTSRDisplay.verdictChipHtml(d.delta, { long: true, bsTooltip: false })}</span>
+        <span class="vt-match-elo-headline-range">${bandMove}</span>
       </div>
       <p class="vt-match-elo-verdict mb-2">${esc(verdict)} ${expectedInfoIcon()}</p>
       ${cmdrNote}
@@ -539,8 +538,8 @@
               label: (item) => {
                 const pt = item.raw;
                 if (!pt || pt.name == null) return null;
-                const sign = pt.delta > 0 ? '+' : '';
-                return `Played ${pt.y >= 0 ? '+' : ''}${pt.y.toFixed(2)} vs expected ${pt.x >= 0 ? '+' : ''}${pt.x.toFixed(2)} \u2192 ${sign}${pt.delta.toFixed(1)}`;
+                const v = VTSRDisplay.deltaVerdict(pt.delta);
+                return `Played ${pt.y >= 0 ? '+' : ''}${pt.y.toFixed(2)} vs expected ${pt.x >= 0 ? '+' : ''}${pt.x.toFixed(2)} \u2192 ${v ? v.label : 'no change'}`;
               },
             },
           }),
@@ -617,7 +616,8 @@
     const mag = Math.abs(h.diff);
     if (mag < HANDICAP_GAP_MIN) return '';
     const team = h.diff > 0 ? 1 : 2;
-    return ` Team ${team}\u2019s thugs were ${Math.round(mag)} VTSR-T stronger going in.`;
+    const shift = VTSRDisplay.gapToWinShift(mag);
+    return ` Team ${team}\u2019s thugs were stronger going in (about ${VTSRDisplay.winShiftText(shift)} win chance).`;
   }
 
   function paintVtsrc(joined, matchId) {

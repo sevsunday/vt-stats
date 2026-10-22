@@ -68,6 +68,7 @@ from typing import Any
 
 import identity_aliases
 import inactivity
+import vtsr_bands
 
 
 # ---------------------------------------------------------------------------
@@ -1407,6 +1408,9 @@ def _rating_pass(
     peak_vtsr: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     peak_at: dict[str, str] = {}
     win_history: dict[str, list[float]] = defaultdict(list)
+    # Chronological post-match ratings per player, replayed through the
+    # sticky display-band walk (scripts/vtsr_bands.py) at the end.
+    after_sequence: dict[str, list[float]] = defaultdict(list)
     # Per-axis running sums + counts → career-average axis z-scores.
     # Tracked separately per axis because each axis's denominator can
     # differ (axes self-omit on a per-match basis via redistribution).
@@ -1706,6 +1710,7 @@ def _rating_pass(
                 r_after = ELO_RATING_FLOOR
 
             thug_elo[key] = r_after
+            after_sequence[key].append(r_after)
             matches_played[key] = n_before + 1
             last_match_id[key] = match_id
             last_delta[key] = dr
@@ -1861,7 +1866,7 @@ def _rating_pass(
             steam64_for_key.get(key),
             display_name.get(key, ""),
         )
-        ratings.append({
+        row = {
             "name":             display_name.get(key, ""),
             "steam64":          steam64_for_key.get(key),
             "vtsr":             round(vtsr, 1),
@@ -1898,7 +1903,17 @@ def _rating_pass(
             # v2.8: low-tier at-base lift eligibility factor applied to this
             # player's thug rows this pass (0.0 when not eligible / lift off).
             "lowtier_lift_factor": round((lowtier_eligibility or {}).get(key, 0.0), 4),
-        })
+        }
+        # Display band (sticky tier + half). Canonical pass only: the
+        # alpha-override files publish a blend the thug sequence doesn't
+        # describe, and nothing displays their bands.
+        if alpha_override is None:
+            band = vtsr_bands.walk_bands(after_sequence.get(key) or [t_elo])
+            row["band_index"] = band
+            row["band_tier"] = vtsr_bands.band_tier(band)
+            row["band_half"] = vtsr_bands.band_half(band)
+            row["band_label"] = vtsr_bands.band_label(band)
+        ratings.append(row)
 
     # Sort by VTSR desc, then name asc (deterministic).
     ratings.sort(key=lambda r: (-r["vtsr"], (r["name"] or "").lower()))
@@ -1961,6 +1976,8 @@ def _rating_pass(
         "inactivity_window_days": INACTIVITY_WINDOW_DAYS,
         "comeback_games_required": COMEBACK_GAMES_REQUIRED,
         "corpus_latest_date": activity["corpus_latest_date"],
+        # Display-only band rules (scripts/vtsr_bands.py). UI reads these.
+        "band_config":        vtsr_bands.band_config(),
         "min_player_count":   ELO_MIN_PLAYER_COUNT,
         "min_duration_sec":   ELO_MIN_DURATION_SEC,
         "computed_at":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

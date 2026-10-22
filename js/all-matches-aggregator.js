@@ -281,7 +281,6 @@
     career_loose_collector:  ['Loose Collector',         'bi-box-arrow-in-down'],
     career_war_machine:      ['Conveyor Belt',           'bi-gear-wide-connected'],
     // Flavor B — cross-match-only originals (no per-match sibling).
-    the_champion:            ['The Champion',            'bi-stars'],
     the_veteran:             ['The Veteran',             'bi-clock-history'],
     the_workhorse:           ['The Workhorse',           'bi-hammer'],
     the_carry:               ['The Carry',               'bi-trophy-fill'],
@@ -1281,11 +1280,10 @@
       .map(([wk, count]) => ({ week_iso: wk, count }))
       .sort((a, b) => a.week_iso.localeCompare(b.week_iso));
 
-    // ---- Phase 6: career_highlights (24 cards, self-omitting) ----
+    // ---- Phase 6: career_highlights (23 cards, self-omitting) ----
     // Built inline so we still have access to the per-player career
     // bucket Map (maps_played, win_streak_log, teammates_seen Set) which
-    // isn't fully exposed on the emitted careerStatsKept rows. ELO is
-    // optional; the_champion silently drops when missing.
+    // isn't fully exposed on the emitted careerStatsKept rows.
     const careerHighlights = buildCareerHighlightsInline({
       careerStatsKept,
       careerBuckets: career,        // pid -> bucket
@@ -1564,24 +1562,8 @@
         }));
     }
 
-    // ---------- Flavor B: cross-match-only (12) ----------
-
-    // The Champion — highest VTSR-T (`vtsr` field; requires elo).
-    if (elo && Array.isArray(elo.ratings) && elo.ratings.length) {
-      const eligibleVtsr = elo.ratings
-        .filter(r => keptNames.has(r.name))
-        .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
-      if (eligibleVtsr.length) {
-        cards.push(makeCard('the_champion',
-          eligibleVtsr,
-          {
-            value: r => r.vtsr,
-            format: 'score',
-            winner: r => ({ type: 'player', name: r.name, steam64: r.steam64 }),
-            breakdown: r => ({ matches_played: r.matches_played, peak_vtsr: r.peak_vtsr }),
-          }));
-      }
-    }
+    // ---------- Flavor B: cross-match-only (11) ----------
+    // No VTSR-T card: VTSR-T renders as a band, never a ranked number.
 
     cards.push(makeCard('the_veteran',
       [...careerStatsKept].sort((a, b) => (b.matches_played || 0) - (a.matches_played || 0)),

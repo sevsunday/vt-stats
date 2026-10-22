@@ -8,7 +8,8 @@
  *
  *   VTSR-C Elo (default)    — sortable experimental commander-ladder
  *                             table (explainer lives on How).
- *   VTSR-T Elo              — sortable table + detail panels.
+ *   VTSR-T                  — tier-grouped ladder + detail panels
+ *                             (no # ranks; noise-band tie chips).
  *   How it works            — annotated ΔR = K(P−E) stage + the 13.1
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
@@ -23,19 +24,19 @@
  * player_slugs.json (player links), validation_summary.json (noise band
  * + accuracy tab), and match_contributions.json -> VTAggregate.build()
  * for the corpus-wide career_stats[] the leaderboard joins its Ship /
- * K/D / Acc columns from. The leaderboard preview additionally reads
- * elo_current_alpha{10,25,50,100}.json. Those files are not the
- * published rating.
+ * K/D / Acc columns from. VTSR-T renders as bands and verdicts through
+ * js/vtsr-display.js, never as a number; VTSR-C keeps its numbers.
  *
  * Corpus-wide and picker-unaware (mirrors the VTSR-T contract). The
- * v2.7 thug-only alt pair and toggle are retired. Published VTSR-T is
- * always elo_current.json (alpha 0). ?rating=wins previews a blend.
+ * v2.7 thug-only alt pair and the wins-weighted preview are retired.
+ * Published VTSR-T is always elo_current.json (alpha 0).
  *
  * URL routing: ?tab=vtsr-c|vtsr-t|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
  * VTSR-C pane is the default and writes no ?tab= at all. `vtsr-t` opens
  * the thug board; `leaderboard` is a permanent inbound alias rewritten to
- * `vtsr-t`. ?rating=wins with no tab still opens the thug board.
+ * `vtsr-t`. A legacy ?rating=wins with no tab still opens the thug board
+ * and the param is dropped.
  */
 (function () {
   'use strict';
@@ -92,13 +93,6 @@
     return VTSR_TIERS.find(t => vtsr >= t.min && vtsr < t.max)
       || VTSR_TIERS[VTSR_TIERS.length - 1];
   }
-  function tierProgress(vtsr, tier) {
-    if (tier.id === 1) return { toNext: null, fromCurrent: vtsr - tier.min, pct: 1.0 };
-    if (tier.id === 0) return { toNext: null, fromCurrent: null, pct: 0 };
-    const span = tier.max - tier.min;
-    const into = vtsr - tier.min;
-    return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
-  }
   function vtsrLadderMinMatches(elo) {
     return (elo && elo.leaderboard_min_matches != null)
       ? elo.leaderboard_min_matches
@@ -133,7 +127,7 @@
       return statusChipHtml(
         'vt-vtsr-returning-chip',
         `Returning \u00b7 ${n} of ${need}`,
-        `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ranked ladder.`
+        `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ladder.`
       );
     }
     if (status === 'inactive') {
@@ -142,23 +136,15 @@
       const seen = r.last_seen_date;
       const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
       const title = seen
-        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match in the corpus. Play ${need} games within ${win} days to rejoin the ranked ladder.`
-        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join the ranked ladder.`;
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match in the corpus. Play ${need} games within ${win} days to rejoin the ladder.`
+        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join the ladder.`;
       return statusChipHtml('vt-vtsr-inactive-chip', label, title);
     }
     const n = r.matches_played || 0;
     const min = vtsrLadderMinMatches(elo);
-    const title = `${n} of ${min} rated matches to join the ranked ladder.`;
+    const title = `${n} of ${min} rated matches to appear on the ladder.`;
     const label = n === 1 ? '1 match' : `${n} matches`;
     return statusChipHtml('vt-cmdr-progress-chip', label, title);
-  }
-
-  function tierBadgeHtml(tier, opts = {}) {
-    const titleAttr = opts.title ? ` title="${esc(opts.title)}" data-bs-toggle="tooltip" data-bs-placement="top"` : '';
-    if (tier.id === 0) {
-      return `<span class="vt-vtsr-provisional"${titleAttr}>${tier.short}</span>`;
-    }
-    return `<span class="vt-tier-badge vt-tier-${tier.id}"${titleAttr}>${tier.short}</span>`;
   }
 
   // ----------------------------------------------------------------------
@@ -176,203 +162,15 @@
     historyChart: null,   // Chart.js instance on the accuracy tab
   };
 
-  // Leaderboard preview. Published VTSR-T stays state.elo (alpha 0).
-  // ?rating=wins shows a side file; w is omitted at the 50% default.
-  const WINS_WEIGHTS = [10, 25, 50, 100];
-  const DEFAULT_WINS_WEIGHT = 50;
-  let ratingView = 'performance';
-  let winsWeight = DEFAULT_WINS_WEIGHT;
-  const winsFiles = Object.create(null);
-  const winsLoaded = Object.create(null);
-  const winsInflight = Object.create(null);
-
-  function previewAlpha() {
-    if (ratingView !== 'wins') return null;
-    const file = winsFiles[winsWeight];
-    if (file && typeof file.alpha === 'number') return file.alpha;
-    return winsWeight / 100;
-  }
-  function isWinsOnly(alpha) {
-    return alpha != null && alpha >= 0.999;
-  }
-  function previewStatus() {
-    if (ratingView !== 'wins') return 'off';
-    if (!winsLoaded[winsWeight]) return 'loading';
-    if (!winsFiles[winsWeight]) return 'missing';
-    return 'ready';
-  }
-  function readRatingFromUrl() {
-    const q = new URLSearchParams(window.location.search);
-    const rating = q.get('rating');
-    const raw = q.get('w');
-    if (rating !== 'wins') {
-      return { view: 'performance', weight: winsWeight, dirty: rating != null || raw != null };
-    }
-    if (raw == null || raw === '') {
-      return { view: 'wins', weight: DEFAULT_WINS_WEIGHT, dirty: false };
-    }
-    const n = Number(raw);
-    if (!WINS_WEIGHTS.includes(n) || n === DEFAULT_WINS_WEIGHT) {
-      return { view: 'wins', weight: DEFAULT_WINS_WEIGHT, dirty: true };
-    }
-    return { view: 'wins', weight: n, dirty: false };
-  }
-  function writeRatingUrl() {
-    if (historyWrites) return;
+  // The retired wins-weighted preview used ?rating=wins&w=. Old links
+  // still land on the thug pane; the params are dropped on boot.
+  function stripLegacyRatingParams() {
     const url = new URL(window.location.href);
-    if (ratingView !== 'wins') {
-      url.searchParams.delete('rating');
-      url.searchParams.delete('w');
-    } else {
-      url.searchParams.set('rating', 'wins');
-      if (winsWeight === DEFAULT_WINS_WEIGHT) url.searchParams.delete('w');
-      else url.searchParams.set('w', String(winsWeight));
-    }
-    const next = url.pathname + url.search + url.hash;
-    const cur = window.location.pathname + window.location.search + window.location.hash;
-    if (next === cur) return;
-    history.replaceState(null, '', next);
+    if (!url.searchParams.has('rating') && !url.searchParams.has('w')) return;
+    url.searchParams.delete('rating');
+    url.searchParams.delete('w');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
   }
-  function ensureWinsFile(pct) {
-    if (winsLoaded[pct]) return Promise.resolve(winsFiles[pct]);
-    if (winsInflight[pct]) return winsInflight[pct];
-    winsInflight[pct] = fetchJson(`${DATA}elo_current_alpha${pct}.json`).then((data) => {
-      winsFiles[pct] = data;
-      winsLoaded[pct] = true;
-      return data;
-    });
-    return winsInflight[pct];
-  }
-  function blendedLastByKey(alpha) {
-    const map = new Map();
-    const hist = (state.eloHistory && state.eloHistory.history) || [];
-    for (let i = hist.length - 1; i >= 0; i--) {
-      const h = hist[i];
-      if (h.match_excluded) continue;
-      for (const d of (h.deltas || [])) {
-        const keys = [];
-        if (d.steam64) keys.push(String(d.steam64));
-        if (d.name) keys.push('name:' + d.name);
-        if (!keys.length || keys.some(k => map.has(k))) continue;
-        const thug = (d.after != null && d.before != null)
-          ? (Number(d.after) - Number(d.before))
-          : (Number(d.delta) || 0);
-        const w = d.wins;
-        const winsStep = (w && w.after != null && w.before != null)
-          ? (Number(w.after) - Number(w.before)) : 0;
-        const step = Math.round((alpha * winsStep + (1 - alpha) * thug) * 100) / 100;
-        for (const k of keys) map.set(k, step);
-      }
-    }
-    return map;
-  }
-  function withPreviewDeltas(ratings, alpha) {
-    const last = blendedLastByKey(alpha);
-    return ratings.map((r) => {
-      const byId = r.steam64 ? last.get(String(r.steam64)) : undefined;
-      const byName = r.name ? last.get('name:' + r.name) : undefined;
-      const step = byId != null ? byId : (byName != null ? byName : 0);
-      return Object.assign({}, r, { last_delta: step });
-    });
-  }
-  function setTooltipTitle(el, title) {
-    if (!el) return;
-    if (window.bootstrap && bootstrap.Tooltip) {
-      const inst = bootstrap.Tooltip.getInstance(el);
-      if (inst) inst.dispose();
-    }
-    el.setAttribute('title', title);
-  }
-  function applyColumnTip(el, title) {
-    if (!el) return;
-    if (!el.dataset.tipDefault) el.dataset.tipDefault = el.getAttribute('title') || '';
-    setTooltipTitle(el, title == null ? el.dataset.tipDefault : title);
-  }
-  function previewBannerHtml() {
-    const status = previewStatus();
-    if (status === 'off') return '';
-    if (status === 'loading') {
-      const which = winsWeight === 100 ? 'wins-only' : `${winsWeight}%`;
-      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">Loading the ${which} preview\u2026</div>`;
-    }
-    if (status === 'missing') {
-      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">Could not load <code>elo_current_alpha${winsWeight}.json</code>. This preview stays empty until that file is present.</div>`;
-    }
-    const alpha = previewAlpha();
-    const common = 'This is not the published VTSR-T. The accuracy tests have not cleared folding wins into the published rating. Player pages still show the published rating.';
-    if (isWinsOnly(alpha)) {
-      return `<div class="alert alert-secondary py-2 px-3 mb-3 small">The axes are off. This number is the wins ladder only. ${common}</div>`;
-    }
-    const pct = Math.round((alpha || 0) * 100);
-    return `<div class="alert alert-secondary py-2 px-3 mb-3 small">${pct}% of this number is the wins ladder and ${100 - pct}% is the performance rating. ${common} The mix pulls the number toward 1500.</div>`;
-  }
-  function syncPreviewChrome() {
-    const winsOn = ratingView === 'wins';
-    const alpha = previewAlpha();
-    const winsOnly = winsOn && isWinsOnly(alpha);
-    const perfBtn = document.getElementById('vtsr-rating-performance');
-    const winsBtn = document.getElementById('vtsr-rating-wins');
-    const weights = document.getElementById('vtsr-weight-toggle');
-    if (perfBtn) {
-      perfBtn.classList.toggle('active', !winsOn);
-      perfBtn.setAttribute('aria-pressed', winsOn ? 'false' : 'true');
-    }
-    if (winsBtn) {
-      winsBtn.classList.toggle('active', winsOn);
-      winsBtn.setAttribute('aria-pressed', winsOn ? 'true' : 'false');
-    }
-    if (weights) {
-      weights.hidden = !winsOn;
-      weights.querySelectorAll('[data-wins-weight]').forEach((btn) => {
-        const on = winsOn && Number(btn.dataset.winsWeight) === winsWeight;
-        btn.classList.toggle('active', on);
-        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-    }
-    const title = document.getElementById('vtsr-card-title');
-    if (title) {
-      const label = !winsOn ? 'VTSR-T Leaderboard'
-        : (winsOnly ? 'Wins ladder preview' : 'Wins-weighted preview');
-      title.innerHTML = `<i class="bi bi-stars me-2"></i>${label}`;
-    }
-    const banner = document.getElementById('vtsr-preview-banner');
-    if (banner) banner.innerHTML = previewBannerHtml();
-    const table = document.getElementById('vtsr-table');
-    if (table) table.classList.toggle('vt-vtsr-hide-tier', winsOn);
-    const rankTh = document.querySelector('#vtsr-table thead th:first-child');
-    const ratingTh = document.querySelector('#vtsr-table th[data-sort="vtsr"]');
-    const lastTh = document.querySelector('#vtsr-table th[data-sort="last_delta"]');
-    const peakTh = document.querySelector('#vtsr-table th[data-sort="peak_vtsr"]');
-    if (ratingTh) ratingTh.textContent = !winsOn ? 'VTSR-T' : (winsOnly ? 'Wins' : 'Wins-weighted');
-    if (!winsOn) {
-      applyColumnTip(rankTh, null);
-      applyColumnTip(ratingTh, null);
-      applyColumnTip(lastTh, null);
-      applyColumnTip(peakTh, null);
-    } else if (winsOnly) {
-      applyColumnTip(rankTh, 'Rank (1 = highest wins ladder).');
-      applyColumnTip(ratingTh, '<strong>Wins ladder</strong><br>The axes are off. This number is the wins ladder only. It is not the published VTSR-T.');
-      applyColumnTip(lastTh, '<strong>Last</strong><br>Change in the wins ladder on the latest rated match. Not the published VTSR-T change.');
-      applyColumnTip(peakTh, '<strong>Peak</strong><br>Highest the wins ladder has been for this player.');
-    } else {
-      const pct = Math.round((alpha || 0) * 100);
-      applyColumnTip(rankTh, 'Rank (1 = highest wins-weighted rating).');
-      applyColumnTip(ratingTh, `<strong>Wins-weighted</strong><br>${pct}% wins ladder, ${100 - pct}% performance. Not the published VTSR-T.`);
-      applyColumnTip(lastTh, '<strong>Last</strong><br>Change in this wins-weighted number on the latest rated match. Not the published VTSR-T change.');
-      applyColumnTip(peakTh, '<strong>Peak</strong><br>Highest this wins-weighted number has been.');
-    }
-  }
-  function showWinsPreview(weight) {
-    ratingView = 'wins';
-    if (WINS_WEIGHTS.includes(weight)) winsWeight = weight;
-    const weightNow = winsWeight;
-    writeRatingUrl();
-    renderLeaderboard();
-    ensureWinsFile(weightNow).then(() => {
-      if (ratingView === 'wins' && winsWeight === weightNow) renderLeaderboard();
-    });
-  }
-
   // Player links resolve to the canonical player/<slug>/ from this page's
   // subdirectory (../player/...); fall back to the runtime ?p= route.
   function playerHref(steam64) {
@@ -406,7 +204,7 @@
   // Corpus-wide: no picker filter exists here, so every rated player shows.
   // ----------------------------------------------------------------------
 
-  let vtsrSortState = { key: 'vtsr', asc: false };
+  let vtsrSortState = { key: 'band', asc: false };
   const expandedVtsrRows = new Set();
   let _vtsrCareerStats = null;
 
@@ -463,8 +261,8 @@
           vb = cb ? ((cb.overall_accuracy_est != null ? cb.overall_accuracy_est : cb.overall_accuracy) || 0) : -1;
           break;
         }
-        case 'vtsr':
-        default:               va = a.vtsr || 0;                  vb = b.vtsr || 0;                  break;
+        case 'band':
+        default:               va = VTSRDisplay.bandFor(a).index; vb = VTSRDisplay.bandFor(b).index; break;
       }
       if (va < vb) return asc ? -1 : 1;
       if (va > vb) return asc ? 1 : -1;
@@ -567,12 +365,7 @@
         <span class="vt-axis-bar-z">${reading}</span>
       </div>`;
     }).join('');
-    let careerSub = 'typical showing across rated matches';
-    if (ratingView === 'wins') {
-      careerSub = isWinsOnly(previewAlpha())
-        ? 'how this player has been playing; not in this number'
-        : 'the axes half of this preview';
-    }
+    const careerSub = 'typical showing across rated matches';
     const heading = mode === 'career'
       ? `Career axis profile <span class="vt-vtsr-detail-sub text-muted">(${careerSub})</span>`
       : 'Last-match axis breakdown';
@@ -580,28 +373,6 @@
       <h6>${heading}</h6>
       <div class="vt-axis-bar-grid">${rows}</div>
     </section>`;
-  }
-
-  function winsPreviewNote(lastDelta) {
-    const alpha = previewAlpha();
-    if (alpha == null || !lastDelta) return '';
-    const wins = lastDelta.wins;
-    const winsStep = (wins && wins.after != null && wins.before != null)
-      ? (Number(wins.after) - Number(wins.before)) : 0;
-    const sign = winsStep > 0 ? '+' : '';
-    if (isWinsOnly(alpha)) {
-      if (!wins) {
-        return '<div class="vt-vtsr-detail-formula">The axes are not in this number or in Last. This match had no decided winner, so Last is 0.</div>';
-      }
-      return `<div class="vt-vtsr-detail-formula">The axes are not in this number or in Last. Last is the wins step alone (${sign}${winsStep.toFixed(1)}).</div>`;
-    }
-    const pct = Math.round(alpha * 100);
-    const rest = 100 - pct;
-    if (!wins) {
-      return `<div class="vt-vtsr-detail-formula">This match had no decided winner, so the wins ladder did not move. Last is ${rest}% of the performance change.</div>`;
-    }
-    const word = wins.s === 1 ? 'a win' : wins.s === 0 ? 'a loss' : wins.s === 0.5 ? 'a draw' : 'a decided result';
-    return `<div class="vt-vtsr-detail-formula">This match was ${word}. The wins ladder moved ${sign}${winsStep.toFixed(1)}. Last mixes ${pct}% of that step with ${rest}% of the performance change.</div>`;
   }
 
   function renderVtsrLastMatchSection(eloRow) {
@@ -633,8 +404,6 @@
     }
     const ac = lastDelta.axis_contributions || {};
     const matchId = lastEntry.match_id || '';
-    const dr = (lastDelta.delta != null ? lastDelta.delta : 0).toFixed(1);
-    const drSign = lastDelta.delta > 0 ? '+' : '';
     const perfStr = (lastDelta.performance != null ? lastDelta.performance : 0).toFixed(2);
     const perfSign = lastDelta.performance > 0 ? '+' : '';
     const expStr = (lastDelta.expected != null ? lastDelta.expected : 0).toFixed(2);
@@ -653,8 +422,9 @@
       }
     }
     const grid = renderVtsrAxisGrid(ac, 'last_match', weightsRedistributed);
-    const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; Scored ${perfSign}${perfStr} vs ${expSign}${expStr} expected \u2192 <span class="${lastDelta.delta > 0 ? 'vt-vtsr-delta-positive' : lastDelta.delta < 0 ? 'vt-vtsr-delta-negative' : ''}">${drSign}${dr}</span></div>`;
-    return grid.replace('</h6>', `</h6>${formulaLine}${winsPreviewNote(lastDelta)}`);
+    const verdict = VTSRDisplay.verdictChipHtml(lastDelta.delta, { long: true });
+    const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; Scored ${perfSign}${perfStr} vs ${expSign}${expStr} expected \u2192 ${verdict}</div>`;
+    return grid.replace('</h6>', `</h6>${formulaLine}`);
   }
 
   function renderVtsrCombatSection(careerRow) {
@@ -763,13 +533,13 @@
   }
 
   function renderVtsrPeakSection(eloRow) {
-    const peak = Math.round(eloRow.peak_vtsr || eloRow.vtsr || 0);
+    const peakBand = VTSRDisplay.rawBandFor(eloRow.peak_vtsr || eloRow.vtsr || 0);
     const peakAt = eloRow.peak_at || '';
     const peakStr = peakAt ? `Reached at <strong>${esc(peakAt)}</strong>` : '';
     return `<section class="vt-vtsr-detail-section">
-      <h6>Peak</h6>
+      <h6>Highest band</h6>
       <div class="vt-vtsr-detail-peak">
-        <span class="vt-vtsr-detail-peak-value">${peak}</span>
+        <span class="vt-vtsr-detail-peak-value">${VTSRDisplay.bandChipHtml(peakBand, { title: '' })}</span>
         <span class="vt-vtsr-detail-peak-label text-muted">${peakStr}</span>
       </div>
     </section>`;
@@ -796,28 +566,39 @@
     </div>`;
   }
 
-  function renderVtsrLadderRow(r, elo, rank, noiseSigma) {
-    const alpha = previewAlpha();
-    const preview = alpha != null;
-    const winsOnly = isWinsOnly(alpha);
-    const ratingLabel = !preview ? 'VTSR-T' : (winsOnly ? 'wins ladder' : 'wins-weighted preview');
-    const tier = resolveTier(r.vtsr, r.matches_played);
-    let tierTip;
-    if (tier.id === 0) {
-      tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
-    } else if (tier.id === 1) {
-      tierTip = `${tier.label} · ${tier.min}+ ${ratingLabel} · top of the ladder`;
-    } else if (tier.id === 5) {
-      const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
-      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} ${ratingLabel} · ${fromFloor} pts above floor`;
-    } else {
-      const prog = tierProgress(r.vtsr, tier);
-      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} ${ratingLabel} · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
-    }
-    const badge = tierBadgeHtml(tier, { title: tierTip });
+  function vtsrTierGroupHeaderHtml(tier, count, colSpan) {
+    const badge = tier.id === 0
+      ? '<span class="vt-vtsr-provisional">?</span>'
+      : `<span class="vt-tier-badge vt-tier-${tier.id}">${tier.short}</span>`;
+    const nLabel = count === 1 ? '1 player' : `${count} players`;
+    return `<tr class="vt-vtsr-tier-group" aria-hidden="true">
+      <td colspan="${colSpan}">
+        <span class="vt-vtsr-tier-group-badge">${badge}</span>
+        <span class="vt-vtsr-tier-group-label">${esc(tier.label)}</span>
+        <span class="vt-vtsr-tier-group-count">${esc(nLabel)}</span>
+      </td>
+    </tr>`;
+  }
+
+  function vtsrHalfGroupHeaderHtml(halfLabel, count, colSpan) {
+    const nLabel = count === 1 ? '1 player' : `${count} players`;
+    return `<tr class="vt-vtsr-half-group" aria-hidden="true">
+      <td colspan="${colSpan}">
+        <span class="vt-vtsr-half-group-label">${esc(halfLabel)}</span>
+        <span class="vt-vtsr-tier-group-count">${esc(nLabel)}</span>
+      </td>
+    </tr>`;
+  }
+
+  function renderVtsrLadderRow(r, elo, opts = {}) {
+    const { noiseSigma = null, showProgress = false } = opts;
+    const band = VTSRDisplay.bandFor(r);
+    const bandTip = band.provisional
+      ? `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`
+      : `${band.label}. ${VTSRDisplay.BAND_EXPLAINER}`;
+    const badge = VTSRDisplay.bandChipHtml(band, { title: bandTip });
+    const bar = VTSRDisplay.positionBarHtml(r, noiseSigma, { band, compact: true });
     const lastDelta = r.last_delta || 0;
-    const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
-    const lastSign  = lastDelta > 0 ? '+' : '';
     const rowKey = vtsrRowKey(r);
     const detailId = `vtsr-detail-${rowKey}`;
     const expanded = expandedVtsrRows.has(rowKey);
@@ -868,39 +649,24 @@
       ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T.`
       : 'No decided rated matches';
 
-    const vtsrValueStr = (!preview && noiseSigma != null)
-      ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
-      : `${Math.round(r.vtsr)} ${ratingLabel}`;
-    let vtsrTip;
-    if (!preview) {
-      vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
-    } else if (winsOnly) {
-      vtsrTip = `${Math.round(r.vtsr)} on the wins ladder. The axes are off, so this is not the published VTSR-T. Published performance rating ${Math.round(r.thug_elo || r.vtsr)}.`;
-    } else {
-      const pct = Math.round(alpha * 100);
-      vtsrTip = `${Math.round(r.vtsr)} wins-weighted preview: ${pct}% wins ladder, ${100 - pct}% performance. Not the published VTSR-T. Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)}.`;
-    }
+    const verdict = VTSRDisplay.deltaVerdict(lastDelta);
+    const lastTip = r.last_match_id
+      ? `${verdict ? verdict.label : 'No change'} in match ${r.last_match_id}`
+      : 'No rated matches yet';
 
-    let lastTip = (r.last_match_id && lastDelta !== 0)
-      ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
-      : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
-    if (preview) lastTip = `Change in this preview, not the published VTSR-T. ${lastTip}`;
-
+    const peakBand = VTSRDisplay.rawBandFor(r.peak_vtsr || r.vtsr);
     const peakAt = r.peak_at || '';
     const peakTip = peakAt
-      ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} ${preview ? 'of this preview ' : ''}reached at ${peakAt}`
-      : `Peak ${preview ? 'of this preview' : 'rating'}: ${Math.round(r.peak_vtsr || r.vtsr)}`;
+      ? `Highest band reached: ${peakBand ? peakBand.label : ''}, at ${peakAt}`
+      : `Highest band reached: ${peakBand ? peakBand.label : ''}`;
 
-    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} ${ratingLabel} \u00b7 excludes matches with <6 players or <4 min duration`;
+    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} \u00b7 excludes matches with <6 players or <4 min duration`;
 
     const detailHtml = buildVtsrDetailPanel(r, careerRow);
-    const progressChip = rank == null ? vtsrProgressChipHtml(r, elo) : '';
-    const rankCell = rank == null
-      ? '<td class="text-muted">\u2014</td>'
-      : `<td class="text-muted">${rank}</td>`;
+    const progressChip = showProgress ? vtsrProgressChipHtml(r, elo) : '';
+    const colSpan = 10;
 
     return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
-      ${rankCell}
       <td class="vt-vtsr-expand-col">
         <button type="button" class="vt-row-expand"
                 data-bs-toggle="collapse" data-bs-target="#${detailId}"
@@ -909,32 +675,73 @@
           <i class="bi bi-chevron-right"></i>
         </button>
       </td>
-      <td class="text-center vt-vtsr-tier-col">${badge}</td>
+      <td class="vt-vtsr-tier-col">${badge}</td>
       <td class="fw-semibold"${playerCellAttrs}>${playerLinkHtml(r.name, r.steam64)}${progressChip}</td>
-      <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
+      <td class="vt-vtsr-position-col">${bar}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(winRateTip)}">${winRateStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
-      <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
-      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
+      <td class="text-end">${VTSRDisplay.verdictChipHtml(lastDelta, { title: lastTip })}</td>
+      <td class="text-end">${VTSRDisplay.bandChipHtml(peakBand, { compact: true, title: peakTip })}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
     </tr>
     <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-      <td colspan="${preview ? 10 : 11}">${detailHtml}</td>
+      <td colspan="${colSpan}">${detailHtml}</td>
     </tr>`;
   }
 
+  // Tier groups (1 -> 5, reversed when the Tier column sorts ascending).
+  // On the default band sort each tier splits into Upper / Lower
+  // sub-groups, names A-Z inside each; any other column sort reorders
+  // rows inside the tier group instead.
+  function renderVtsrGroupedRows(ranked, elo, noiseSigma) {
+    const colSpan = 10;
+    const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
+    const bandSort = vtsrSortState.key === 'band';
+
+    const buckets = new Map();
+    for (const r of ranked) {
+      const tier = resolveTier(r.vtsr, r.matches_played);
+      const band = VTSRDisplay.bandFor(r);
+      const id = band.provisional ? 0 : band.tier;
+      const t = id === 0 ? tier : (VTSR_TIERS.find(x => x.id === id) || tier);
+      if (!buckets.has(id)) buckets.set(id, { tier: t, rows: [] });
+      buckets.get(id).rows.push(r);
+    }
+    for (const b of buckets.values()) b.rows.sort(sorter);
+
+    let tierOrder = VTSR_TIERS.map(t => t.id);
+    if (bandSort && vtsrSortState.asc) tierOrder = tierOrder.slice().reverse();
+    if (buckets.has(0)) tierOrder = [...tierOrder, 0];
+
+    const rowHtml = r => renderVtsrLadderRow(r, elo, { noiseSigma, showProgress: false });
+    let html = '';
+    for (const id of tierOrder) {
+      const b = buckets.get(id);
+      if (!b || !b.rows.length) continue;
+      html += vtsrTierGroupHeaderHtml(b.tier, b.rows.length, colSpan);
+      if (bandSort && id !== 0) {
+        const halves = vtsrSortState.asc ? ['lower', 'upper'] : ['upper', 'lower'];
+        for (const half of halves) {
+          const rows = b.rows.filter(r => VTSRDisplay.bandFor(r).half === half);
+          if (!rows.length) continue;
+          html += vtsrHalfGroupHeaderHtml(half === 'upper' ? 'Upper' : 'Lower', rows.length, colSpan);
+          html += rows.map(rowHtml).join('');
+        }
+      } else {
+        html += b.rows.map(rowHtml).join('');
+      }
+    }
+    return html;
+  }
+
   function renderLeaderboard() {
-    syncPreviewChrome();
-    const status = previewStatus();
-    const elo = ratingView === 'wins' ? (winsFiles[winsWeight] || null) : state.elo;
+    const elo = state.elo;
     const $card = document.getElementById('section-vtsr');
     const $empty = document.getElementById('elo-leaderboard-empty');
     if (!$card) return;
 
-    const canonicalReady = state.elo && Array.isArray(state.elo.ratings) && state.elo.ratings.length > 0;
-    const previewShell = ratingView === 'wins' && canonicalReady && status !== 'ready';
-    if ((!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) && !previewShell) {
+    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
       $card.classList.add('d-none');
       if ($empty) $empty.classList.remove('d-none');
       return;
@@ -948,35 +755,25 @@
 
     _vtsrCareerStats = state.careerStats || [];
 
-    const rulesElo = elo || state.elo;
-    const minMatches = vtsrLadderMinMatches(rulesElo);
-    const win = inactivityWindowDays(rulesElo);
-    const need = comebackGamesRequired(rulesElo);
+    const minMatches = vtsrLadderMinMatches(elo);
+    const win = inactivityWindowDays(elo);
+    const need = comebackGamesRequired(elo);
     const $banner = document.getElementById('vtsr-ladder-banner');
     if ($banner) {
       $banner.innerHTML = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
-        Ranked players have at least ${fmt(minMatches)} rated matches and have played within ${fmt(win)} days of the newest match.
+        Players on the ladder have at least ${fmt(minMatches)} rated matches and have played within ${fmt(win)} days of the newest match.
         Returning players rejoin after ${fmt(need)} games. Players with fewer than ${fmt(ELO_PROVISIONAL_THRESHOLD)} still show Provisional.
+        Grouped by tier and half. A label only moves after a clear margin, so one game rarely changes it.
       </div>`;
     }
 
-    if (previewShell) {
-      const tbody = $card.querySelector('#vtsr-table tbody');
-      if (tbody) tbody.innerHTML = '';
-      const $unrankedWrap = document.getElementById('vtsr-unranked-wrap');
-      if ($unrankedWrap) $unrankedWrap.replaceChildren();
-      ensureTooltips($card);
-      return;
-    }
-
-    const alpha = previewAlpha();
-    const ratings = alpha == null ? elo.ratings : withPreviewDeltas(elo.ratings, alpha);
+    const ratings = elo.ratings;
     const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
     const ranked = ratings.filter(r => vtsrLadderEligible(r, elo)).slice().sort(sorter);
     const unranked = ratings.filter(r => !vtsrLadderEligible(r, elo)).slice().sort(sorter);
 
     const tbody = $card.querySelector('#vtsr-table tbody');
-    tbody.innerHTML = ranked.map((r, i) => renderVtsrLadderRow(r, elo, i + 1, noiseSigma)).join('');
+    tbody.innerHTML = renderVtsrGroupedRows(ranked, elo, noiseSigma);
 
     const $unrankedWrap = document.getElementById('vtsr-unranked-wrap');
     if ($unrankedWrap) {
@@ -984,11 +781,14 @@
         const thead = document.querySelector('#vtsr-table thead');
         const theadHtml = thead ? thead.outerHTML : '';
         $unrankedWrap.innerHTML = `<div class="vt-vtsr-unranked">
-          <h6 class="vt-vtsr-unranked-title">Unranked</h6>
-          <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches, and a game within ${fmt(win)} days of the newest match (or ${fmt(need)} games after returning), to join the ladder. No rank is assigned here.</p>
-          <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2${ratingView === 'wins' ? ' vt-vtsr-hide-tier' : ''}" style="font-size: 0.85rem;">
+          <h6 class="vt-vtsr-unranked-title">Not on the ladder yet</h6>
+          <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches, and a game within ${fmt(win)} days of the newest match (or ${fmt(need)} games after returning), to appear on the ladder.</p>
+          <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
             ${theadHtml}
-            <tbody>${unranked.map(r => renderVtsrLadderRow(r, elo, null, noiseSigma)).join('')}</tbody>
+            <tbody>${unranked.map(r => renderVtsrLadderRow(r, elo, {
+              noiseSigma,
+              showProgress: true,
+            })).join('')}</tbody>
           </table>
         </div>`;
       } else {
@@ -1017,7 +817,7 @@
       th.style.cursor = 'pointer';
       th.onclick = () => {
         if (vtsrSortState.key === th.dataset.sort) vtsrSortState.asc = !vtsrSortState.asc;
-        else { vtsrSortState.key = th.dataset.sort; vtsrSortState.asc = false; }
+        else { vtsrSortState.key = th.dataset.sort; vtsrSortState.asc = th.dataset.sort === 'name'; }
         renderLeaderboard();
       };
     });
@@ -1085,8 +885,12 @@
       const dCls = d > 0 ? 'vt-vtsr-delta-positive' : d < 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
       const th = duel.team_handicap || {};
       const myThugDiff = (th.diff != null) ? (side === 1 ? th.diff : -th.diff) : null;
-      const thugTip = myThugDiff == null ? ''
-        : `Their thug team averaged ${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)} VTSR-T vs the opponent's — the expected score already discounts/credits this.`;
+      const ce = state.cmdrElo || {};
+      const thugShift = myThugDiff == null ? null
+        : VTSRDisplay.gapToWinShift(myThugDiff, ce.lambda_team_handicap, ce.logistic_scale);
+      const thugShiftStr = thugShift == null ? '\u2014' : VTSRDisplay.winShiftText(thugShift);
+      const thugTip = thugShift == null ? ''
+        : `How much this commander's thugs, compared with the opponent's, moved the win chance on their own (${thugShiftStr}). The expected score already credits or discounts this.`;
       const telem = (duel.performance || {}).available
         ? `<span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
              title="This match carried proto v4 economy telemetry — its econ composite is recorded (inert while \u03b1_c = 1).">v4</span>`
@@ -1105,7 +909,7 @@
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
             title="Pre-match win probability from rating + team-strength handicap.">${((me.expected || 0) * 100).toFixed(0)}%</td>
         <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top"
-            title="${esc(thugTip)}">${myThugDiff == null ? '\u2014' : `${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)}`}</td>
+            title="${esc(thugTip)}">${thugShiftStr}</td>
       </tr>`;
     }).join('');
 
@@ -1169,7 +973,7 @@
             <th class="text-end">\u0394</th>
             <th class="text-end">Expected</th>
             <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                title="Their thug team's mean VTSR-T advantage in that match (the handicap input).">Thug \u0394</th>
+                title="How much this commander's thugs moved the win chance compared with the opponent's (the handicap input).">Thug edge</th>
           </tr></thead>
           <tbody>${duelRows}</tbody>
         </table>
@@ -1559,31 +1363,34 @@
     }
     const blendBlock = E.blendBlockHtml() || '';
     const sigma = ratingNoiseSigma();
-    const noiseSection = sigma != null
+      const noiseSection = sigma != null
       ? `<section class="vt-vtsr-doc-section">
            <h6>How close is too close to call?</h6>
            <p class="mb-0">Two players within roughly <strong>${sigma} points</strong> of each
-           other are basically tied &mdash; tier placement is meaningful, exact rank inside
-           a tier mostly isn&rsquo;t. The gap that matters shrinks as more matches get recorded.
+           other are basically tied, and one game moves a rating by 10 to 25 points. That is
+           why the site never shows the number: you see a band instead (a tier and its Upper or
+           Lower half), and a label only moves after a clear margin.
+           The gap that matters shrinks as more matches get recorded.
            <span class="text-muted small">(That figure comes from recomputing every rating on
            random subsets of the matches and measuring the wobble &mdash; the full numbers live
            on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.)</span></p>
          </section>`
       : '';
+    const formLead = `VTSR-T is your <strong>thug form</strong>. Each game it grades damage traded, kills, base and scav damage, and map coverage against the people in that lobby. You go up when that grade beats what your current rating predicted, and down when it falls short; each game reads as <strong>Beat expectation</strong>, <strong>On par</strong> or <strong>Below expectation</strong>. Winning the game does not move it; commanders have their own win rating, VTSR-C. The site shows VTSR-T as a band, never a number. Under the hood everyone starts at <strong>1500</strong>. Walk through the formula:`;
     pane.innerHTML = `<div class="vt-elo-doc">
       <section class="vt-vtsr-doc-section">
         <h6>The one formula</h6>
-        <p class="mb-1">VTSR-T is an <strong>ELO rating</strong> &mdash; the same idea as a chess rating. Everyone starts at <strong>1500</strong>, and after every match one formula decides how your number moves. Walk through it:</p>
+        <p class="mb-1">${formLead}</p>
         ${deltaBlock}
         <p class="mb-0 mt-2 text-muted small">Losses sting a little less than wins reward, and your rating never drops below <strong>1000</strong>.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>The published rating: two dials</h6>
-        <p class="mb-1">Under the hood, the number on the leaderboard is a <strong>mix of two ratings</strong> &mdash; one for raw match performance and one for wins &mdash; with a knob that decides the blend:</p>
+        <p class="mb-1">Under the hood, the rating behind your band is a <strong>mix of two ratings</strong> &mdash; one for raw match performance and one for wins &mdash; with a knob that decides the blend:</p>
         ${blendBlock}
-        <p class="mb-2 mt-2 text-muted small">The Wins dial isn&rsquo;t a placeholder &mdash; it&rsquo;s a real win/loss ladder that updates on every match with a verified outcome, and each player&rsquo;s value shows in the leaderboard&rsquo;s rating tooltip. What&rsquo;s off is the <strong>mixer</strong>.</p>
-        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. Early recordings often had no provable winner, which kept that wins sample small for a long time (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab); newer matches are signed off, so the gap is closing. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result. The leaderboard can still preview a 10%, 25%, or 50% mix, or the wins ladder with the axes turned off. None of those previews is the published number.</p>
+        <p class="mb-2 mt-2 text-muted small">The Wins dial isn&rsquo;t a placeholder &mdash; it&rsquo;s a real win/loss ladder that updates on every match with a verified outcome. What&rsquo;s off is the <strong>mixer</strong>.</p>
+        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. Early recordings often had no provable winner, which kept that wins sample small for a long time (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab); newer matches are signed off, so the gap is closing. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -1594,7 +1401,8 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible in the Unranked table.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. To appear on the ladder requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible under <strong>Not on the ladder yet</strong>.</p>
+        <p class="mb-2">Each tier splits at its midpoint into an <strong>Upper</strong> and a <strong>Lower</strong> half, and that band is what every page shows. A label only moves after the rating clears the line by <strong>${fmt((window.VTSRDisplay && VTSRDisplay.config.buffer_pts) || 20)} points</strong>, so one noisy game rarely flips it. That margin applies to tier lines too, so a player who dips just under a line keeps their tier until the drop is clear.</p>
         ${E.tierTableHtml()}
       </section>
 
@@ -2017,7 +1825,7 @@
     </div>`;
 
     pane.innerHTML = `<div class="vt-elo-doc" style="max-width: 1100px;">
-      <p class="mb-3">Every ELO update, we <strong>re-validate</strong> the results to give you the latest effectiveness and prediction accuracy.</p>
+      <p class="mb-3">Every rating update, we <strong>re-validate</strong> the results to give you the latest effectiveness and prediction accuracy.</p>
       <div class="vt-elo-statgrid">${cards}</div>
       ${funnelHtml}
       ${gapHtml}
@@ -2138,44 +1946,10 @@
   // Boot.
   // ----------------------------------------------------------------------
 
-  function bindRatingToggle() {
-    const perfBtn = document.getElementById('vtsr-rating-performance');
-    const winsBtn = document.getElementById('vtsr-rating-wins');
-    const weights = document.getElementById('vtsr-weight-toggle');
-    if (perfBtn) {
-      perfBtn.addEventListener('click', () => {
-        if (ratingView === 'performance') return;
-        ratingView = 'performance';
-        writeRatingUrl();
-        renderLeaderboard();
-      });
-    }
-    if (winsBtn) {
-      winsBtn.addEventListener('click', () => {
-        if (ratingView === 'wins') return;
-        showWinsPreview(winsWeight);
-      });
-    }
-    if (weights) {
-      weights.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-wins-weight]');
-        if (!btn) return;
-        const w = Number(btn.dataset.winsWeight);
-        if (ratingView === 'wins' && w === winsWeight) return;
-        showWinsPreview(w);
-      });
-    }
-  }
-
   async function boot() {
     // Orphaned v2.7 thug-only key — the toggle is gone; drop it so a
     // returning user never carries a stale pref that nothing reads.
     try { localStorage.removeItem('vt.elo_mode'); } catch { /* private mode / storage blocked */ }
-
-    const parsedRating = readRatingFromUrl();
-    ratingView = parsedRating.view;
-    if (parsedRating.view === 'wins') winsWeight = parsedRating.weight;
-    bindRatingToggle();
 
     // "How It's Calculated" on the leaderboard card switches to the
     // How-it-works pill (no modal on this page — the tab IS the modal).
@@ -2200,9 +1974,7 @@
       });
     }
 
-    // Core data, all in parallel + 404-safe. A wins deep link fetches
-    // its side file in the same batch so the first paint is that preview.
-    const winsBoot = ratingView === 'wins' ? ensureWinsFile(winsWeight) : Promise.resolve(null);
+    // Core data, all in parallel + 404-safe.
     const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
@@ -2211,8 +1983,8 @@
       fetchJson(`${DATA}match_contributions.json`),
       fetchJson(`${DATA}elo_commander_current.json`),
       fetchJson(`${DATA}elo_commander_history.json`),
-      winsBoot,
     ]);
+    if (window.VTSRDisplay) VTSRDisplay.setConfig(elo);
     state.elo = elo;
     state.eloHistory = eloHistory;
     state.slugMap = slugMap;
@@ -2234,7 +2006,6 @@
       }
     }
 
-    if (parsedRating.dirty) writeRatingUrl();
     renderLeaderboard();
     // The thug table is always built. The commander ladder is built now
     // only when this visit lands on it; any other pane still lazy-renders
@@ -2246,25 +2017,11 @@
 
     // Deep links (?tab=...) boot straight into the right pane.
     activateTabFromUrl();
+    stripLegacyRatingParams();
     window.addEventListener('popstate', () => {
       historyWrites++;
       try {
         activateTabFromUrl();
-        const next = readRatingFromUrl();
-        const prevView = ratingView;
-        const prevWeight = winsWeight;
-        ratingView = next.view;
-        if (next.view === 'wins') winsWeight = next.weight;
-        if (prevView !== ratingView || (ratingView === 'wins' && prevWeight !== winsWeight)) {
-          const viewNow = ratingView;
-          const weightNow = winsWeight;
-          if (viewNow === 'wins') {
-            ensureWinsFile(weightNow).then(() => {
-              if (ratingView === 'wins' && winsWeight === weightNow) renderLeaderboard();
-            });
-          }
-          renderLeaderboard();
-        }
       } finally { historyWrites--; }
     });
   }

@@ -584,11 +584,13 @@
     if (!modalEl || !bodyMEl || !footerMEl) return;
 
     const lobbyNick = winner.lobbyNick ? `<div class="vt-tools-wheel-result-nick text-secondary small mt-1">aka <code>${escapeHtml(winner.lobbyNick)}</code></div>` : '';
-    const tier = winner.tier ? `<span class="vt-tools-wheel-result-tier badge">T${winner.tier}</span>` : '';
+    const tier = '';
     const provisional = winner.isProvisional
       ? `<span class="vt-tools-wheel-result-provisional badge ms-2" title="VTSR is provisional / anchored">${winner.isCustom ? 'custom' : 'provisional'}</span>`
       : '';
-    const vtsr = Number.isFinite(winner.vtsr) ? `<div class="vt-tools-wheel-result-vtsr text-secondary small mt-1">VTSR-T <strong>${Math.round(winner.vtsr)}</strong></div>` : '';
+    const vtsr = (winner.band && window.VTSRDisplay)
+      ? `<div class="vt-tools-wheel-result-vtsr text-secondary small mt-1">VTSR-T ${VTSRDisplay.bandChipHtml(winner.band, { bsTooltip: false })}</div>`
+      : '';
 
     const steamLink = winner.steamProfileUrl
       ? `<a class="btn btn-outline-secondary btn-sm" href="${escapeHtml(winner.steamProfileUrl)}" target="_blank" rel="noopener noreferrer">

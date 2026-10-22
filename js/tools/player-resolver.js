@@ -95,6 +95,8 @@
 
   const SITE_URL = 'https://vtstats.bz';
   const PROVISIONAL_ANCHOR_VTSR = 1500;
+  // Mirrors ELO_PROVISIONAL_THRESHOLD in scripts/elo.py.
+  const PROVISIONAL_THRESHOLD = 10;
 
   // ---------------------------------------------------------------- State
 
@@ -166,6 +168,7 @@
       console.warn('[player-resolver] failed to load elo_current.json (rating-blind mode)');
       return;
     }
+    if (window.VTSRDisplay) VTSRDisplay.setConfig(data);
     eloMeta = {
       schema_version: data.schema_version,
       anchor: data.anchor || PROVISIONAL_ANCHOR_VTSR,
@@ -286,8 +289,11 @@
 
   // ---------------------------------------------------------------- Resolution
 
-  function resolveTier(vtsr) {
+  // Raw tier for a VTSR-T value; null when unknown or (with `matches`)
+  // still provisional, so callers render the "?" chip.
+  function resolveTier(vtsr, matches) {
     if (!Number.isFinite(vtsr)) return null;
+    if (Number.isFinite(matches) && matches < PROVISIONAL_THRESHOLD) return null;
     if (vtsr >= 1800) return 1;
     if (vtsr >= 1650) return 2;
     if (vtsr >= 1500) return 3;
@@ -370,6 +376,12 @@
     const matchesAsCmdr = eloEntry && Number.isFinite(eloEntry.matches_as_commander) ? eloEntry.matches_as_commander : 0;
     const matchesAsThug = eloEntry && Number.isFinite(eloEntry.matches_as_thug) ? eloEntry.matches_as_thug : 0;
     const cmdrShare = matchesPlayed > 0 ? matchesAsCmdr / matchesPlayed : 0;
+    // Displayed VTSR-T band (sticky, from the pipeline); null when the
+    // player has no rating, so the UI shows "?".
+    const band = (eloEntry && window.VTSRDisplay) ? VTSRDisplay.bandFor(eloEntry) : null;
+    const tier = band
+      ? (band.provisional ? null : band.tier)
+      : (eloEntry ? resolveTier(vtsr, matchesPlayed) : null);
 
     return {
       steam64: id,
@@ -395,7 +407,8 @@
       matchesAsCmdr,
       matchesAsThug,
       cmdrShare,
-      tier: resolveTier(vtsr),
+      tier,
+      band,
       cmdrHint: resolveCmdrHint(matchesAsCmdr, cmdrShare),
       isProvisional,
       isUnknown,
@@ -431,7 +444,8 @@
       matchesAsCmdr: 0,
       matchesAsThug: 0,
       cmdrShare: 0,
-      tier: resolveTier(PROVISIONAL_ANCHOR_VTSR),
+      tier: null,
+      band: null,
       cmdrHint: null,
       isProvisional: true,
       isUnknown: false,

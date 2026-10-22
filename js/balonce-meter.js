@@ -747,6 +747,25 @@
     };
   }
 
+  // Thug-team strength shown as its effect on win chance, never as a
+  // VTSR-T number: the same logistic as computeWinProb with the
+  // commander term removed.
+  function thugWinShift(thugGap, consts) {
+    const lambda = isNum(consts.lambda) ? consts.lambda : 1;
+    const scale = isNum(consts.scale) && consts.scale > 0 ? consts.scale : 400;
+    return 1 / (1 + Math.pow(10, -(lambda * thugGap) / scale)) - 0.5;
+  }
+
+  function thugEdgePartHtml(joined, thugGap, consts) {
+    const shift = thugWinShift(thugGap, consts);
+    const pct = Math.round(Math.abs(shift) * 100);
+    const label = pct === 0
+      ? 'Thugs: even'
+      : `Thugs: ${esc(teamPhrase(joined, shift > 0 ? 1 : 2))} +${pct}%`;
+    return `<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="How much the two thug teams alone tilt the prediction, as win chance. Each side's thugs are rated going into the match; commanders are left out.">${label}</span>`;
+  }
+
   // ---- Zone 1: pre-match -------------------------------------------
   // Ratings live on the team panels (rosterRatings). This strip is the
   // gauge, the favored line, and the two gap chips.
@@ -769,8 +788,7 @@
         title="Commander rating gap (VTSR-C), team 1 minus team 2. The dominant term in the prediction.">Cmdr gap <span class="vt-mono">${fmtSigned(cmdrGap)}</span></span>`);
     }
     if (isNum(thugGap)) {
-      parts.push(`<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Thug-team strength gap (mean VTSR-T), team 1 minus team 2, weighted at lambda = ${consts.lambda}.">Thug gap <span class="vt-mono">${fmtSigned(thugGap)}</span></span>`);
+      parts.push(thugEdgePartHtml(joined, thugGap, consts));
     }
 
     const headline = fav.team
@@ -942,13 +960,15 @@
       .slice()
       .sort((x, y) => Math.abs(y.would_delta) - Math.abs(x.would_delta))
       .map((d) => {
-        const cls = d.would_delta > 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative';
+        const verdict = window.VTSRDisplay
+          ? VTSRDisplay.verdictChipHtml(d.would_delta, { bsTooltip: false, title: '' })
+          : '';
         return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-          title="What this player\u2019s VTSR-T would have done had the match been rated. It was not \u2014 their rating is unchanged.">
+          title="How this player\u2019s game would have read had the match been rated. It was not \u2014 their rating is unchanged.">
           ${playerLinkHtml(d.name, d.steam64)}${d.is_commander
             ? ' <span class="vt-balonce-cmdr-chip">CMDR</span>'
             : ''}
-          <span class="${cls} vt-mono">${fmtSigned(d.would_delta, 1)}</span></span>`;
+          ${verdict}</span>`;
       }).join('');
 
     return `
@@ -958,7 +978,7 @@
         </div>
         <div class="vt-balonce-whatif-note">
           The result was lost, but the whole game was still recorded. This is
-          what the 5-axis composite measured over those
+          what the 4-axis composite measured over those
           ${Math.round((joined.match.duration_sec || 0) / 60)} minutes \u2014
           measured, never applied.
         </div>
@@ -970,7 +990,7 @@
           <div class="vt-balonce-sub">Who was winning each axis</div>
           ${axisHtml}
         </div>` : ''}
-        ${movers ? `<div class="vt-balonce-sub">VTSR-T that would have moved</div>
+        ${movers ? `<div class="vt-balonce-sub">How each game would have read</div>
           <div class="vt-balonce-chiprow">${movers}</div>` : ''}
       </div>`;
   }

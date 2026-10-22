@@ -506,7 +506,7 @@
                     <i class="bi bi-graph-up-arrow me-1"></i>VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR-T Change</strong><br>Rating gained or lost from this match.<br>Same number that drives the &lsquo;Last&rsquo; column on the All Matches VTSR-T leaderboard.<br>&mdash; if the match was excluded (&lt;6 players or &lt;5 min)."></i>
+                       title="<strong>VTSR-T this game</strong><br>How this match went against what the player&rsquo;s rating expected: Beat expectation, On par, or Below expectation.<br>&mdash; if the match was excluded (&lt;6 players or &lt;5 min)."></i>
                   </th>
                   <th data-sort="asset_dealt" class="text-end">
                     Unit Dmg
@@ -1196,28 +1196,8 @@
                 <tr>
                   <th class="vt-career-col-shared">#</th>
                   <th class="vt-career-col-shared" data-sort="name">Player</th>
-                  <!-- Tier career column hidden to de-emphasize ratings.
-                       Restore by uncommenting this <th> AND re-adding the matching
-                       ${tierCell} body cell in js/app.js renderCareerTable(). -->
-                  <!--
-                  <th class="text-center vt-career-col-shared" data-sort="tier">
-                    Tier
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Tier</strong><br>VTSR-T-driven 5-tier classification: Tier 1 (>=1800), Tier 2 (1650-1799), Tier 3 (1500-1649, anchor), Tier 4 (1350-1499), Tier 5 (1000-1349, wide band). Provisional badge for players with fewer than 10 rated matches."></i>
-                  </th>
-                  -->
-                  <!-- VTSR-T career column hidden to de-emphasize ratings.
-                       Restore by uncommenting this <th> AND re-adding the matching
-                       ${vtsrCell} body cell in js/app.js renderCareerTable(). -->
-                  <!--
-                  <th data-sort="vtsr" class="text-end vt-career-col-shared">
-                    VTSR-T
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug)<br>Fine-tuned combat ELO (four-axis thug composite), anchored at 1500, soft floor at 1000. With Wins blend &alpha;=0 this equals the headline rating; full methodology in the VTSR-T Leaderboard card above."></i>
-                  </th>
-                  -->
+                  <!-- No Tier / VTSR-T career columns: VTSR-T renders as a band,
+                       never as a number, and the Career Leaderboard leaves it out. -->
                   <!-- Team column removed from the All Matches Career Leaderboard:
                        team is a per-match attribute, not a meaningful career-wide value. -->
                   <th data-sort="matches_played" class="text-end vt-career-col-shared">Matches</th>
@@ -1363,10 +1343,10 @@
           </div>
         </div>
         <!-- Career Highlights — sibling of the per-match Match Highlights
-             card. 24 cards: 12 career-rolled (career_*) plus 12 cross-
-             match-only (the_champion, the_veteran, etc.). Built client-side
+             card. 23 cards: 12 career-rolled (career_*) plus 11 cross-
+             match-only (the_veteran, the_workhorse, etc.). Built client-side
              by buildCareerHighlights() in js/all-matches-aggregator.js
-             from career_stats / commander_stats / faction_stats / ELO. -->
+             from career_stats / commander_stats / faction_stats. -->
         <div class="card mb-4 vt-highlights-card d-none" id="section-career-highlights">
           <div class="card-header"><h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Career Highlights</h5></div>
           <div class="card-body">
@@ -1384,7 +1364,7 @@
              Populated by renderVtsrTeaser() in js/app.js. -->
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
+            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Ladder</h5>
             <div class="d-flex align-items-center gap-1 flex-wrap">
               <button type="button" class="btn btn-sm vt-vtsr-info-btn"
                       id="vtsr-methodology-btn"
@@ -1400,9 +1380,9 @@
             <div id="vtsr-teaser-inactive" class="vt-vtsr-teaser-inactive d-none"></div>
             <div class="vt-vtsr-teaser-footer">
               <a href="elo/?tab=vtsr-t" class="btn btn-sm btn-primary">
-                <i class="bi bi-trophy me-1"></i>View full leaderboard
+                <i class="bi bi-trophy me-1"></i>View full ladder
               </a>
-              <span class="text-muted small">Sortable table, per-player breakdowns, methodology &amp; rating accuracy live on the ELO page.</span>
+              <span class="text-muted small">Tier-grouped ladder, per-player breakdowns, methodology &amp; rating accuracy live on the ELO page.</span>
             </div>
           </div>
         </div>
@@ -1615,7 +1595,7 @@
             </div>
           </div>
           <div class="card-body">
-            <p class="text-muted small">Who has faced stronger or weaker opposition. The default bar is average opposing thug VTSR-T, measured from a typical schedule in this view. Harder schedules sit to the right. Choosing another numeric column header redraws the bar from that column. Thug gap is own thugs minus opposing thugs, with that player left out of their own side. On the chart, a gap below zero points right, because opposing thugs were stronger. Recorded games use the rating from that day. Community games use each opponent's rating today. The list starts as the ranked ladder for that pill. This is the full corpus. The match picker does not change it.</p>
+            <p class="text-muted small">Who has faced stronger or weaker opposition. The default bar is how much the opposing thugs cost in win chance, measured against a typical schedule in this view. Harder schedules sit to the right. Choosing another column header redraws the bar from that column. Thug gap is how much own thugs moved the win chance against opposing thugs, with that player left out of their own side. On the chart, a negative gap points right, because opposing thugs were stronger. VTSR-T shows as win chance or a band, never as a number; VTSR-C keeps its numbers. Recorded games use the rating from that day. Community games use each opponent's rating today. The list starts as the ranked ladder for that pill. This is the full corpus. The match picker does not change it.</p>
             <div class="vt-players-schedule-scroll">
               <div class="chart-container" id="vt-players-schedule-chart-wrap">
                 <canvas id="vt-players-schedule-chart"></canvas>
@@ -1628,8 +1608,8 @@
                   <tr>
                     <th data-vt-sort="name">Player</th>
                     <th data-vt-sort="matches" class="text-end">Matches</th>
-                    <th data-vt-sort="oppThug" class="text-end is-sorted">Opp. thug VTSR-T</th>
-                    <th data-vt-sort="gap" class="text-end">Thug gap</th>
+                    <th data-vt-sort="oppThug" class="text-end is-sorted" title="Win chance against a typical schedule: negative means the opposing thugs were stronger than usual">Opp. thugs</th>
+                    <th data-vt-sort="gap" class="text-end" title="Win chance from own thugs against opposing thugs">Thug gap</th>
                     <th data-vt-sort="oppCmdr" class="text-end">Opp. cmdr VTSR-C</th>
                     <th data-vt-sort="own" class="text-end" id="vt-players-own-heading">Current VTSR-C</th>
                   </tr>
@@ -1680,7 +1660,7 @@
                 <canvas id="vt-players-thug-chart"></canvas>
               </div>
               <p class="text-muted small d-none" id="vt-players-thug-empty">No determined thug games in this format.</p>
-              <p class="text-muted small mb-0 mt-2"><span class="vt-players-thin-mark" aria-hidden="true"></span> A hollow bar is a quarter with one or two games. The line is the rating at the end of that quarter. VTSR-C moves on community duels. VTSR-T holds through a quarter that is only community games. Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>.</p>
+              <p class="text-muted small mb-0 mt-2"><span class="vt-players-thin-mark" aria-hidden="true"></span> A hollow bar is a quarter with one or two games. The line is the rating at the end of that quarter (VTSR-T on a tier axis). VTSR-C moves on community duels. VTSR-T holds through a quarter that is only community games. Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>.</p>
             </div>
           </div>
         </div>
@@ -2395,6 +2375,7 @@
   <!-- Per-match Elo tab renderer (window.VTMatchElo). Depends on
        charts.js globals (activeCharts / glassTooltipConfig / getThemeColors)
        so it loads after it, before app.js. -->
+  <script src="js/vtsr-display.js"></script>
   <script src="js/match-elo.js"></script>
   <!-- Balonce Meter: shared win-probability model (VTSR-C commander gap +
        thug VTSR-T handicap) + the per-match Outcome-card read

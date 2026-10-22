@@ -1180,13 +1180,6 @@
     flex-grow: 1;
 }
 
-.vt-tools-balonce-team-sum {
-    font-weight: 700;
-    color: var(--kb-primary);
-    font-size: 0.78rem;
-    font-feature-settings: "tnum" 1;
-}
-
 .vt-tools-balonce-team-header-disadv {
     font-size: 0.58rem;
     font-weight: 700;
@@ -1272,12 +1265,16 @@
 }
 
 .vt-tools-balonce-row-tier {
-    font-size: 0.68rem;
-    font-weight: 700;
-    color: var(--kb-primary);
-    background-color: color-mix(in oklab, var(--kb-primary) 16%, transparent);
-    padding: 0.12em 0.45em;
-    border-radius: 4px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+.vt-tools-balonce-row-tier .vt-tier-badge,
+.vt-tools-picker-card-tier .vt-tier-badge,
+.vt-tools-picker-cart-row-tier .vt-tier-badge {
+    min-width: 1.7rem;
+    font-size: 0.66rem;
+    padding: 0.05rem 0.35rem;
 }
 
 .vt-tools-balonce-row-provisional {
@@ -1300,13 +1297,6 @@
     font-style: italic;
     text-transform: lowercase;
     letter-spacing: 0.02em;
-}
-
-.vt-tools-balonce-row-vtsr {
-    font-feature-settings: "tnum" 1;
-    color: var(--kb-text-secondary);
-    font-size: 0.82rem;
-    font-weight: 600;
 }
 
 /* Session-ignored spectators. Sits under the team columns; chips are
@@ -1429,8 +1419,8 @@
 }
 
 /* Commander row carries BOTH ratings: this chip is the VTSR-C (the one
-   in the prediction); the trailing `.vt-tools-balonce-row-vtsr` number
-   is their thug VTSR-T, shown for context only. */
+   in the prediction); the band chip beside it is their thug VTSR-T,
+   shown for context only. */
 .vt-tools-balonce-row-cmdrelo {
     flex-shrink: 0;
     font-feature-settings: "tnum" 1;

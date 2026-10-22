@@ -72,17 +72,22 @@
     pillar:  { min: 40, label: 'Zoner (40+)' },
   };
 
-  // Sort comparators keyed by select value. Each returns -1/0/1
-  // (descending by intent — UI label says "highest first" for sane
-  // defaults so we return negative when `a` is "higher").
+  // Sort comparators keyed by select value. VTSR-T is never a sort key
+  // (it is shown as a band, not a number); VTSR-C is, because it is a
+  // win/loss rating. Players without a VTSR-C rating sort last.
+  const byName = (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase());
   const SORT_COMPARATORS = {
-    'vtsr-desc':    (a, b) => safeNum(b.vtsr) - safeNum(a.vtsr),
-    'vtsr-asc':     (a, b) => safeNum(a.vtsr) - safeNum(b.vtsr),
-    'peak-desc':    (a, b) => safeNum(b.peak_vtsr) - safeNum(a.peak_vtsr),
-    'matches-desc': (a, b) => safeNum(b.matches_played) - safeNum(a.matches_played),
-    'last-desc':    (a, b) => String(b.last_match_id || '').localeCompare(String(a.last_match_id || '')),
-    'name-asc':     (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()),
+    'name-asc':     byName,
+    'vtsrc-desc':   (a, b) => {
+      const ha = Number.isFinite(a.vtsr_c), hb = Number.isFinite(b.vtsr_c);
+      if (ha !== hb) return ha ? -1 : 1;
+      if (ha && a.vtsr_c !== b.vtsr_c) return b.vtsr_c - a.vtsr_c;
+      return byName(a, b);
+    },
+    'matches-desc': (a, b) => (safeNum(b.matches_played) - safeNum(a.matches_played)) || byName(a, b),
+    'last-desc':    (a, b) => String(b.last_match_id || '').localeCompare(String(a.last_match_id || '')) || byName(a, b),
   };
+  const DEFAULT_SORT = 'name-asc';
 
   function safeNum(v) { return Number.isFinite(+v) ? +v : 0; }
 
@@ -170,7 +175,7 @@
     if (state.filters.activity && state.filters.activity !== 'active') {
       params.set('activity', state.filters.activity);
     }
-    if (state.filters.sort && state.filters.sort !== 'vtsr-desc') params.set('sort', state.filters.sort);
+    if (state.filters.sort && state.filters.sort !== DEFAULT_SORT) params.set('sort', state.filters.sort);
   }
 
   function syncDirectoryUrl(mode) {
@@ -217,7 +222,7 @@
     paintChipGroup(dom.activityChips, 'activity', state.filters.activity);
 
     const sort = params.get('sort');
-    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : 'vtsr-desc';
+    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : DEFAULT_SORT;
     if (dom.sortSelect) dom.sortSelect.value = state.filters.sort;
 
     if (!writesSuppressed()) syncDirectoryUrl('replace');
@@ -311,7 +316,7 @@
       tiers:     new Set(),    // Set<number>; empty = all
       role:      'any',
       activity:  'active',
-      sort:      'vtsr-desc',
+      sort:      DEFAULT_SORT,
     },
     compareMode: false,
     selection:   new Set(),    // Set<steam64-string>
@@ -330,14 +335,6 @@
     }
     const t = VTSR_TIERS.find(x => vtsr >= x.min && vtsr < x.max) || VTSR_TIERS[VTSR_TIERS.length - 1];
     return { ...t, provisional: false };
-  }
-
-  function tierBadgeHtml(vtsr, matchesPlayed) {
-    const t = resolveTier(vtsr, matchesPlayed);
-    if (t.provisional) {
-      return `<span class="vt-vtsr-provisional" title="Provisional — fewer than ${ELO_PROVISIONAL_THRESHOLD} rated matches">?</span>`;
-    }
-    return `<span class="vt-tier-badge vt-tier-${t.id}" title="${t.label}">${t.short}</span>`;
   }
 
   function commanderShare(rating) {
@@ -429,10 +426,6 @@
     if (m === 0) return h + 'h';
     return h + 'h ' + m + 'm';
   }
-  function formatVtsr(n) {
-    if (!Number.isFinite(n)) return '\u2014';
-    return (Math.round(n * 10) / 10).toFixed(0);
-  }
   function escapeHtml(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -474,10 +467,18 @@
     for (const c of (state.careerStats || [])) {
       if (c.steam64) careerBySteam.set(String(c.steam64), c);
     }
+    const cmdrBySteam = new Map();
+    for (const c of ((state.cmdrElo && state.cmdrElo.ratings) || [])) {
+      if (c.steam64) cmdrBySteam.set(String(c.steam64), c);
+    }
     return ratings.map((r) => {
       const c = careerBySteam.get(String(r.steam64)) || null;
+      const cmdr = cmdrBySteam.get(String(r.steam64)) || null;
       return {
         ...r,
+        vtsr_c:           cmdr && Number.isFinite(cmdr.vtsr_c) ? cmdr.vtsr_c : null,
+        vtsr_c_provisional: !!(cmdr && cmdr.provisional),
+        vtsr_c_games:     cmdr ? (cmdr.matches_commanded_rated || 0) : 0,
         career: c,
         primary_ship: c && c.career_loadout && c.career_loadout.primary_ship
           ? c.career_loadout.primary_ship.name
@@ -541,17 +542,22 @@
   // ---- Directory render -------------------------------------------------
 
   function buildHeroStats(rows) {
-    const ranked = rows.filter(r => !r.matches_provisional);
-    const top = ranked.length ? ranked.reduce((a, b) => (safeNum(a.vtsr) > safeNum(b.vtsr) ? a : b)) : null;
-    const dateRange = rangeOfDates((state.elo && state.elo.history_dates) || []);
+    const tierCounts = new Map();
+    for (const r of rows) {
+      const b = VTSRDisplay.bandFor(r);
+      if (!b || b.provisional) continue;
+      tierCounts.set(b.tier, (tierCounts.get(b.tier) || 0) + 1);
+    }
+    const tierPills = VTSR_TIERS
+      .filter(t => tierCounts.get(t.id))
+      .map(t => `<span class="vt-tier-badge vt-tier-${t.id}" title="${t.label}">${t.short}</span><span class="num">${tierCounts.get(t.id)}</span>`)
+      .join(' ');
     return `
       <span class="vt-player-hero-stat">
         <i class="bi bi-people"></i><span class="num">${rows.length}</span><span>players</span>
       </span>
-      <span class="vt-player-hero-stat">
-        <i class="bi bi-trophy"></i><span>Top:</span>
-        <span class="num">${top ? escapeHtml(top.name) : '\u2014'}</span>
-        ${top ? `<span class="num">${formatVtsr(top.vtsr)}</span>` : ''}
+      <span class="vt-player-hero-stat" title="Players per VTSR-T tier">
+        <i class="bi bi-layers"></i>${tierPills || '<span>\u2014</span>'}
       </span>
       <span class="vt-player-hero-stat">
         <i class="bi bi-controller"></i>
@@ -567,7 +573,7 @@
   function buildTierChips() {
     const out = [`<span class="vt-chip-group-label">Tier</span>`];
     for (const t of VTSR_TIERS) {
-      out.push(`<button type="button" class="vt-chip" data-tier="${t.id}" title="${t.label} (${t.min}+)">${t.short}</button>`);
+      out.push(`<button type="button" class="vt-chip" data-tier="${t.id}" title="${t.label}">${t.short}</button>`);
     }
     out.push(`<button type="button" class="vt-chip" data-tier="0" title="Fewer than ${ELO_PROVISIONAL_THRESHOLD} rated matches">?</button>`);
     return out.join('');
@@ -579,8 +585,8 @@
     return rows.filter((r) => {
       if (q && !String(r.name || '').toLowerCase().includes(q)) return false;
       if (f.tiers.size) {
-        const t = resolveTier(safeNum(r.vtsr), safeNum(r.matches_played));
-        if (!f.tiers.has(t.id)) return false;
+        const b = VTSRDisplay.bandFor(r);
+        if (!f.tiers.has(b.provisional ? 0 : b.tier)) return false;
       }
       if (f.role !== 'any') {
         const share = commanderShare(r);
@@ -592,19 +598,26 @@
         if (bucket && safeNum(r.matches_played) < bucket.min) return false;
       }
       return true;
-    }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS['vtsr-desc']);
+    }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS[DEFAULT_SORT]);
+  }
+
+  function vtsrCChipHtml(row) {
+    if (!Number.isFinite(row.vtsr_c)) return '';
+    const prov = row.vtsr_c_provisional;
+    const games = row.vtsr_c_games || 0;
+    const tip = `VTSR-C ${Math.round(row.vtsr_c)}: commander win/loss rating over ${games} rated commander game${games === 1 ? '' : 's'}${prov ? ' (provisional)' : ''}`;
+    return `<span class="vt-player-card-pill vt-player-card-pill--vtsrc${prov ? ' is-provisional' : ''}" title="${escapeHtml(tip)}">
+         <i class="bi bi-shield-fill"></i>C <span class="num">${Math.round(row.vtsr_c)}</span>
+       </span>`;
   }
 
   function renderCard(row) {
-    const t = resolveTier(safeNum(row.vtsr), safeNum(row.matches_played));
+    const band = VTSRDisplay.bandFor(row);
+    const t = { id: band.provisional ? 0 : band.tier };
     const role = roleLabel(row);
     const href = playerHref(row.steam64);
     const selected = state.selection.has(String(row.steam64));
-    const peakHtml = Number.isFinite(row.peak_vtsr) && row.peak_vtsr > 0
-      ? `<span class="vt-player-card-pill vt-player-card-pill--peak" title="Peak VTSR-T">
-           <i class="bi bi-trophy-fill"></i>Peak <span class="num">${formatVtsr(row.peak_vtsr)}</span>
-         </span>`
-      : '';
+    const peakHtml = vtsrCChipHtml(row);
     const shipHtml = row.primary_ship
       ? `<span class="vt-player-card-pill vt-player-card-pill--ship" title="Primary ship (by time)">
            <i class="bi bi-fuel-pump"></i><span>${escapeHtml(row.primary_ship)}</span>
@@ -619,12 +632,11 @@
 
       <div class="vt-player-card-head">
         <div class="vt-player-card-name">${escapeHtml(row.name)}</div>
-        <div class="vt-player-card-tier-wrap">${tierBadgeHtml(safeNum(row.vtsr), safeNum(row.matches_played))}</div>
       </div>
 
       <div class="vt-player-card-rating">
-        <span class="vt-player-card-rating-big">${formatVtsr(row.vtsr)}</span>
-        <span class="vt-player-card-rating-label">VTSR-T</span>
+        ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
+        ${VTSRDisplay.positionBarHtml(row, ratingNoiseSigma(), { band, bsTooltip: false })}
       </div>
 
       <div class="vt-player-card-meta">
@@ -642,9 +654,7 @@
       <div class="vt-player-card-foot">
         <span><span class="num">${formatNumber(row.matches_played)}</span> matches</span>
         ${Number.isFinite(row.last_delta)
-          ? `<span class="${row.last_delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">
-               ${row.last_delta >= 0 ? '+' : ''}${(Math.round(row.last_delta * 10) / 10).toFixed(1)}
-             </span>`
+          ? VTSRDisplay.verdictChipHtml(row.last_delta, { bsTooltip: false, title: 'Last rated game against what the rating expected' })
           : ''}
       </div>
     </a>`;
@@ -778,9 +788,9 @@
     state.filters.tiers.clear();
     state.filters.role = 'any';
     state.filters.activity = 'active';
-    state.filters.sort = 'vtsr-desc';
+    state.filters.sort = DEFAULT_SORT;
     dom.searchInput.value = '';
-    if (dom.sortSelect) dom.sortSelect.value = 'vtsr-desc';
+    if (dom.sortSelect) dom.sortSelect.value = DEFAULT_SORT;
     dom.tierChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
     dom.roleChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.role === 'any' ? 'true' : 'false'));
     dom.activityChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.activity === 'active' ? 'true' : 'false'));
@@ -1027,7 +1037,7 @@
     },
     pve_share: {
       head: 'You\u2019re not doing a lot of damage to non-human stuff.',
-      body: 'This is your damage to enemy non-human assets as a share of your total dealt.\n\n<u>If you are typically someone assigned to hit pools and scavs</u> \u2014 raise your ELO by doing exactly that! For maximum ELO gain, avoid dying as much as possible. Proactively use radar, t-key and your eyes to evade enemies!\n\n<u>If you are a dogfighter/aggressive roleplayer</u> (typical of higher-tier players) \u2014 this metric typically isn\u2019t an actual issue, it\u2019s just a byproduct of the role you play.',
+      body: 'This is your damage to enemy non-human assets as a share of your total dealt.\n\n<u>If you are typically someone assigned to hit pools and scavs</u> \u2014 raise your VTSR-T by doing exactly that! For maximum VTSR-T gain, avoid dying as much as possible. Proactively use radar, t-key and your eyes to evade enemies!\n\n<u>If you are a dogfighter/aggressive roleplayer</u> (typical of higher-tier players) \u2014 this metric typically isn\u2019t an actual issue, it\u2019s just a byproduct of the role you play.',
     },
     mobility: {
       head: 'You\u2019re not moving enough.',
@@ -1035,48 +1045,40 @@
     },
   };
 
-  // Approximate ΔVTSR for a +0.5σ improvement on a given axis. Mirrors
-  // the elo.py update rule at a first-order approximation:
-  //   perf_idx += share[A] * 0.25     (0.5σ pre-clip ≈ +0.25 post-clip)
-  //   ΔVTSR_per_match ≈ perf_idx_delta * rating_scale * K_eff
-  // share[A] is the raw weight divided by the sum, matching elo.py.
-  // K_eff settles around 25 once a player passes the provisional
-  // threshold (K_base=40 attenuated by the matches-played taper). We
-  // surface this as "rough monthly gain" rather than per-match so the
-  // number is more graspable.
-  function quickWinDeltaPerMatch(axisKey) {
+  // Share of the per-match performance grade an axis carries (raw
+  // weight over the sum, matching elo.py's renormalization).
+  function axisWeightShare(axisKey) {
     const weights = (state.elo && state.elo.weights) || {};
     const raw = +weights[axisKey] || 0;
     const total = Object.keys(weights).reduce((s, k) => s + (+weights[k] || 0), 0);
-    const w = total > 0 ? raw / total : 0;
-    const ratingScale = +((state.elo && state.elo.rating_scale) || 2.5);
-    const kEff = 25; // settles here for non-provisional players
-    return w * 0.25 * ratingScale * kEff;
+    return total > 0 ? raw / total : 0;
   }
 
   // ---- Phase 4: Overview tab renderer ----------------------------------
 
   function renderSingle(rating) {
     const role = roleLabel(rating);
-    const t = resolveTier(safeNum(rating.vtsr), safeNum(rating.matches_played));
-    const rankInfo = computeRank(rating);
-    const rankHtml = rankInfo.eligible
-      ? `#${rankInfo.rank} of ${rankInfo.total}`
-      : `Unranked${vtsrProgressChipHtml(rating, state.elo)}`;
+    const band = VTSRDisplay.bandFor(rating);
+    const peakBand = VTSRDisplay.rawBandFor(rating.peak_vtsr || rating.vtsr);
+    const form = recentFormStat(rating);
+    const ladder = ladderStatusStat(rating);
+    const statAttrs = s => (s.title ? ` title="${escapeHtml(s.title)}"` : '');
     dom.singleHero.innerHTML = `
       <div class="vt-player-single-hero-body">
         <div>
           <div class="vt-player-single-tier-row">
-            ${tierBadgeHtml(safeNum(rating.vtsr), safeNum(rating.matches_played))}
-            <span class="text-secondary small">${t.provisional ? 'Provisional' : t.label}</span>
+            <span class="text-secondary small">VTSR-T</span>
             <span class="text-secondary small">&middot;</span>
             <span class="text-secondary small">${role.label}</span>
           </div>
           <h1 class="vt-player-single-name">${escapeHtml(rating.name)}</h1>
-          <div class="vt-player-single-vtsr">${formatVtsr(rating.vtsr)}<span class="vt-player-card-rating-label ms-2">VTSR-T</span></div>
+          <div class="vt-player-single-vtsr">
+            ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
+            ${VTSRDisplay.positionBarHtml(rating, ratingNoiseSigma(), { band, bsTooltip: false })}
+          </div>
           <div class="vt-player-single-peak mt-2">
             <i class="bi bi-trophy-fill" style="color: var(--kb-success);"></i>
-            Peak ${formatVtsr(rating.peak_vtsr)} &middot;
+            Peak ${peakBand && !band.provisional ? escapeHtml(peakBand.label) : '\u2014'} &middot;
             <span class="num">${formatNumber(rating.matches_played)}</span> matches
             (<span class="num">${formatNumber(rating.matches_as_commander)}</span>C /
              <span class="num">${formatNumber(rating.matches_as_thug)}</span>T)
@@ -1096,18 +1098,18 @@
         <div>
           <div class="vt-player-single-stats">
             <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">Last delta</div>
-              <div class="vt-player-single-stat-value ${Number.isFinite(rating.last_delta) && rating.last_delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">
-                ${Number.isFinite(rating.last_delta) ? (rating.last_delta >= 0 ? '+' : '') + (Math.round(rating.last_delta * 10) / 10).toFixed(1) : '\u2014'}
+              <div class="vt-player-single-stat-label">Last game</div>
+              <div class="vt-player-single-stat-value">
+                ${Number.isFinite(rating.last_delta) ? VTSRDisplay.verdictChipHtml(rating.last_delta, { long: true, bsTooltip: false }) : '\u2014'}
               </div>
             </div>
             <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">Career rank</div>
-              <div class="vt-player-single-stat-value">${rankHtml}</div>
+              <div class="vt-player-single-stat-label">${escapeHtml(form.label)}</div>
+              <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(form)}>${form.valueHtml}</div>
             </div>
             <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">Provisional</div>
-              <div class="vt-player-single-stat-value">${rating.matches_provisional ? 'Yes' : 'No'}</div>
+              <div class="vt-player-single-stat-label">${escapeHtml(ladder.label)}</div>
+              <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(ladder)}>${ladder.valueHtml}</div>
             </div>
             <div class="vt-player-single-stat">
               <div class="vt-player-single-stat-label">Last match</div>
@@ -1232,8 +1234,8 @@
                     <th class="vt-matchlog-th text-end" data-sort="kd">K-D</th>
                     <th class="vt-matchlog-th text-end" data-sort="dealt">Dealt</th>
                     <th class="vt-matchlog-th text-end" data-sort="acc">Acc</th>
-                    <th class="vt-matchlog-th text-end" data-sort="delta">&Delta;VTSR</th>
-                    <th class="vt-matchlog-th text-end" data-sort="after">After</th>
+                    <th class="vt-matchlog-th text-end" data-sort="delta" title="How the game went against what the rating expected">Game</th>
+                    <th class="vt-matchlog-th text-end" data-sort="after" title="VTSR-T band after the game">Band after</th>
                     <th class="vt-matchlog-th vt-matchlog-vod" title="YouTube VOD">VOD</th>
                     <th class="vt-matchlog-th"></th>
                   </tr>
@@ -1399,9 +1401,13 @@
     const themeSuccess = getCSSVar('--kb-success')      || '#2ecc71';
     const themeDanger  = getCSSVar('--kb-danger')       || '#e74c3c';
 
-    // Per-point colour: signed delta tint so a glance at the trail
-    // tells you which match was a gain vs a loss.
-    const pointColors = points.map(p => (Number.isFinite(p.delta) && p.delta < 0) ? themeDanger : themeSuccess);
+    // Per-point colour: Beat / On par / Below so a glance at the trail
+    // tells you which games beat expectation.
+    const pointColors = points.map(p => {
+      const v = VTSRDisplay.deltaVerdict(p.delta);
+      if (!v || v.key === 'par') return themeMuted;
+      return v.key === 'beat' ? themeSuccess : themeDanger;
+    });
 
     // Use {x, y} pairs with a linear-scale x-axis (timestamps in
     // milliseconds). Avoids needing a chartjs date adapter vendor
@@ -1447,12 +1453,12 @@
               label: (item) => {
                 const i = item.dataIndex;
                 const p = points[i];
-                const dStr = Number.isFinite(p.delta)
-                  ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(2)}`
-                  : '—';
+                const v = VTSRDisplay.deltaVerdict(p.delta);
+                const b = VTSRDisplay.rawBandFor(p.after);
                 const m = (p.map || '').replace(/\.bzn$/i, '');
                 return [
-                  `Rating: ${p.after.toFixed(0)} (${dStr})`,
+                  `Band: ${b ? b.label : '—'}`,
+                  `Game: ${v ? v.label : '—'}`,
                   `Match: ${m || p.match_id}`,
                 ];
               },
@@ -1487,13 +1493,13 @@
             },
             grid:  { color: 'rgba(255,255,255,0.04)' },
           },
-          y: {
+          y: VTSRDisplay.applyTierAxis({
             beginAtZero: false,
             min: 1000,
-            ticks: { color: themeMuted, stepSize: 100 },
-            grid:  { color: 'rgba(255,255,255,0.05)' },
-            title: { display: true, text: 'VTSR-T', color: themeText },
-          },
+            ticks: { color: themeMuted },
+            grid:  { display: false },
+            title: { display: true, text: 'VTSR-T band', color: themeText },
+          }),
         },
         onClick: (evt, items) => {
           if (!items.length) return;
@@ -1518,7 +1524,7 @@
     });
   }
 
-  // Bootstrap resampling noise sigma (median per-player ±ELO) from
+  // Bootstrap resampling noise sigma (median per-player ±points) from
   // validation_summary.json. null when the file is missing/stale so the
   // band plugin self-disables.
   function ratingNoiseSigma() {
@@ -1612,7 +1618,7 @@
         ctx.arc(x, y, 2, 0, Math.PI * 2);
         ctx.fill();
 
-        const label = `Peak ${peak.after.toFixed(0)}`;
+        const label = 'Peak';
         ctx.font = '600 11px Geist, system-ui, sans-serif';
         const w = ctx.measureText(label).width + 10;
         const labelX = Math.min(x + 8, chartArea.right - w - 2);
@@ -1654,9 +1660,9 @@
         ctx.fillStyle = colorMix(muted, 0.9);
         ctx.font = '600 10px Geist Mono, ui-monospace, monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('Anchor 1500', chartArea.right - 4, yAnchor - 4);
+        ctx.fillText('Start', chartArea.right - 4, yAnchor - 4);
         ctx.fillStyle = getCSSVar('--kb-danger') || '#e74c3c';
-        ctx.fillText('Floor 1000', chartArea.right - 4, yFloor - 4);
+        ctx.fillText('Floor', chartArea.right - 4, yFloor - 4);
         ctx.restore();
       },
     };
@@ -1669,7 +1675,24 @@
     // Returns an rgba() string with the alpha applied. Best-effort
     // — falls back to the input color when parsing fails.
     if (!color) return `rgba(255,255,255,${alpha})`;
-    const c = color.trim();
+    let c = color.trim();
+    // Themes may define colors as oklch() / hsl() / named; let the canvas
+    // normalize them to #rrggbb or rgba() so the alpha can be applied.
+    if (!c.startsWith('#') && !c.startsWith('rgb')) {
+      if (!colorMix._ctx) {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 1;
+        colorMix._ctx = cv.getContext('2d', { willReadFrequently: true });
+      }
+      const ctx = colorMix._ctx;
+      if (ctx) {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = c;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
+    }
     if (c.startsWith('#')) {
       const r = parseInt(c.slice(1, 3), 16);
       const g = parseInt(c.slice(3, 5), 16);
@@ -1844,12 +1867,14 @@
     const kd = r.deaths > 0 ? (r.kills / r.deaths).toFixed(2) : (r.kills > 0 ? '\u221E' : '0.00');
     const acc = (r.has_bullet_hit !== false && r.shots > 0) ? ((r.hits / r.shots) * 100).toFixed(1) + '%' : '—';
     const deltaCell = Number.isFinite(r.delta)
-      ? `<span class="${r.delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">${r.delta >= 0 ? '+' : ''}${r.delta.toFixed(1)}</span>`
+      ? VTSRDisplay.verdictChipHtml(r.delta, { bsTooltip: false })
       : (r.is_campod ? '<span class="vt-campod-badge" title="> 25% in camera-pod ship; excluded from rating">Campod</span>'
         : r.is_low_activity ? '<span class="vt-partial-badge" title="Presence < 75% of match; excluded from rating">Partial</span>'
         : r.is_zero_damage ? '<span class="vt-idle-badge" title="Dealt 0 damage; excluded from rating">Idle</span>'
         : '—');
-    const afterCell = Number.isFinite(r.after) ? r.after.toFixed(0) : '—';
+    const afterCell = Number.isFinite(r.after)
+      ? VTSRDisplay.bandChipHtml(VTSRDisplay.rawBandFor(r.after), { compact: true, bsTooltip: false, title: VTSRDisplay.rawBandFor(r.after).label })
+      : '—';
     const rowCls = r.is_campod ? 'vt-row-campod'
       : (r.is_low_activity ? 'vt-row-partial'
         : (r.is_zero_damage ? 'vt-row-idle' : ''));
@@ -2217,7 +2242,6 @@
     career_tycoon:           'scrap',
     career_loose_collector:  'loose',
     career_war_machine:      'scrap',
-    the_champion:            'VTSR-T',
     the_veteran:             'matches',
     the_workhorse:           'commands',
     the_carry:               '',
@@ -2248,7 +2272,6 @@
     career_pod_goblin:      'Lifetime powerups grabbed plus powerups denied.',
     career_chris_kyle:      'Lifetime cockpit snipes.',
     career_the_locksmith:   'Average share of each match spent with target lock on.',
-    the_champion:           'Current VTSR-T rating.',
     the_veteran:            'Matches played.',
     the_workhorse:          'Matches commanded.',
     the_carry:              'Win rate while commanding, recorded matches only.',
@@ -3136,11 +3159,12 @@
     }
     if (gaps.length) {
       const mean = gaps.reduce((s, p) => s + (p.ownThug - p.oppThug), 0) / gaps.length;
-      const rounded = Math.round(mean);
-      const mag = Math.abs(rounded);
-      const line = rounded === 0
-        ? `Their thugs averaged the same VTSR-T as the other side, across ${gaps.length} rated duels with a thug rating on both teams.`
-        : `Their thugs averaged ${mag} VTSR-T ${rounded > 0 ? 'higher' : 'lower'} than the other side, across ${gaps.length} rated duels with a thug rating on both teams.`;
+      const ce = state.cmdrElo || {};
+      const shift = VTSRDisplay.gapToWinShift(mean, ce.lambda_team_handicap, ce.logistic_scale);
+      const pct = Math.round((shift || 0) * 100);
+      const line = pct === 0
+        ? `Their thugs were about even with the other side's, across ${gaps.length} rated duels with a thug rating on both teams.`
+        : `Their thugs were ${pct > 0 ? 'stronger' : 'weaker'} than the other side's, worth about ${VTSRDisplay.winShiftText(shift)} win chance on average, across ${gaps.length} rated duels with a thug rating on both teams.`;
       tiles.push(`<div class="vt-cmdr-econ-tile"><div class="vt-cmdr-riv-stat-label">Squad gap</div><div class="vt-cmdr-econ-sub">${line}</div></div>`);
     }
     return `<div class="vt-cmdr-econ-grid mb-3">${tiles.join('')}</div>`;
@@ -3713,7 +3737,7 @@
         head: `${e.axisDef.label} is below median.`,
         body: 'No specific coaching tip wired yet for this axis.',
       };
-      const projection = quickWinDeltaPerMatch(e.axisDef.key);
+      const share = axisWeightShare(e.axisDef.key);
       const zCls = `vt-coaching-z ${e.z >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}`;
       return `<div class="vt-coaching-card">
         <div class="vt-coaching-head">
@@ -3728,9 +3752,9 @@
           ${formatCoachingBody(copy.body)}
           <div class="vt-coaching-projection">
             <i class="bi bi-graph-up-arrow"></i>
-            +0.5&sigma; here &asymp;
-            <strong class="vt-vtsr-delta-positive">+${projection.toFixed(1)}</strong>
-            VTSR-T per match
+            This axis is
+            <strong class="vt-vtsr-delta-positive">${Math.round(share * 100)}%</strong>
+            of the game grade behind VTSR-T
           </div>
         </div>
       </div>`;
@@ -3777,7 +3801,7 @@
     const need = (elo && elo.comeback_games_required != null) ? elo.comeback_games_required : 3;
     if (status === 'returning') {
       const n = r.comeback_games_played || 0;
-      const title = `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ranked ladder.`;
+      const title = `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ladder.`;
       return ` <span class="vt-vtsr-returning-chip" title="${escapeHtml(title)}">Returning \u00b7 ${n} of ${need}</span>`;
     }
     if (status === 'inactive') {
@@ -3785,29 +3809,43 @@
       const win = (elo && elo.inactivity_window_days != null) ? elo.inactivity_window_days : 90;
       const seen = r.last_seen_date;
       const title = seen
-        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`
-        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join.`;
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin the ladder.`
+        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join the ladder.`;
       const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
       return ` <span class="vt-vtsr-inactive-chip" title="${escapeHtml(title)}">${label}</span>`;
     }
     const n = r.matches_played || 0;
     const min = vtsrLadderMinMatches(elo);
-    const title = `${n} of ${min} rated matches to join the ranked ladder.`;
+    const title = `${n} of ${min} rated matches to appear on the ladder.`;
     const label = n === 1 ? '1 match' : `${n} matches`;
     return ` <span class="vt-cmdr-progress-chip" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
   }
 
-  function computeRank(rating) {
-    const elo = state.elo;
-    const ratings = (elo && elo.ratings) || [];
-    const eligible = ratings.filter(r => vtsrLadderEligible(r, elo))
-      .slice().sort((a, b) => safeNum(b.vtsr) - safeNum(a.vtsr));
-    const sid = String(rating.steam64 || '');
-    const idx = eligible.findIndex(r => String(r.steam64) === sid);
+  // "Last 10" form stat: how many of the last ten rated games beat,
+  // matched, or fell short of what the rating expected.
+  function recentFormStat(rating) {
+    const counts = VTSRDisplay.formCounts(rating.win_history || []);
+    if (!counts.total) {
+      return { label: `Last ${counts.total || 10}`, valueHtml: '\u2014', title: 'No rated matches yet' };
+    }
+    const parts = [`${counts.beat} above`, `${counts.below} below`];
+    if (counts.par) parts.push(`${counts.par} on par`);
     return {
-      rank: idx >= 0 ? idx + 1 : null,
-      total: eligible.length,
-      eligible: idx >= 0,
+      label: `Last ${counts.total}`,
+      valueHtml: escapeHtml(parts.join(' \u00b7 ')),
+      title: `Of the last ${counts.total} rated games: ${counts.beat} beat expectation, ${counts.par} on par, ${counts.below} below expectation.`,
+    };
+  }
+
+  function ladderStatusStat(rating) {
+    const elo = state.elo;
+    if (vtsrLadderEligible(rating, elo)) {
+      return { label: 'Ladder', valueHtml: 'On the ladder', title: null };
+    }
+    return {
+      label: 'Ladder',
+      valueHtml: `Not on the ladder yet${vtsrProgressChipHtml(rating, elo)}`,
+      title: null,
     };
   }
 
@@ -3934,15 +3972,17 @@
         </button>
         <div class="vt-compare-mini-head">
           <span class="vt-compare-mini-swatch" aria-hidden="true"></span>
-          ${tierBadgeHtml(safeNum(r.vtsr), safeNum(r.matches_played))}
           <span class="vt-compare-mini-slot small text-secondary">#${index + 1}</span>
         </div>
         <a href="${href}" class="vt-compare-mini-name" title="Open ${escapeHtml(r.name)}'s profile">
           ${escapeHtml(r.name)}
         </a>
-        <div class="vt-compare-mini-vtsr">${formatVtsr(r.vtsr)}<span class="vt-compare-mini-vtsr-label">VTSR-T</span></div>
+        <div class="vt-compare-mini-vtsr">
+          ${VTSRDisplay.bandChipHtml(VTSRDisplay.bandFor(r), { bsTooltip: false })}
+          ${VTSRDisplay.positionBarHtml(r, ratingNoiseSigma(), { bsTooltip: false })}
+        </div>
         <div class="vt-compare-mini-stats">
-          <div><i class="bi bi-trophy"></i>Peak ${formatVtsr(r.peak_vtsr)}</div>
+          <div><i class="bi bi-trophy"></i>Peak ${escapeHtml((VTSRDisplay.rawBandFor(r.peak_vtsr || r.vtsr) || {}).label || '\u2014')}</div>
           <div><i class="bi bi-grid-3x3-gap"></i>${formatNumber(r.matches_played)} matches</div>
           <div><i class="bi bi-${role.code === 'c' ? 'shield-fill' : 'lightning-charge-fill'}"></i>${escapeHtml(role.label)}</div>
           ${primary ? `<div><i class="bi bi-fuel-pump"></i>${escapeHtml(primary)}</div>` : ''}
@@ -3980,7 +4020,7 @@
                 <canvas id="vt-compare-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
               </div>
               <p class="text-secondary small mb-0 mt-2 text-center">
-                Career-mean post-clip z per axis. Bigger polygon = stronger profile across the eight VTSR-T axes.
+                Career-mean post-clip z per axis. Bigger polygon = stronger profile across the four VTSR-T axes.
               </p>
             </div>
           </div>
@@ -3992,7 +4032,7 @@
             <div class="card-body">
               <div class="d-flex flex-wrap gap-2 align-items-baseline justify-content-between mb-2">
                 <h2 class="h6 text-secondary text-uppercase mb-0" style="letter-spacing:0.08em;">
-                  <i class="bi bi-graph-up me-1"></i>VTSR-T progression
+                  <i class="bi bi-graph-up me-1"></i>VTSR-T band over time
                 </h2>
                 <div class="vt-chip-group" role="group" aria-label="X-axis mode" id="vt-compare-x-mode">
                   <button type="button" class="vt-chip" data-x="date" data-selected="${compareState.xAxisMode === 'matches' ? 'false' : 'true'}">By date</button>
@@ -4161,7 +4201,10 @@
                 }
                 return `Match #${Math.round(x)}`;
               },
-              label: (item) => `${item.dataset.label}: ${Math.round(item.parsed.y)}`,
+              label: (item) => {
+                const b = VTSRDisplay.rawBandFor(item.parsed.y);
+                return `${item.dataset.label}: ${b ? b.label : '—'}`;
+              },
             },
           },
           zoom: {
@@ -4193,13 +4236,13 @@
               ? { display: true, text: 'Matches played (rebased)', color: themeText }
               : { display: false },
           },
-          y: {
+          y: VTSRDisplay.applyTierAxis({
             beginAtZero: false,
             min: 1000,
-            ticks: { color: themeMuted, stepSize: 100 },
-            grid: { color: 'rgba(255,255,255,0.05)' },
-            title: { display: true, text: 'VTSR-T', color: themeText },
-          },
+            ticks: { color: themeMuted },
+            grid: { display: false },
+            title: { display: true, text: 'VTSR-T band', color: themeText },
+          }),
         },
       },
       plugins: [
@@ -4218,10 +4261,11 @@
       const pts = seriesPerPlayer[i];
       const last = pts.length ? pts[pts.length - 1].after : null;
       const first = pts.length ? pts[0].after : null;
-      const swing = (Number.isFinite(last) && Number.isFinite(first))
-        ? (last - first) : null;
-      const swingHtml = swing != null
-        ? `<span class="${swing >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">${swing >= 0 ? '+' : ''}${swing.toFixed(0)}</span>`
+      const fromBand = Number.isFinite(first) ? VTSRDisplay.rawBandFor(first) : null;
+      // Current end of the range uses the sticky band the hero shows.
+      const toBand = Number.isFinite(last) ? VTSRDisplay.bandFor(f.rating) : null;
+      const swingHtml = (fromBand && toBand)
+        ? `<span class="${toBand.index > fromBand.index ? 'vt-vtsr-delta-positive' : toBand.index < fromBand.index ? 'vt-vtsr-delta-negative' : 'text-secondary'}">${escapeHtml(fromBand.shortLabel)} \u2192 ${escapeHtml(toBand.shortLabel)}</span>`
         : '<span class="text-secondary">—</span>';
       return `<span class="vt-compare-ts-legend-chip">
         <span class="vt-compare-swatch" style="background:${f.color};"></span>
@@ -4244,8 +4288,10 @@
     const num = (v) => formatNumber(+v);
     const ratio = (v) => Number.isFinite(+v) ? (Math.round(+v * 100) / 100).toFixed(2) : '—';
     return [
-      { label: 'VTSR-T',         accessor: ({rating}) => safeNum(rating.vtsr),               format: (v) => formatVtsr(v),  dir: 'hi' },
-      { label: 'Peak VTSR-T',    accessor: ({rating}) => safeNum(rating.peak_vtsr),          format: (v) => formatVtsr(v),  dir: 'hi' },
+      { label: 'VTSR-T band',    accessor: ({rating}) => VTSRDisplay.bandFor(rating).index,
+                                  format: (v, f) => escapeHtml(VTSRDisplay.bandFor(f.rating).label), dir: 'hi' },
+      { label: 'Peak band',      accessor: ({rating}) => (VTSRDisplay.rawBandFor(rating.peak_vtsr || rating.vtsr) || {}).index,
+                                  format: (v, f) => escapeHtml((VTSRDisplay.rawBandFor(f.rating.peak_vtsr || f.rating.vtsr) || {}).label || '\u2014'), dir: 'hi' },
       { label: 'Matches played', accessor: ({rating}) => safeNum(rating.matches_played),     format: num,                   dir: 'hi' },
       { label: 'As commander',   accessor: ({rating}) => safeNum(rating.matches_as_commander), format: num,                 dir: 'hi' },
       { label: 'As thug',        accessor: ({rating}) => safeNum(rating.matches_as_thug),    format: num,                   dir: 'hi' },
@@ -4286,7 +4332,7 @@
     const bodyHtml = rows.map(rowDef => {
       const cells = found.map((f) => {
         const v = rowDef.accessor(f);
-        return { v: Number.isFinite(+v) ? +v : null, display: rowDef.format(v) };
+        return { v: Number.isFinite(+v) && v !== null && v !== undefined ? +v : null, display: rowDef.format(v, f) };
       });
       const numericVals = cells.map(c => c.v).filter(v => v != null);
       let bestVal = null, worstVal = null;
@@ -4399,7 +4445,7 @@
 
     const headerCols = found.map(f => `
       <th scope="col" class="text-end" style="color:${f.color};">
-        <span class="vt-compare-swatch d-inline-block me-1" style="background:${f.color};"></span>${escapeHtml(f.rating.name)} ΔVTSR
+        <span class="vt-compare-swatch d-inline-block me-1" style="background:${f.color};"></span>${escapeHtml(f.rating.name)}
       </th>`).join('');
 
     const matchSids = found.map(f => f.rating.steam64).join(',');
@@ -4417,9 +4463,8 @@
         const cmdr = pp.is_commander ? '<i class="bi bi-shield-fill" title="Commander"></i> ' : '';
         const excl = pp.excluded
           ? `<span class="badge bg-warning-subtle text-warning-emphasis ms-1" title="Excluded from rating">excl</span>` : '';
-        const deltaHtml = Number.isFinite(+delta)
-          ? `<span class="${delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">
-               ${delta >= 0 ? '+' : ''}${(+delta).toFixed(1)}</span>`
+        const deltaHtml = (delta != null && Number.isFinite(+delta))
+          ? VTSRDisplay.verdictChipHtml(+delta, { bsTooltip: false })
           : `<span class="text-secondary">—</span>`;
         return `<td class="text-end">${teamBadge}${cmdr}${deltaHtml}${excl}</td>`;
       }).join('');
@@ -4519,7 +4564,7 @@
     const candidates = ratings
       .filter(r => !taken.has(String(r.steam64)))
       .filter(r => slugMap[String(r.steam64)] && slugMap[String(r.steam64)].slug)
-      .sort((a, b) => safeNum(b.vtsr) - safeNum(a.vtsr));
+      .sort(byName);
 
     const pop = document.createElement('div');
     pop.className = 'vt-compare-add-popover';
@@ -4576,7 +4621,7 @@
     if (!slug) return '';
     return `<button type="button" class="vt-compare-add-row" data-slug="${escapeHtml(slug)}">
       <span class="vt-compare-add-name">${escapeHtml(r.name)}</span>
-      <span class="vt-compare-add-vtsr">${formatVtsr(r.vtsr)}</span>
+      <span class="vt-compare-add-vtsr">${VTSRDisplay.bandChipHtml(VTSRDisplay.bandFor(r), { compact: true, bsTooltip: false })}</span>
     </button>`;
   }
 
@@ -4838,7 +4883,10 @@
         // June 2026 fable review (git history)). Graceful 404: null hides the band.
         fetchJson(`${state.dataPrefix}data/processed/validation_summary.json`).catch(() => null),
         ensureMatchVideosLoaded(),
+        // VTSR-C for the directory sort + card chip (404-safe).
+        ensureCmdrEloLoaded(),
       ]);
+      VTSRDisplay.setConfig(elo);
       state.elo = elo;
       state.slugMap = slugMap;
       state.validation = validation;
@@ -4936,7 +4984,6 @@
     boot,
     get state() { return state; },
     resolveTier,
-    tierBadgeHtml,
     playerHref,
     sparkSvg,
   };

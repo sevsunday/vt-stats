@@ -93,7 +93,7 @@
   // Working-set state held only while the modal is open. Lives outside the
   // module-level closure so handlers below can mutate it.
   let pickerCart = []; // ResolvedPlayer[]
-  let pickerSortMode = 'vtsr-desc';
+  let pickerSortMode = 'alpha';
   let pickerSearchQuery = '';
   // Pool filter: 'in-data' = matchesPlayed > 0 (default), 'all' = full directory.
   let pickerPoolFilter = 'in-data';
@@ -281,12 +281,21 @@
     renderRosterManualControls();
   }
 
+  // VTSR-T band chip for a resolved player (never the number). Falls back
+  // to the raw band for players without a pipeline band.
+  function bandBadgeHtml(p) {
+    if (!window.VTSRDisplay) return p.tier ? `T${p.tier}` : '?';
+    const band = p.band || (Number.isFinite(p.vtsr) ? VTSRDisplay.rawBandFor(p.vtsr) : null);
+    if (!band) return '?';
+    return VTSRDisplay.bandChipHtml(band, { compact: true, bsTooltip: false, title: `VTSR-T ${band.label}` });
+  }
+
   function renderRosterRow(p, idx) {
-    const tierBadge = p.tier ? `<span class="vt-tools-roster-row-tier" title="VTSR-T ${Math.round(p.vtsr)}">T${p.tier}</span>` : '';
+    const tierBadge = p.tier ? bandBadgeHtml(p) : '';
     const provisionalChip = p.isCustom
-      ? '<span class="vt-tools-roster-row-provisional-chip" title="Custom (non-Steam) entry — anchored at VTSR 1500">custom</span>'
+      ? '<span class="vt-tools-roster-row-provisional-chip" title="Custom (non-Steam) entry — counted at the starting rating">custom</span>'
       : p.isProvisional
-        ? '<span class="vt-tools-roster-row-provisional-chip" title="Provisional / unrated — anchored at VTSR 1500">provisional</span>'
+        ? '<span class="vt-tools-roster-row-provisional-chip" title="Provisional / unrated — counted at the starting rating">provisional</span>'
         : '';
     const lobbyNickRow = p.lobbyNick ? `<span class="vt-tools-roster-row-lobbynick">${escapeHtml(p.lobbyNick)}</span>` : '';
     const steamLink = p.steamProfileUrl
@@ -481,7 +490,7 @@
 
     pickerSearchQuery = '';
     if (pickerSearchEl) pickerSearchEl.value = '';
-    pickerSortMode = pickerSortEl ? pickerSortEl.value : 'vtsr-desc';
+    pickerSortMode = pickerSortEl ? pickerSortEl.value : 'alpha';
 
     // Snap pool filter back to its default ('In data') on each open.
     pickerPoolFilter = 'in-data';
@@ -582,28 +591,13 @@
 
     // Defensive copy then sort by the current sort mode.
     const sorted = list.slice();
-    // "Rated" for sort purposes mirrors the grid-badge boundary: a player
-    // is rated if they've played at least one match. Players with no
-    // matches default to the 1500 anchor VTSR which would otherwise
-    // contaminate the top of an asc / middle of a desc sort.
-    const isRated = (p) => (p.matchesPlayed || 0) > 0;
     switch (pickerSortMode) {
-      case 'vtsr-desc':
+      case 'vtsrc-desc':
+        // VTSR-C (commander win/loss rating). VTSR-T is never a sort key.
         sorted.sort((a, b) => {
-          const va = isRated(a) ? (Number.isFinite(a.vtsr) ? a.vtsr : -Infinity) : -Infinity;
-          const vb = isRated(b) ? (Number.isFinite(b.vtsr) ? b.vtsr : -Infinity) : -Infinity;
+          const va = Number.isFinite(a.vtsrC) ? a.vtsrC : -Infinity;
+          const vb = Number.isFinite(b.vtsrC) ? b.vtsrC : -Infinity;
           if (vb !== va) return vb - va;
-          return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
-        });
-        break;
-      case 'vtsr-asc':
-        sorted.sort((a, b) => {
-          // Unrated sinks to bottom in BOTH directions — it's the useful
-          // default (don't surface anchor-1500 fillers at the top when
-          // the user asks for the weakest rated players).
-          const ap = isRated(a) ? (Number.isFinite(a.vtsr) ? a.vtsr : Infinity) : Infinity;
-          const bp = isRated(b) ? (Number.isFinite(b.vtsr) ? b.vtsr : Infinity) : Infinity;
-          if (ap !== bp) return ap - bp;
           return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
         });
         break;
@@ -642,7 +636,7 @@
       // their name muted via Bootstrap's `text-muted`; rated players
       // get a primary-colored tier badge.
       const isRated = (p.matchesPlayed || 0) > 0;
-      const tierText = isRated && p.tier ? `T${p.tier}` : '?';
+      const tierHtml = isRated && p.tier ? bandBadgeHtml(p) : '?';
       const tierClass = `vt-tools-picker-card-tier${isRated ? ' vt-tools-picker-card-tier--rated' : ''}`;
       const nameClass = `vt-tools-picker-card-name${isRated ? '' : ' text-muted'}`;
       return `
@@ -652,7 +646,7 @@
                 aria-pressed="${selected ? 'true' : 'false'}">
           <i class="bi bi-check-circle-fill vt-tools-picker-card-check" aria-hidden="true"></i>
           <div class="${nameClass}" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</div>
-          <div class="${tierClass}">${escapeHtml(tierText)}</div>
+          <div class="${tierClass}">${tierHtml}</div>
         </button>
       `;
     }).join('');
@@ -675,13 +669,13 @@
       } else {
         pickerCartListEl.innerHTML = pickerCart.map((p) => {
           const isRated = (p.matchesPlayed || 0) > 0;
-          const tierText = isRated && p.tier ? `T${p.tier}` : '?';
+          const tierHtml = isRated && p.tier ? bandBadgeHtml(p) : '?';
           const tierClass = `vt-tools-picker-cart-row-tier${isRated ? ' vt-tools-picker-cart-row-tier--rated' : ''}`;
           const nameClass = `vt-tools-picker-cart-row-name${isRated ? '' : ' text-muted'}`;
           return `
             <div class="vt-tools-picker-cart-row">
               <span class="${nameClass}" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</span>
-              <span class="${tierClass}">${escapeHtml(tierText)}</span>
+              <span class="${tierClass}">${tierHtml}</span>
               <button type="button" class="vt-tools-picker-cart-row-remove"
                       data-vt-picker-cart-remove="${escapeHtml(p.steam64)}"
                       title="Remove from cart" aria-label="Remove from cart">

@@ -151,9 +151,14 @@
     player.vtsr = isNum(vtsr) ? vtsr : anchor();
     player.vtsrC = isNum(vtsrC) ? vtsrC : null;
     player.vtsrCEffective = isNum(effective) ? effective : anchor();
-    const resolver = window.VTToolsResolver;
-    if (resolver && typeof resolver.tierFor === 'function') {
-      player.tier = resolver.tierFor(player.vtsr);
+    // "Today" keeps the resolver's sticky band; "as played" has only the
+    // pre-match value, so it uses the raw band for it.
+    if (window.VTSRDisplay) {
+      player.band = useThen ? VTSRDisplay.rawBandFor(player.vtsr) : (player.bandNow || VTSRDisplay.rawBandFor(player.vtsr));
+      player.tier = player.band && !player.band.provisional ? player.band.tier : null;
+    } else {
+      const resolver = window.VTToolsResolver;
+      if (resolver && typeof resolver.tierFor === 'function') player.tier = resolver.tierFor(player.vtsr);
     }
     player.ratingBasis = useThen ? 'then' : 'now';
   }
@@ -259,6 +264,7 @@
       else cThen = reconstructVtsrC(duels, sid, match.date);
 
       player.vtsrNow = isNum(resolved.vtsr) ? resolved.vtsr : floor;
+      player.bandNow = resolved.band || null;
       player.vtsrCNow = isNum(resolved.vtsrC) ? resolved.vtsrC : null;
       player.vtsrCEffectiveNow = isNum(resolved.vtsrCEffective) ? resolved.vtsrCEffective : floor;
       player.vtsrThen = before;

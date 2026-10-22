@@ -1335,14 +1335,16 @@
       const name = href
         ? `<a class="vt-map-cmdr-name" href="${escapeHtml(href)}">${escapeHtml(p.name)}</a>`
         : `<span class="vt-map-cmdr-name">${escapeHtml(p.name)}</span>`;
-      const delta = safeNum(p.delta_sum);
-      const sign = delta > 0 ? '+' : '';
-      const tip = 'Total VTSR-T change from thug games on this map, not one match';
+      const games = safeNum(p.matches);
+      const beat = p.beat != null ? safeNum(p.beat) : null;
+      const tip = 'Thug games on this map that beat what the player\u2019s VTSR-T expected. Ordered by how far those games beat it overall.';
+      const line = beat != null
+        ? `Beat expectation in <span class="num">${formatNumber(beat)}</span> of <span class="num">${formatNumber(games)}</span> games`
+        : `<span class="num">${formatNumber(games)}</span> games`;
       return `<li class="vt-map-cmdr-row">
         <span class="vt-map-cmdr-rank">${i + 1}</span>
         ${name}
-        <span class="vt-map-cmdr-count" title="${escapeHtml(tip)}"><span class="num">${sign}${delta.toFixed(1)} VTSR-T</span>
-          <span class="text-secondary small">${formatNumber(p.matches)} matches</span></span>
+        <span class="vt-map-cmdr-count" title="${escapeHtml(tip)}"><span class="text-secondary small">${line}</span></span>
       </li>`;
     }).join('');
     return insightCard('trophy-fill', 'Best thug performance', `<ol class="vt-map-cmdr-list mb-0">${items}</ol>`, extraClass);

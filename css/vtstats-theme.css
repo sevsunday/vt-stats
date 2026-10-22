@@ -5909,6 +5909,91 @@ td.vt-col-split {
     user-select: none;
 }
 
+/* ============================================================================
+   VTSR-T display layer (js/vtsr-display.js): band chip, fuzzy position bar,
+   per-game verdict chip. VTSR-T never renders as a number.
+   ============================================================================ */
+:is(.vt-band-chip, .vt-band-bar)[data-tier="1"] { --vt-band-color: var(--vt-tier-1); }
+:is(.vt-band-chip, .vt-band-bar)[data-tier="2"] { --vt-band-color: var(--vt-tier-2); }
+:is(.vt-band-chip, .vt-band-bar)[data-tier="3"] { --vt-band-color: var(--vt-tier-3); }
+:is(.vt-band-chip, .vt-band-bar)[data-tier="4"] { --vt-band-color: var(--vt-tier-4); }
+:is(.vt-band-chip, .vt-band-bar)[data-tier="5"] { --vt-band-color: var(--kb-text-secondary); }
+
+.vt-band-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    vertical-align: middle;
+    cursor: default;
+}
+.vt-band-half {
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--kb-text-secondary);
+}
+.vt-band-half[data-half="upper"] { color: var(--kb-text-primary); }
+.vt-band-half--compact {
+    font-size: 0.6rem;
+    color: var(--vt-band-color, var(--kb-text-secondary));
+}
+
+.vt-band-bar {
+    position: relative;
+    display: inline-flex;
+    gap: 2px;
+    width: 100%;
+    max-width: 10rem;
+    height: 6px;
+    vertical-align: middle;
+    cursor: default;
+    /* Keep the soft marker inside the track ends; it may overhang vertically. */
+    clip-path: inset(-6px 0);
+}
+.vt-band-bar--compact { max-width: 5rem; height: 4px; }
+.vt-band-bar-seg {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: color-mix(in oklab, var(--kb-text-muted) 22%, transparent);
+}
+.vt-band-bar-seg.is-lit {
+    background: color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 45%, transparent);
+}
+.vt-band-bar-marker {
+    position: absolute;
+    top: -3px;
+    height: calc(100% + 6px);
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: radial-gradient(ellipse at center,
+        var(--vt-band-color, var(--kb-primary)) 0%,
+        color-mix(in oklab, var(--vt-band-color, var(--kb-primary)) 45%, transparent) 35%,
+        transparent 72%);
+    pointer-events: none;
+}
+
+.vt-verdict-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--vt-verdict-color) 45%, transparent);
+    background: color-mix(in oklab, var(--vt-verdict-color) 12%, transparent);
+    color: var(--vt-verdict-color);
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    vertical-align: middle;
+    cursor: default;
+}
+.vt-verdict-chip[data-verdict="beat"]  { --vt-verdict-color: var(--kb-success); }
+.vt-verdict-chip[data-verdict="par"]   { --vt-verdict-color: var(--kb-text-secondary); }
+.vt-verdict-chip[data-verdict="below"] { --vt-verdict-color: var(--kb-danger); }
+
 /* VTSR-C v4-telemetry chip (ladder rows + duel-log entries) */
 .vt-cmdr-telem-chip {
     font-family: 'Geist Mono', ui-monospace, monospace;
@@ -6443,8 +6528,8 @@ td.vt-col-split {
 }
 
 /* ===== VTSR-T teaser card (dashboard) ================================
-   Compact top-5 list + provisional chip row + View-full-leaderboard
-   footer. The full sortable table lives on the /elo/ page. */
+   Compact top-5 list + provisional chip row + View-full-ladder
+   footer. The full tier-grouped ladder lives on the /elo/ page. */
 .vt-vtsr-teaser-row {
     display: flex;
     align-items: center;
@@ -6453,14 +6538,12 @@ td.vt-col-split {
     border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 14%, transparent);
 }
 .vt-vtsr-teaser-row:last-child { border-bottom: 0; }
-.vt-vtsr-teaser-rank {
-    width: 1.4rem;
-    text-align: center;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: var(--kb-text-muted);
+.vt-vtsr-teaser-band {
+    padding: 0.55rem 0.25rem 0.2rem;
 }
-.vt-vtsr-teaser-tier { width: 2rem; text-align: center; }
+.vt-vtsr-teaser-band:first-child { padding-top: 0; }
+.vt-vtsr-teaser-row { padding-left: 0.75rem; }
+.vt-vtsr-teaser-more { padding: 0.25rem 0.25rem 0.25rem 0.75rem; }
 .vt-vtsr-teaser-name {
     flex: 1 1 auto;
     min-width: 0;
@@ -6469,16 +6552,9 @@ td.vt-col-split {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.vt-vtsr-teaser-rating {
-    font-family: var(--vt-font-mono, monospace);
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
 .vt-vtsr-teaser-delta {
-    width: 3.2rem;
+    flex: 0 0 auto;
     text-align: right;
-    font-size: 0.85em;
-    font-variant-numeric: tabular-nums;
 }
 .vt-vtsr-teaser-provisional,
 .vt-vtsr-teaser-inactive {
@@ -7969,7 +8045,7 @@ html.vt-cursor-active * {
 }
 .vt-match-elo-row {
     display: grid;
-    grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 2fr) 4.5rem;
+    grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 2fr) 6rem;
     gap: 0.6rem;
     align-items: center;
     padding: 0.35rem 0.5rem;
@@ -8062,6 +8138,12 @@ html.vt-cursor-active * {
     font-size: 0.95rem;
     color: var(--kb-text-secondary);
 }
+.vt-match-elo-headline-delta .vt-verdict-chip {
+    font-family: inherit;
+    font-size: 1rem;
+    padding: 0.2rem 0.7rem;
+    letter-spacing: 0;
+}
 .vt-match-elo-verdict {
     font-size: 0.95rem;
     color: var(--kb-text-primary);
@@ -8101,7 +8183,7 @@ html.vt-cursor-active * {
 
 @media (max-width: 640px) {
     .vt-match-elo-row {
-        grid-template-columns: 1fr 3.5rem;
+        grid-template-columns: 1fr 6rem;
         grid-template-rows: auto auto;
     }
     .vt-match-elo-track { grid-column: 1 / -1; }

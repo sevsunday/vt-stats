@@ -711,9 +711,8 @@
               <select class="form-select form-select-sm vt-tools-picker-sort"
                       id="vt-tools-picker-sort"
                       title="Sort the player grid">
-                <option value="alpha">A &rarr; Z</option>
-                <option value="vtsr-desc" selected>VTSR-T (high &rarr; low)</option>
-                <option value="vtsr-asc">VTSR-T (low &rarr; high)</option>
+                <option value="alpha" selected>A &rarr; Z</option>
+                <option value="vtsrc-desc">VTSR-C (high &rarr; low)</option>
                 <option value="matches-desc">Matches played</option>
               </select>
             </div>
@@ -902,14 +901,14 @@
               computed.
             </li>
             <li>
-              <strong>Unrated and provisional players are anchored at 1500</strong>, and
-              a commander&rsquo;s own thug rating is shown but not scored &mdash; their
+              <strong>Unrated and provisional players count at the starting rating</strong>, and
+              a commander&rsquo;s own thug band is shown but not scored &mdash; their
               commanding record (VTSR-C) is what counts.
             </li>
             <li>
               <strong>Uneven lobbies use a house rule.</strong> The formula compares
               average thug ratings, so on its own a 4v3 reads as fair. Here the empty
-              seat on the short side is scored as a thug at the rating floor (1000),
+              seat on the short side is scored as a thug at the rating floor,
               which is why Suggest loads the smaller team with stronger players. Only
               8 rated games so far were uneven, so this rule is a stated assumption,
               not a validated one.
@@ -941,6 +940,7 @@
   <script src="../js/bz2api.js"></script>
   <script src="../js/live-session-card.js"></script>
   <script src="../js/live-map-enrich.js"></script>
+  <script src="../js/vtsr-display.js"></script>
   <script src="../js/tools/player-resolver.js"></script>
   <!-- Balonce Meter: the shared win-probability model + gauge markup that
        Team Balonce renders (same module the dashboard's per-match Balonce

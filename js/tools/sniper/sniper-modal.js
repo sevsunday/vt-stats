@@ -318,14 +318,12 @@
         const lobbyNick = player.lobbyNick
             ? `<div class="vt-tools-wheel-result-nick text-secondary small mt-1">aka <code>${escapeHtml(player.lobbyNick)}</code></div>`
             : '';
-        const tier = player.tier
-            ? `<span class="vt-tools-wheel-result-tier badge">T${player.tier}</span>`
-            : '';
+        const tier = '';
         const provisional = player.isProvisional
             ? `<span class="vt-tools-wheel-result-provisional badge ms-2" title="VTSR is provisional / anchored">${player.isCustom ? 'custom' : 'provisional'}</span>`
             : '';
-        const vtsr = Number.isFinite(player.vtsr)
-            ? `<div class="vt-tools-wheel-result-vtsr text-secondary small mt-1">VTSR-T <strong>${Math.round(player.vtsr)}</strong></div>`
+        const vtsr = (player.band && window.VTSRDisplay)
+            ? `<div class="vt-tools-wheel-result-vtsr text-secondary small mt-1">VTSR-T ${VTSRDisplay.bandChipHtml(player.band, { bsTooltip: false })}</div>`
             : '';
 
         const steamLink = player.steamProfileUrl

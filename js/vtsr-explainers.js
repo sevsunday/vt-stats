@@ -81,7 +81,7 @@
   // 13.1 final equation: the published rating is a blend of two dials.
   const BLEND_STEPS = [
     { term: 'eq-rt', title: 'The Performance dial', x: 63, y: 63,
-      body: 'Thug ELO &mdash; everything on this page: the 4-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
+      body: 'The performance rating &mdash; everything on this page: the 4-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
       body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
@@ -490,7 +490,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>How it works</h6>
-        <p class="mb-1">VTSR-T is an <strong>ELO rating</strong> &mdash; the same idea as a chess rating. Everyone starts at <strong>1500</strong>, and after every match one formula decides how your number moves. Walk through it:</p>
+        <p class="mb-1">VTSR-T is your <strong>thug form</strong>. Each game it grades damage traded, kills, base and scav damage, and map coverage against the people in that lobby. You go up when that grade beats what your current number predicted, and down when it falls short. Winning the game does not move it; commanders have their own win rating, VTSR-C. Everyone starts at <strong>1500</strong>. Walk through the formula:</p>
         ${deltaBlock}
         <p class="mb-0 mt-2 text-muted small">Losses sting a little less than wins reward, and your rating never drops below <strong>1000</strong>.</p>
       </section>
@@ -508,7 +508,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible in the Unranked table.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. To appear on the ladder requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible under <strong>Not on the ladder yet</strong>. The ladder groups by tier and does not number players.</p>
         ${tierTableHtml()}
       </section>
 

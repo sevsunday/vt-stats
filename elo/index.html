@@ -128,7 +128,7 @@
           <button class="nav-link" id="elo-tab-leaderboard-btn" data-bs-toggle="pill"
                   data-bs-target="#elo-tab-leaderboard" type="button" role="tab"
                   aria-controls="elo-tab-leaderboard" aria-selected="false">
-            <i class="bi bi-list-ol me-1"></i>VTSR-T Elo
+            <i class="bi bi-list-ol me-1"></i>VTSR-T
           </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -194,18 +194,8 @@
            aria-labelledby="elo-tab-leaderboard-btn">
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0" id="vtsr-card-title"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
+            <h5 class="mb-0" id="vtsr-card-title"><i class="bi bi-stars me-2"></i>VTSR-T Ladder</h5>
             <div class="d-flex align-items-center flex-wrap gap-2">
-              <div class="btn-group btn-group-sm vt-vtsr-seg" role="group" aria-label="Rating" id="vtsr-rating-toggle">
-                <button type="button" class="btn active" id="vtsr-rating-performance" aria-pressed="true">Performance</button>
-                <button type="button" class="btn" id="vtsr-rating-wins" aria-pressed="false">Wins weighted</button>
-              </div>
-              <div class="btn-group btn-group-sm vt-vtsr-seg" role="group" aria-label="Wins weight" id="vtsr-weight-toggle" hidden>
-                <button type="button" class="btn" data-wins-weight="10" aria-pressed="false">10%</button>
-                <button type="button" class="btn" data-wins-weight="25" aria-pressed="false">25%</button>
-                <button type="button" class="btn" data-wins-weight="50" aria-pressed="false">50%</button>
-                <button type="button" class="btn" data-wins-weight="100" aria-pressed="false">Wins only</button>
-              </div>
               <button type="button" class="btn btn-sm vt-vtsr-info-btn" id="vtsr-how-link">
                 <i class="bi bi-info-circle me-1"></i>How It's Calculated
               </button>
@@ -213,29 +203,25 @@
           </div>
           <div class="card-body table-responsive vt-sticky-thead-card" id="vtsr-card-body">
             <div id="vtsr-ladder-banner"></div>
-            <div id="vtsr-preview-banner"></div>
             <table id="vtsr-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
               <thead>
                 <tr>
-                  <th data-bs-toggle="tooltip" data-bs-placement="top"
-                      title="Rank (1 = highest VTSR-T)."
-                  >#</th>
                   <th class="vt-vtsr-expand-col"
                       data-bs-toggle="tooltip" data-bs-placement="top"
                       title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship + weapon distributions."
                   ></th>
-                  <th class="text-center vt-vtsr-tier-col"
+                  <th data-sort="band" class="vt-vtsr-tier-col sort-active"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Tier</strong><br>Absolute thresholds: Tier 1 (&ge;1800), Tier 2 (1650-1799), Tier 3 (1500-1649), Tier 4 (1350-1499), Tier 5 (1000-1349). Players with fewer than 10 rated matches show <strong>Provisional</strong>."
-                  >Tier</th>
+                      title="<strong>Band</strong><br>VTSR-T tier and its Upper or Lower half. VTSR-T is thug form: each match grades damage traded, kills, base and scav damage, and map coverage against that lobby. Winning the game does not move it. A label only moves after a clear margin, so one game rarely changes it. Players with fewer than 10 rated matches show <strong>Provisional</strong>."
+                  >Band</th>
                   <th data-sort="name"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
                   >Player</th>
-                  <th data-sort="vtsr" class="text-end sort-active"
+                  <th class="vt-vtsr-position-col"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
-                  >VTSR-T</th>
+                      title="<strong>Position</strong><br>Where the player sits inside their tier. The soft edge is the noise band: the rating can't tell apart players inside it."
+                  >Position</th>
                   <th data-sort="win_rate" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Win%</strong><br>How often this player's team won in rated matches with a decided result. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T. Hover a cell for the W&ndash;L record."
@@ -250,15 +236,15 @@
                   >Acc</th>
                   <th data-sort="last_delta" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
-                  >Last</th>
+                      title="<strong>Last game</strong><br>How the most recent rated match went against what the rating expected: Beat expectation, On par, or Below expectation. Click the row chevron for the per-axis breakdown."
+                  >Last game</th>
                   <th data-sort="peak_vtsr" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Peak</strong><br>Highest published VTSR-T this player has ever held. Hover the cell to see when it was reached."
+                      title="<strong>Peak</strong><br>Highest band this player has reached. Hover the cell to see when."
                   >Peak</th>
                   <th data-sort="matches_played" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
+                      title="<strong>Matches</strong><br>Number of rated matches behind this band. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
                   >Matches</th>
                 </tr>
               </thead>
@@ -341,6 +327,7 @@
   <!-- Shared explainer content + annotated-stage engine (also loaded by
        the dashboard for its methodology modal). -->
   <script src="../js/vtsr-explainers.js"></script>
+  <script src="../js/vtsr-display.js"></script>
   <script src="../js/elo.js"></script>
 
   <script src="../js/cursor-settings.js"></script>

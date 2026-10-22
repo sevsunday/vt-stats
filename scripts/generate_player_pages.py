@@ -60,7 +60,9 @@ SITE_URL = "https://vtstats.bz"
 # v17 adds ODF Guide to that dropdown.
 # v18 adds the Commander profile pane (VTSR-C pill).
 # v19 adds Weapons (the /weapons/ Weapons Lab) to the ODF dropdown.
-PLAYER_TEMPLATE_VERSION = 21
+# v22 drops the VTSR-T directory sorts (adds VTSR-C), loads
+# js/vtsr-display.js, and takes VTSR-T numbers out of the OG description.
+PLAYER_TEMPLATE_VERSION = 22
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,
@@ -573,19 +575,19 @@ def _player_og_summary(rating: dict, slug_map: dict) -> dict:
     canonical = f"{slug_map.get('site_url') or SITE_URL}/player/{slug}/" if slug else f"{SITE_URL}/player/"
 
     vtsr = rating.get("vtsr")
-    peak = rating.get("peak_vtsr")
     matches = int(rating.get("matches_played") or 0)
     tier = resolve_tier(float(vtsr) if vtsr is not None else 0.0, matches)
     role = _role_label(rating)
 
+    # VTSR-T is shown as a band (tier + half), never a number.
     desc_parts = []
     if vtsr is not None:
         if tier.get("provisional"):
-            desc_parts.append(f"VTSR-T {vtsr:.0f} (Provisional)")
+            desc_parts.append("Provisional")
+        elif rating.get("band_label"):
+            desc_parts.append(str(rating["band_label"]))
         else:
-            desc_parts.append(f"{tier['label']} · VTSR-T {vtsr:.0f}")
-    if peak is not None and peak > 0:
-        desc_parts.append(f"Peak {peak:.0f}")
+            desc_parts.append(tier["label"])
     desc_parts.append(f"{matches} career match{'es' if matches != 1 else ''}")
     desc_parts.append(role)
     description = " · ".join(desc_parts) if desc_parts else _NO_VTSR_FALLBACK_DESC

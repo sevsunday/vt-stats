@@ -3234,6 +3234,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `inactivity_window_days` | int | Display-only. Days of no appearance vs `corpus_latest_date` before Unranked. 90. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. |
 | `comeback_games_required` | int | Display-only. Games after a >window gap before rejoining the ranked table. 3. |
 | `corpus_latest_date` | ISO date | Newest corpus match date the clocks are measured against (not wall-clock). |
+| `band_config` | object | Display-only VTSR-T band rules from `scripts/vtsr_bands.py`: `edges` (the nine band edges, ascending: tier lines 1350/1500/1650/1800 plus the half splits 1175/1425/1575/1725/1875), `tier_lines`, `splits`, `buffer_pts` (20 — points past an edge before the sticky band moves), `on_par_delta_pts` (3 — a per-game change smaller than this reads "On par"). `js/vtsr-display.js` reads it; do not hardcode. Canonical file only. |
 | `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates. `min_player_count` is 6 non-campod leaderboard rows (camera-pod spectators do not count; idle thugs and partials do). `min_duration_sec` is 240. |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
@@ -3250,7 +3251,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].steam64` | string \| null | Stable identity. Null for legacy rows missing steam64. |
 | `ratings[].vtsr` | float | Published headline rating (= **VTSR-T** when $\alpha=0$). Rounded to 1 decimal. |
 | `ratings[].thug_elo` | float | **v2.3** — pure Thug-ELO component (was `combat_elo` pre-v2.3). |
-| `ratings[].wins_elo` | float | Wins-ELO component ($R^W$). **Stage E (proto v4 overhaul): REAL ladder values** — updated on every rated match with a determined outcome (see the `wins_*` top-level constants below); anchor 1500 for players with zero wins-rated games. Consequence-free while `alpha = 0.0` (the published `vtsr` is bit-identical to `thug_elo`), but visible: the ELO-page rating tooltip and the Tools resolver read it. Pre-Stage-E files carried a flat 1500.0 stub. |
+| `ratings[].wins_elo` | float | Wins-ELO component ($R^W$). **Stage E (proto v4 overhaul): REAL ladder values** — updated on every rated match with a determined outcome (see the `wins_*` top-level constants below); anchor 1500 for players with zero wins-rated games. Consequence-free while `alpha = 0.0` (the published `vtsr` is bit-identical to `thug_elo`). The Tools resolver carries it; no page displays it. Pre-Stage-E files carried a flat 1500.0 stub. |
 | `ratings[].wins_games` | int | **Stage E** — count of wins-rated rows for this player (determined-outcome matches only; always ≤ `matches_played`). |
 | `ratings[].wins_record` | object | **Stage E** — `{w, l, d}` tallies over the wins-rated rows (draws = attested/adjudicated `decided_by == "draw"`). |
 | `wins_k_base` / `wins_k_floor` / `wins_provisional_prior` / `wins_logistic_scale` | float | **Stage E** — wins-ladder constants: symmetric K decaying 24 → 12 over the first 10 wins-rated games; classic chess logistic scale 400; team-MEAN reference (Phase 2C rejected MAX/softmax for update rules); no loss aversion, no floor, no inactivity boost. |
@@ -3270,6 +3271,8 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].days_since_last_match` | int | Whole days from last appearance to `corpus_latest_date`. |
 | `ratings[].last_seen_date` | ISO date | Date of the last any-match appearance (corpus or F9). Empty string when never seen. |
 | `ratings[].comeback_games_played` / `comeback_games_remaining` | int | Meaningful when `inactive_status == "returning"`. |
+| `ratings[].band_index` | int | Display-only sticky VTSR-T band, 0 (Tier 5 Lower) … 9 (Tier 1 Upper). Replays the player's chronological post-match ratings; moves to an adjacent band only after clearing its edge by `band_config.buffer_pts`, tier lines included, so it can differ from the raw tier of `vtsr` near a line. Every page shows this band instead of the number (§13.8). Canonical file only (absent on the alpha-override pairs). Does not change the rating. |
+| `ratings[].band_tier` / `band_half` / `band_label` | int / string / string | Same band, decoded: tier 1–5, `"upper"` \| `"lower"`, and e.g. `"Tier 2 · Upper"`. The UI applies the Provisional gate (`matches_provisional`) on top. |
 | `ratings[].last_match_id` | string | Match id of the player's most recent rated match. |
 | `ratings[].last_delta` | float | The Δ applied at `last_match_id` (negative = loss). |
 | `ratings[].peak_vtsr` | float | Highest headline rating (`vtsr`) this player has ever held. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate. |
@@ -3578,7 +3581,7 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
           "win_rate": { "i": { "wins": 1, "decided": 2 }, "e": { "wins": 1, "decided": 2 }, "f": { "wins": 0, "decided": 0 } }
         },
         "best_players": [
-          { "steam64": "76561198045727092", "name": "Snake", "delta_sum": 12.4, "matches": 2 }
+          { "steam64": "76561198045727092", "name": "Snake", "delta_sum": 12.4, "matches": 2, "beat": 1 }
         ],
         "best_commanders": [],
         "records": {
@@ -3621,7 +3624,7 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
 | `last_played` | string \| null | Max `match.date`. `null` on unplayed. |
 | `top_commanders[]` | array | Top 10 commanders on this map. Recorded slot-1 / slot-6 rows (campod and low-activity skipped) plus one commanded game per non-overlapping F9 duel. Sort: wins, then win rate, then matches commanded. |
 | `recent_matches[]` | array | 10 most recent games by date, mixing recorded matches and F9 duels. A community row has `source: "f9"`, an empty `id`, and `winner_decided_by: "f9"`. |
-| `insights` | object | `wins` stays recorded-only (`{t1, t2, contested, unclear}`). `factions` and `player_counts` add F9 picks, wins, and lobby sizes (`3v3`/`4v4`/`5v5` → 6/8/10). `best_players` is recorded thug VTSR-T only. `best_commanders` uses the same win/loss counts as `top_commanders`. |
+| `insights` | object | `wins` stays recorded-only (`{t1, t2, contested, unclear}`). `factions` and `player_counts` add F9 picks, wins, and lobby sizes (`3v3`/`4v4`/`5v5` → 6/8/10). `best_players` is recorded thug VTSR-T only: ordered by `delta_sum` (never displayed), with `beat` = games whose change reached `ON_PAR_DELTA` (the card reads "Beat expectation in `beat` of `matches` games"). `best_commanders` uses the same win/loss counts as `top_commanders`. |
 
 ### `top_commanders[]` row shape
 

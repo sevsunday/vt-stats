@@ -93,6 +93,32 @@
     return n > 0 ? '+' + v : v;
   }
 
+  // VTSR-T never renders as a number: a VTSR-T gap shows as its effect on
+  // win chance, a current VTSR-T as a band. VTSR-C keeps its numbers.
+  function winShiftPct(gap) {
+    if (gap == null || !isFinite(gap) || !window.VTSRDisplay) return null;
+    return VTSRDisplay.gapToWinShift(gap) * 100;
+  }
+  function fmtWinShift(gap) {
+    if (gap == null || !isFinite(gap) || !window.VTSRDisplay) return '\u2014';
+    return VTSRDisplay.winShiftText(VTSRDisplay.gapToWinShift(gap));
+  }
+  function fmtPct(n) {
+    if (n == null || !isFinite(n)) return '\u2014';
+    const r = Math.round(n);
+    return (r > 0 ? '+' : (r < 0 ? '\u2212' : '\u00b1')) + Math.abs(r) + '%';
+  }
+  function isThugMetric(metric) {
+    return metric === 'oppThug' || metric === 'gap' || (metric === 'own' && state.role !== 'commander');
+  }
+  function bandHtml(vtsr, row) {
+    if (!window.VTSRDisplay) return '\u2014';
+    const b = row ? VTSRDisplay.bandFor(row)
+      : (vtsr != null && isFinite(vtsr) ? VTSRDisplay.rawBandFor(vtsr) : null);
+    if (!b) return '\u2014';
+    return VTSRDisplay.bandChipHtml(b, { compact: true, title: b.label });
+  }
+
   function slugFor(sid, slugMap) {
     if (!slugMap) return null;
     let entry = slugMap[sid];
@@ -196,6 +222,7 @@
       const p = ensurePlayer(bySid, sid, r.name, slugMap);
       if (p) {
         p.vtsrT = r.vtsr;
+        p.thugRow = r;
         p.thugRanked = r.leaderboard_eligible !== false;
         if (r.name) p.name = r.name;
       }
@@ -414,6 +441,7 @@
         gap: mean(withGap),
         oppCmdr: mean(withCmdr),
         own: state.role === 'commander' ? p.vtsrC : p.vtsrT,
+        ownRow: state.role === 'commander' ? null : (p.thugRow || null),
         ranked: state.role === 'commander' ? p.cmdrRanked : p.thugRanked,
       });
     }
@@ -473,13 +501,22 @@
   function metricSpec(metric) {
     const ownLabel = state.role === 'commander' ? 'Current VTSR-C' : 'Current VTSR-T';
     const specs = {
-      oppThug: { label: 'Opp. thug VTSR-T', axis: 'vs a typical schedule', versus: 'vs a typical schedule', format: fmtRating },
-      gap: { label: 'Thug gap', axis: 'opposing thugs ahead of own', versus: 'vs even', format: fmtSigned },
+      oppThug: { label: 'Opp. thug strength', axis: 'win chance lost to opposing thugs, vs a typical schedule', versus: 'win chance vs a typical schedule' },
+      gap: { label: 'Thug gap', axis: 'win chance lost to opposing thugs ahead of own', versus: 'win chance from thugs' },
       oppCmdr: { label: 'Opp. cmdr VTSR-C', axis: 'vs a typical opponent commander', versus: 'vs typical', format: fmtRating },
       matches: { label: 'Matches', axis: 'vs a typical match count', versus: 'vs typical', format: fmtCount },
-      own: { label: ownLabel, axis: 'vs a typical rating', versus: 'vs typical', format: fmtRating },
+      own: state.role === 'commander'
+        ? { label: ownLabel, axis: 'vs a typical rating', versus: 'vs typical', format: fmtRating }
+        : { label: ownLabel, axis: 'win chance vs a typical thug', versus: 'win chance vs a typical thug' },
     };
     return specs[metric] || specs.oppThug;
+  }
+
+  // Mean opposing-thug VTSR-T across the rows on screen: the "typical
+  // schedule" both the table and the chart measure against.
+  function typicalOppThug(rows) {
+    return mean(rows.map(function (r) { return r.oppThug; })
+      .filter(function (v) { return v != null && isFinite(v); }));
   }
 
   function fmtCount(n) {
@@ -518,10 +555,12 @@
     const raw = rows.map(function (r) { return r[metric]; });
     const present = raw.filter(function (v) { return v != null && isFinite(v); });
     const center = metric === 'gap' ? 0 : mean(present);
+    const thugMetric = isThugMetric(metric);
     const deltas = raw.map(function (v) {
       if (v == null || !isFinite(v) || center == null) return null;
       const d = v - center;
-      return metric === 'gap' ? -d : d;
+      const signed = metric === 'gap' ? -d : d;
+      return thugMetric ? winShiftPct(signed) : signed;
     });
     const colors = deltas.map(function (delta, i) {
       if (delta == null) return 'transparent';
@@ -556,11 +595,16 @@
                 const row = rows[item.dataIndex];
                 const value = raw[item.dataIndex];
                 const delta = deltas[item.dataIndex];
-                const lines = [spec.label + ' ' + spec.format(value)];
+                const lines = [thugMetric ? spec.label : spec.label + ' ' + spec.format(value)];
                 if (metric === 'gap' && value != null && isFinite(value)) {
+                  lines.push(fmtWinShift(value) + ' ' + spec.versus);
                   lines.push(value > 0 ? 'own thugs ahead' : (value < 0 ? 'opposing thugs ahead' : 'even'));
+                } else if (delta != null && metric === 'oppThug') {
+                  const mag = Math.abs(Math.round(delta));
+                  lines.push(mag === 0 ? 'About a typical schedule'
+                    : (delta > 0 ? 'Costs ' : 'Worth ') + mag + '% win chance vs a typical schedule');
                 } else if (delta != null) {
-                  lines.push(fmtSigned(delta) + ' ' + spec.versus);
+                  lines.push((thugMetric ? fmtPct(delta) : fmtSigned(delta)) + ' ' + spec.versus);
                 }
                 lines.push(row.matches + ' matches');
                 return lines;
@@ -571,7 +615,9 @@
         scales: {
           x: {
             title: { display: true, text: spec.axis, color: t.textMuted },
-            ticks: { color: t.textMuted },
+            ticks: thugMetric
+              ? { color: t.textMuted, callback: function (v) { return fmtPct(v); } }
+              : { color: t.textMuted },
             grid: { color: t.border },
           },
           y: {
@@ -702,6 +748,10 @@
               },
               label: function (item) {
                 if (item.datasetIndex === 0) return 'Win rate ' + item.raw.toFixed(1) + '%';
+                if (role !== 'commander') {
+                  const b = window.VTSRDisplay && item.raw != null ? VTSRDisplay.rawBandFor(item.raw) : null;
+                  return 'VTSR-T ' + (b ? b.label : '\u2014');
+                }
                 return item.dataset.label + ' ' + fmtRating(item.raw);
               },
             },
@@ -726,12 +776,19 @@
             ticks: { color: t.textMuted },
             grid: { color: t.border },
           },
-          y1: {
-            position: 'right',
-            title: { display: true, text: role === 'commander' ? 'VTSR-C' : 'VTSR-T', color: t.textMuted },
-            ticks: { color: t.textMuted },
-            grid: { display: false },
-          },
+          y1: (role === 'commander' || !window.VTSRDisplay)
+            ? {
+              position: 'right',
+              title: { display: true, text: 'VTSR-C', color: t.textMuted },
+              ticks: { color: t.textMuted },
+              grid: { display: false },
+            }
+            : VTSRDisplay.applyTierAxis({
+              position: 'right',
+              title: { display: true, text: 'VTSR-T band', color: t.textMuted },
+              ticks: { color: t.textMuted },
+              grid: { display: false },
+            }),
         },
       },
     });
@@ -750,7 +807,7 @@
     const before = ratingBeforeWindow(events, start);
     const after = ratingAt(events, end, false);
     if (before == null || after == null) return null;
-    return after - before;
+    return { delta: after - before, before: before, after: after };
   }
 
   function matchCount(player, role) {
@@ -771,10 +828,22 @@
       if (matchCount(p, role) < SAMPLE_FLOOR) continue;
       const climb = climbFor(p, role);
       if (climb == null) continue;
-      out.push({ steam64: p.steam64, name: p.name, climb: climb });
+      out.push({ steam64: p.steam64, name: p.name, climb: climb.delta, before: climb.before, after: climb.after, role: role });
     }
     out.sort(function (a, b) { return b.climb - a.climb; });
     return out.slice(0, 5);
+  }
+
+  // VTSR-T climbs read as a band move; VTSR-C climbs keep points.
+  function climbLabelHtml(r) {
+    if (r.role === 'commander' || !window.VTSRDisplay) {
+      return '<span class="vt-mono">' + fmtSigned(r.climb) + '</span>';
+    }
+    const from = VTSRDisplay.rawBandFor(r.before);
+    const to = VTSRDisplay.rawBandFor(r.after);
+    if (!from || !to) return '\u2014';
+    if (from.index === to.index) return '<span class="text-muted small">' + esc(to.shortLabel) + ', held</span>';
+    return '<span class="small">' + esc(from.shortLabel) + ' \u2192 ' + esc(to.shortLabel) + '</span>';
   }
 
   function playerLink(name, sid) {
@@ -824,6 +893,7 @@
     }
     const tbody = document.querySelector('#vt-players-schedule-table tbody');
     if (tbody) {
+      const typical = typicalOppThug(shown);
       const html = shown.map(function (r) {
         const small = r.matches < SAMPLE_FLOOR ? ' vt-players-row-small' : '';
         const selected = r.steam64 === state.selectedSid ? ' vt-players-row-selected' : '';
@@ -831,10 +901,12 @@
           + '<td>' + playerLink(r.name, r.steam64) + '</td>'
           + '<td class="text-end vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="'
           + esc(matchSplitTip(r)) + '">' + r.matches + '</td>'
-          + '<td class="text-end vt-mono">' + fmtRating(r.oppThug) + '</td>'
-          + '<td class="text-end vt-mono">' + fmtSigned(r.gap) + '</td>'
+          + '<td class="text-end vt-mono">'
+          + (r.oppThug != null && typical != null ? fmtWinShift(typical - r.oppThug) : '\u2014') + '</td>'
+          + '<td class="text-end vt-mono">' + fmtWinShift(r.gap) + '</td>'
           + '<td class="text-end vt-mono">' + fmtRating(r.oppCmdr) + '</td>'
-          + '<td class="text-end vt-mono">' + fmtRating(r.own) + '</td>'
+          + '<td class="text-end vt-mono">'
+          + (state.role === 'commander' ? fmtRating(r.own) : bandHtml(r.own, r.ownRow)) + '</td>'
           + '</tr>';
       }).join('');
       disposeMatchTips(tbody);
@@ -856,7 +928,7 @@
     return '<div class="list-group">' + list.map(function (r) {
       return '<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between" data-vt-pick="' + esc(r.steam64) + '">'
         + '<span>' + esc(r.name) + '</span>'
-        + '<span class="vt-mono">' + fmtSigned(r.climb) + '</span>'
+        + climbLabelHtml(r)
         + '</button>';
     }).join('') + '</div>';
   }
