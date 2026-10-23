@@ -135,18 +135,33 @@
       + `<span class="vt-tier-badge vt-tier-${band.tier}">${band.roman}</span>${half}</span>`;
   }
 
+  // White pin on the sticky tier's display track: 0 at the demotion
+  // edge, 100 at the promotion edge. Null when the row has no bar
+  // (provisional, or no rating). `band` defaults to bandFor(row).
+  // The ladder's Position column sorts on this so order matches the line.
+  // Ratings past the track clamp to the same end and tie.
+  function positionPinPct(row, band) {
+    band = band || bandFor(row);
+    if (!band || band.provisional) return null;
+    const track = TIER_TRACK[band.tier];
+    const v = Number(row && row.vtsr);
+    if (!track || !Number.isFinite(v)) return null;
+    const span = track[1] - track[0];
+    if (!(span > 0)) return null;
+    const clamped = Math.min(track[1], Math.max(track[0], v));
+    return ((clamped - track[0]) / span) * 100;
+  }
+
   // Fuzzy marker inside the displayed tier's track. `row` needs vtsr;
-  // `band` defaults to bandFor(row). No digits are rendered.
+  // `band` defaults to bandFor(row). No digits are rendered. The pin
+  // is positionPinPct; the soft width is the shared noise band.
   function positionBarHtml(row, sigma, opts) {
     opts = opts || {};
     const band = opts.band || bandFor(row);
-    if (!band || band.provisional) return '';
+    const pct = positionPinPct(row, band);
+    if (pct == null) return '';
     const track = TIER_TRACK[band.tier];
-    const v = Number(row && row.vtsr);
-    if (!track || !Number.isFinite(v)) return '';
     const span = track[1] - track[0];
-    const clamped = Math.min(track[1], Math.max(track[0], v));
-    const pct = ((clamped - track[0]) / span) * 100;
     const s = Number.isFinite(sigma) && sigma > 0 ? sigma : 50;
     const width = Math.min(100, Math.max(12, ((2 * s) / span) * 100));
     const splitPct = band.tier === 5
@@ -248,6 +263,7 @@
     bandFor,
     rawBandFor,
     bandChipHtml,
+    positionPinPct,
     positionBarHtml,
     deltaVerdict,
     verdictChipHtml,

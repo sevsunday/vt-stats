@@ -261,6 +261,15 @@
           vb = cb ? ((cb.overall_accuracy_est != null ? cb.overall_accuracy_est : cb.overall_accuracy) || 0) : -1;
           break;
         }
+        case 'position': {
+          const pin = (row) => {
+            const p = VTSRDisplay.positionPinPct(row);
+            return p == null ? -1 : p;
+          };
+          va = pin(a);
+          vb = pin(b);
+          break;
+        }
         case 'band':
         default:               va = VTSRDisplay.bandFor(a).index; vb = VTSRDisplay.bandFor(b).index; break;
       }
@@ -683,14 +692,16 @@
     </tr>`;
   }
 
-  // Tier groups (1 -> 5, reversed when the Tier column sorts ascending).
-  // On the default band sort each tier splits into Upper / Lower
-  // sub-groups, names A-Z inside each; any other column sort reorders
-  // rows inside the tier group instead.
+  // Tier groups (1 -> 5, reversed when the Band column sorts ascending).
+  // Band and Position each keep the Upper / Lower sub-groups. Band
+  // sorts names A-Z inside a half; Position sorts by the white pin
+  // inside that half and does not flip which half comes first. Any
+  // other column sort reorders rows inside the whole tier group.
   function renderVtsrGroupedRows(ranked, elo, noiseSigma) {
     const colSpan = 9;
     const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
     const bandSort = vtsrSortState.key === 'band';
+    const halfSort = bandSort || vtsrSortState.key === 'position';
 
     const buckets = new Map();
     for (const r of ranked) {
@@ -713,8 +724,10 @@
       const b = buckets.get(id);
       if (!b || !b.rows.length) continue;
       html += vtsrTierGroupHeaderHtml(b.tier, b.rows.length, colSpan);
-      if (bandSort && id !== 0) {
-        const halves = vtsrSortState.asc ? ['lower', 'upper'] : ['upper', 'lower'];
+      if (halfSort && id !== 0) {
+        // Only the Band column reverses half order. Position keeps
+        // Upper above Lower and reorders players inside each half.
+        const halves = (bandSort && vtsrSortState.asc) ? ['lower', 'upper'] : ['upper', 'lower'];
         for (const half of halves) {
           const rows = b.rows.filter(r => VTSRDisplay.bandFor(r).half === half);
           if (!rows.length) continue;
