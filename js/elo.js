@@ -824,15 +824,28 @@
   // absent).
   // ----------------------------------------------------------------------
 
-  // Friendly labels for the VTSR-C v2 economy axes (mirror of the frozen
-  // formulas in critique/decisions/vtsr-c-v2-composite.md).
+  // Friendly labels for the VTSR-C economy axes (mirror of the frozen
+  // formulas in critique/decisions/vtsr-c-v2-composite.md, 2026-10-23).
+  // Every axis is measured across the whole game.
   const CMDR_ECON_AXIS_META = {
-    pool_tempo:         { label: 'Pool tempo',         desc: 'Who reached 3 extractors first, inside the opening 4 minutes. Later than that, or never, counts as a missed open.' },
-    combat_conversion:  { label: 'Combat conversion',  desc: 'In the opening 4 minutes, how much of the scrap earned became combat ships. Pods and scavengers do not count.' },
-    regen_tempo:        { label: 'Regen tempo',        desc: 'In the opening 4 minutes, how much time the bank spent in the fast-regen (red) band, and only while the recycler was alive.' },
-    replacement_ratio:  { label: 'Replacement ratio',  desc: 'Combat ships built per ship lost. Shown, not scored — it mostly restates who was winning, and it is not rebuild speed. Not the Thug supply card.' },
-    upgrade_share:      { label: 'Upgrade share',      desc: 'Share of extractors that were upgraded by the end. Shown, not scored — a rush should not upgrade, and the regen benefit is already in regen tempo.' },
-    loose_share:        { label: 'Loose share',        desc: 'Across the whole match, how much of the scrap earned was loose collected by scavengers. Shown, not scored. The recording sees the pickup, not how long the scrap sat on the ground.' },
+    pool_lead:              { label: 'Pools held',          desc: 'Average number of pools held across the whole game.' },
+    non_green_share:        { label: 'Time out of green',   desc: 'Share of time the scrap bank sat in red or yellow, while the recycler was alive. Green is the slow band (1/3 scrap a second, nothing at the cap), so less green is better.' },
+    combat_conversion:      { label: 'Real-ship spending',  desc: 'Scrap spent on combat ships, as a share of scrap earned. Empty scouts and empty Xypos do not count; pods, scavengers and constructor builds never do.' },
+    upgrade_time:           { label: 'Upgrades held',       desc: 'Average number of upgraded pools held across the whole game. Two upgrades kept all game beat two that were built earlier and then half lost.' },
+    replacement_ratio:      { label: 'Ships per loss',      desc: 'Combat ships built per human ship lost, across the whole game. Shown, not scored: it mostly restates who was winning.' },
+    replacement_ratio_real: { label: 'Real ships per loss', desc: 'The same, without empty scouts and empty Xypos among the ships built. Shown, not scored.' },
+    loose_share:            { label: 'Loose share',         desc: 'Across the whole match, how much of the scrap earned was loose collected by scavengers. Shown, not scored. The recording sees the pickup, not how long the scrap sat on the ground.' },
+  };
+
+  const cmdrEconPct = (x) => `${Math.round(x * 100)}%`;
+  const CMDR_ECON_VALUE_FMT = {
+    pool_lead: (x) => x.toFixed(1),
+    non_green_share: cmdrEconPct,
+    combat_conversion: cmdrEconPct,
+    upgrade_time: (x) => x.toFixed(1),
+    replacement_ratio: (x) => x.toFixed(2),
+    replacement_ratio_real: (x) => x.toFixed(2),
+    loose_share: cmdrEconPct,
   };
 
   /** All duels involving one commander, newest first, each tagged with
@@ -920,15 +933,23 @@
         const meta = CMDR_ECON_AXIS_META[axis] || { label: axis, desc: '' };
         const unscored = a.weight === 0;
         const label = unscored ? `${meta.label} (not scored)` : meta.label;
+        const vals = a.values || {};
+        const fmt = CMDR_ECON_VALUE_FMT[axis];
+        const mine = vals[String(telemEntry.side)];
+        const theirs = vals[String(3 - telemEntry.side)];
+        const hasVals = fmt && typeof mine === 'number' && typeof theirs === 'number';
+        const valueTxt = hasVals ? ` This commander ${fmt(mine)}, opponent ${fmt(theirs)}.` : '';
+        const valueChip = hasVals
+          ? `<span class="vt-axis-bar-weighted">${esc(fmt(mine))} vs ${esc(fmt(theirs))}</span>` : '';
         return `<div class="vt-axis-bar-row ${cls}"
                      data-bs-toggle="tooltip" data-bs-placement="top"
-                     title="${esc(meta.desc)} Differential z vs the opposing commander: ${z >= 0 ? '+' : ''}${z.toFixed(2)}">
+                     title="${esc(meta.desc)}${esc(valueTxt)} Differential z vs the opposing commander: ${z >= 0 ? '+' : ''}${z.toFixed(2)}">
           <span class="vt-axis-bar-name">${esc(label)}</span>
           <span class="vt-axis-bar-track">
             <span class="vt-axis-bar-center"></span>
             <span class="vt-axis-bar-fill" style="${fillStyle}"></span>
           </span>
-          <span class="vt-axis-bar-z">${z >= 0 ? '+' : ''}${z.toFixed(2)}</span>
+          <span class="vt-axis-bar-z">${z >= 0 ? '+' : ''}${z.toFixed(2)}${valueChip}</span>
         </div>`;
       }).join('');
       const p = sign * (perf.p || 0);
@@ -1432,7 +1453,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 4 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
+        <p class="mb-1">These 4 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record a commander economy read across the whole game &mdash; pools held, time the scrap bank spent out of green, scrap spent on real combat ships (empty scouts excluded), and upgrades held, plus unscored ships-per-loss and loose-share readouts &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Oct 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;
@@ -1486,7 +1507,7 @@
       },
       {
         icon: 'bi-cash-stack', title: 'Economy is recorded, not yet scored',
-        body: `<p>Matches recorded with the new collector carry an <strong>opening economy read</strong> against the other commander: who reached 3 extractors first, how much of the first 4 minutes of scrap became combat ships, and how much of that opening was spent in the fast-regen band. Three other readouts &mdash; ships built per ship lost, upgrade share, and how much of the scrap earned all match was loose collected &mdash; are shown and <strong>not scored</strong>. None of it moves the rating yet. The blend stays <strong>outcome-pure</strong> until a fresh sample, recorded after 23 Sep 2026, clears the pre-registered rule. The formula is not tuned to fit the matches that judge it.</p>`,
+        body: `<p>Matches recorded with the new collector carry a <strong>commander economy read</strong> against the other commander, measured across the whole game. Four axes are candidates: pools held, time the scrap bank spent out of green (the slow band), scrap spent on real combat ships with empty scouts and empty Xypos excluded, and upgrades held. Three other readouts &mdash; ships built per ship lost, the same without empty scouts, and how much of the scrap earned all match was loose collected &mdash; are shown and <strong>not scored</strong>. None of it moves the rating yet. The blend stays <strong>outcome-pure</strong> until a fresh sample, recorded after 23 Oct 2026, clears the pre-registered rule. The formula is not tuned to fit the matches that judge it.</p>`,
         verdict: 'The first telemetry match is the cautionary tale: the economy composite pointed at the commander who lost.',
       },
       {
@@ -1803,7 +1824,7 @@
       const promoHtml = (promo && promo.verdict) ? `<p class="vt-elo-acc-blurb">Blend status: <strong>${esc(promo.verdict)}</strong>. ${esc(promo.note || '')} Confirmation duels so far: ${promo.n_confirmation ?? 0} (need ${promo.n_confirmation_required ?? 25}, dated after ${esc(promo.amended_on || '')}).</p>` : '';
       cmdrEconHtml += `<div class="vt-elo-acc-section">
         <h6>Do the commander economy axes predict duels?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ea.n_scored ?? 0} verified duels with proto v4 telemetry: when one commander led an economy axis, how often did they win? That same-match agreement is <strong>necessary and not sufficient</strong>. It does not turn the blend on. The blend stays off until a fresh sample, recorded after the 23 Sep 2026 rule change, also holds up in close games and actually improves prediction.</p>
+        <p class="vt-elo-acc-blurb">Across the ${ea.n_scored ?? 0} verified duels with proto v4 telemetry: when one commander led an economy axis, how often did they win? That same-match agreement is <strong>necessary and not sufficient</strong>. It does not turn the blend on. The blend stays off until a fresh sample, recorded after the 23 Oct 2026 rule change, also holds up in close games, already shows in the opening minutes, and actually improves prediction.</p>
         ${promoHtml}
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;

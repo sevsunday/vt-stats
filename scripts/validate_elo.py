@@ -123,28 +123,33 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 9  # v1.8: format-gate audit (#20) on top of v1.7 (#15-#19)
+VALIDATOR_VERSION = 10  # v1.10: VTSR-C whole-game axes (#12d prefixes)
 
-# 2026-09-23 VTSR-C amendment. Confirmation duels are dated strictly after
+# 2026-10-23 VTSR-C amendment. Confirmation duels are dated strictly after
 # this day. Mirrors elo_commander.ECON_SEMANTICS_AMENDED_ON; the history
 # header wins when it is present.
-ECON_SEMANTICS_AMENDED_ON = "2026-09-23"
+ECON_SEMANTICS_AMENDED_ON = "2026-10-23"
 ECON_PROMOTE_MIN_CONFIRMATION = 25
 ECON_PROMOTE_CI_FLOOR = 0.55
 ECON_PROMOTE_MIN_AXES = 2
 ECON_PROMOTE_CLOSE_FLOOR = 0.50
 ECON_PROMOTE_CLOSE_MIN_N = 15
-ECON_PROMOTE_CLOSE_FRAC = 0.75
+# Close = contested, or the duel's own pre-match expected score (team 1)
+# inside this band. No in-match data.
+ECON_PROMOTE_CLOSE_EXPECTED_BAND = (0.40, 0.60)
+# Prefix gate: an axis at or below this agreement in every prefix cannot
+# count toward the CI-floor condition.
+ECON_PROMOTE_PREFIX_FLOOR = 0.50
+ECON_PREFIX_KEYS = ("240", "480", "720")
 ECON_PROMOTE_LOGLOSS_DELTA = 0.01
 ECON_OPENING_WINDOW_SEC = 240.0
-ECON_SCORED_AXES = ("pool_tempo", "combat_conversion", "regen_tempo")
+ECON_SCORED_AXES = ("pool_lead", "non_green_share", "combat_conversion",
+                    "upgrade_time")
 # Retired full-match formulas, diagnostic only. Not a promote sample.
 ECON_LEGACY_AXES = (
     "pool_full", "production_full", "replacement_full",
     "efficiency_full", "upgrade_full",
 )
-RECYCLER_STEMS = frozenset({"ibrecy_vsr", "ebrecym_vsr", "fbrecy_vsr"})
-
 # Last-N windows for the ELO page. Determined = provable-winner matches
 # the accuracy metrics already score. Rated = every non-excluded history
 # row, provable or not. Tunable without a validation_summary schema bump.
@@ -2291,10 +2296,9 @@ def metric_cmdr_econ_axes(
     raw differential, so sign agreement = share of duels where
     ``sign(diff) == sign(team-1 won)``. Exact zero diffs earn half credit.
 
-    This is THE gate feeding the pre-registered promote rule in
-    critique/decisions/vtsr-c-v2-composite.md: alpha_c may only drop below
-    1.0 when >= 3 axes clear 0.55 with none below 0.35 (>= 25 telemetry
-    duels); an axis dies at < 0.40 with n >= 40.
+    This is the discovery-sample direction check. The promote rule in
+    critique/decisions/vtsr-c-v2-composite.md (2026-10-23 amendment)
+    scores the confirmation sample only (metric_cmdr_promote).
     """
     if not cmdr_history or not (cmdr_history.get("duels") or []):
         return {
@@ -2548,72 +2552,43 @@ def _slot_side(slot: Any) -> int | None:
     return None
 
 
-def _loser_recycler_up_late(md: dict) -> bool | None:
-    """True when the losing recycler is still up at 75% of duration.
-
-    "Still up" = no kill-feed destruction of that side's recycler at or
-    before the cutoff (a later rebuild after an early death is not
-    reconstructed; an early death stays "not up", which fails safe).
-    None when the loser or the clock can't be read.
-    """
-    match = md.get("match") or {}
-    winner = match.get("winner") or {}
-    loser = winner.get("loser")
-    if loser not in (1, 2):
-        team = winner.get("team")
-        if team == 1:
-            loser = 2
-        elif team == 2:
-            loser = 1
-        else:
-            return None
-    duration = match.get("duration_sec") or 0
-    if not isinstance(duration, (int, float)) or duration <= 0:
-        return None
-    tick_rate = match.get("tick_rate") or 20
-    if not isinstance(tick_rate, (int, float)) or tick_rate <= 0:
-        tick_rate = 20
-    tick_range = match.get("tick_range") or [0, 0]
-    try:
-        t0 = float(tick_range[0]) if tick_range else 0.0
-    except (TypeError, ValueError, IndexError):
-        t0 = 0.0
-    cutoff = t0 + ECON_PROMOTE_CLOSE_FRAC * float(duration) * float(tick_rate)
-    first: float | None = None
-    for row in (md.get("kills") or {}).get("feed") or []:
-        if _odf_stem(row.get("victim_odf")) not in RECYCLER_STEMS:
-            continue
-        if _slot_side(row.get("victim_team")) != loser:
-            continue
-        tick = row.get("tick")
-        if not isinstance(tick, (int, float)):
-            continue
-        if first is None or tick < first:
-            first = float(tick)
-    if first is None:
+def _is_close_duel(duel: dict) -> bool:
+    """2026-10-23 close subset: contested, or the pre-match call was near
+    even (team 1's stored expected score inside the band). Uses no
+    in-match data."""
+    if duel.get("decided_by") == "contested":
         return True
-    return first > cutoff
-
-
-def _is_close_duel(md: dict | None) -> bool:
-    if not md:
+    e1 = ((duel.get("commanders") or {}).get("1") or {}).get("expected")
+    if not isinstance(e1, (int, float)):
         return False
-    winner = (md.get("match") or {}).get("winner") or {}
-    if winner.get("decided_by") == "contested":
-        return True
-    return _loser_recycler_up_late(md) is True
+    lo, hi = ECON_PROMOTE_CLOSE_EXPECTED_BAND
+    return lo <= float(e1) <= hi
 
 
-def _econ_sign_rows(duels: list[dict]) -> list[dict]:
-    """Sign-agreement rows for an already-filtered duel list."""
+def _axis_diffs(duel: dict) -> dict[str, Any]:
+    return {axis: (block or {}).get("diff") for axis, block in
+            ((duel.get("performance") or {}).get("axes") or {}).items()}
+
+
+def _prefix_diffs(prefix: str):
+    def get(duel: dict) -> dict[str, Any]:
+        perf = duel.get("performance") or {}
+        return dict((perf.get("prefix_diffs") or {}).get(prefix) or {})
+    return get
+
+
+def _econ_sign_rows(duels: list[dict], diffs_of=_axis_diffs) -> list[dict]:
+    """Sign-agreement rows for an already-filtered duel list.
+
+    `diffs_of(duel)` returns the team-1-perspective `{axis: diff}` to
+    score; the default reads the whole game."""
     per_axis: dict[str, dict[str, Any]] = {}
     for duel in duels:
         outcome = duel.get("outcome")
         if outcome not in ("team1", "team2"):
             continue
         t1_won = outcome == "team1"
-        for axis, block in ((duel.get("performance") or {}).get("axes") or {}).items():
-            diff = block.get("diff")
+        for axis, diff in diffs_of(duel).items():
             if not isinstance(diff, (int, float)):
                 continue
             rec = per_axis.setdefault(
@@ -2643,11 +2618,52 @@ def _econ_sign_rows(duels: list[dict]) -> list[dict]:
     return rows
 
 
+def _econ_prefix_tables(duels: list[dict]) -> dict[str, dict[str, Any]]:
+    """Per-prefix sign agreement from ``performance.prefix_diffs``: the
+    same axes re-measured from 0 to 240 / 480 / 720 s. A duel appears in
+    a prefix only when the match ran past it."""
+    out: dict[str, dict[str, Any]] = {}
+    for key in ECON_PREFIX_KEYS:
+        subset = [d for d in duels
+                  if key in ((d.get("performance") or {}).get("prefix_diffs") or {})]
+        out[key] = {
+            "n_duels": len(subset),
+            "axes": _econ_sign_rows(subset, _prefix_diffs(key)),
+        }
+    return out
+
+
+def metric_cmdr_econ_prefixes(
+    cmdr_history: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """#12d (v1.10): econ-axis sign agreement by time prefix, every
+    telemetry duel with a determined outcome. Descriptive. A signal that
+    appears before the game is decided shows up in the early prefixes;
+    one that only reads the scoreboard does not."""
+    if not cmdr_history or not (cmdr_history.get("duels") or []):
+        return {
+            "available": False,
+            "skipped_reason": "elo_commander_history.json missing or empty",
+        }
+    duels = [d for d in cmdr_history["duels"]
+             if (d.get("performance") or {}).get("available")
+             and d.get("outcome") in ("team1", "team2")]
+    if not duels:
+        return {"available": False,
+                "skipped_reason": "no determined telemetry duels"}
+    return {
+        "available": True,
+        "n_duels": len(duels),
+        "prefixes": _econ_prefix_tables(duels),
+        "sample": "all telemetry duels (discovery + confirmation)",
+    }
+
+
 def metric_cmdr_promote(
     cmdr_history: dict[str, Any] | None,
     per_match: dict[str, Any],
 ) -> dict[str, Any]:
-    """2026-09-23 promote rule. Discovery duels never flip alpha_c.
+    """2026-10-23 promote rule. Discovery duels never flip alpha_c.
 
     Confirmation = telemetry duels dated strictly after
     ``econ_semantics_amended_on``. HOLD unless every gate passes.
@@ -2686,12 +2702,27 @@ def metric_cmdr_promote(
 
     conf_rows = _econ_sign_rows(confirmation)
     by_axis = {r["axis"]: r for r in conf_rows}
+    conf_prefixes = _econ_prefix_tables(confirmation)
     cleared = []
+    prefix_blocked = []
     for axis in scored_names:
         row = by_axis.get(axis)
         lo = (row or {}).get("ci_lower")
-        if isinstance(lo, (int, float)) and lo > ECON_PROMOTE_CI_FLOOR:
-            cleared.append(axis)
+        if not (isinstance(lo, (int, float)) and lo > ECON_PROMOTE_CI_FLOOR):
+            continue
+        early = [
+            r.get("sign_agreement")
+            for table in conf_prefixes.values()
+            for r in table["axes"] if r["axis"] == axis
+        ]
+        if not any(isinstance(a, (int, float)) and a > ECON_PROMOTE_PREFIX_FLOOR
+                   for a in early):
+            prefix_blocked.append(axis)
+            reasons.append(
+                f"{axis} clears the full window but is at or below "
+                f"{ECON_PROMOTE_PREFIX_FLOOR} in every prefix")
+            continue
+        cleared.append(axis)
     if len(cleared) < ECON_PROMOTE_MIN_AXES:
         reasons.append(
             f"{len(cleared)} scored axis(es) have a Wilson lower bound "
@@ -2699,11 +2730,7 @@ def metric_cmdr_promote(
             f"{len(scored_names)})"
         )
 
-    close = []
-    for duel in confirmation:
-        md = per_match.get(duel.get("match_id") or "")
-        if _is_close_duel(md):
-            close.append(duel)
+    close = [duel for duel in confirmation if _is_close_duel(duel)]
     close_rows = _econ_sign_rows(close)
     close_by = {r["axis"]: r for r in close_rows}
     close_testable = len(close) >= ECON_PROMOTE_CLOSE_MIN_N
@@ -2756,18 +2783,23 @@ def metric_cmdr_promote(
         "ci_floor": ECON_PROMOTE_CI_FLOOR,
         "close_floor": ECON_PROMOTE_CLOSE_FLOOR,
         "close_min_n": ECON_PROMOTE_CLOSE_MIN_N,
+        "close_expected_band": list(ECON_PROMOTE_CLOSE_EXPECTED_BAND),
+        "prefix_floor": ECON_PROMOTE_PREFIX_FLOOR,
         "reasons": reasons,
         "confirmation_axes": conf_rows,
         "axes_clearing_ci_floor": cleared,
+        "axes_blocked_by_prefix": prefix_blocked,
         "close": {
             "n": len(close),
             "testable": close_testable,
+            "definition": "contested, or pre-match expected score within the band",
             "axes": close_rows,
         },
+        "confirmation_prefixes": conf_prefixes,
         "confirmation_ablation": ablation,
         "note": (
-            "Pre-amendment telemetry is a discovery sample. "
-            "It is published under econ_axes and is not a promote sample."
+            f"Matches recorded on or before {amended} are a discovery "
+            "sample: they are shown above but cannot turn the blend on."
         ),
     }
 
@@ -4944,6 +4976,37 @@ def render_markdown_report(
         lines.append("- " + (legacy.get("skipped_reason") or "unavailable"))
     lines.append("")
 
+    prefixes = perf.get("prefixes") or {}
+    lines.append("## §12d — VTSR-C econ axes by time prefix")
+    lines.append("")
+    if prefixes.get("available"):
+        lines.append(
+            "Each axis re-measured from 0 to 240 / 480 / 720 s, scored "
+            "against the duel outcome. A duel enters a prefix only when its "
+            "match ran past it. Descriptive; the promote rule's "
+            "prefix gate reads the confirmation sample (§12b).")
+        lines.append("")
+        table_by = prefixes.get("prefixes") or {}
+        axis_names: list[str] = []
+        for tbl in table_by.values():
+            for r in tbl.get("axes") or []:
+                if r["axis"] not in axis_names:
+                    axis_names.append(r["axis"])
+        head = " | ".join(f"0–{k} s (n={_fmt_int(v.get('n_duels'))})"
+                          for k, v in table_by.items())
+        lines.append(f"| axis | {head} |")
+        lines.append("|---" * (len(table_by) + 1) + "|")
+        for axis in axis_names:
+            cells = []
+            for tbl in table_by.values():
+                hit = next((r for r in tbl.get("axes") or []
+                            if r["axis"] == axis), None)
+                cells.append(_fmt_pct((hit or {}).get("sign_agreement")))
+            lines.append(f"| `{axis}` | " + " | ".join(cells) + " |")
+    else:
+        lines.append("- " + (prefixes.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
     # §13 — VTSR-C alpha_c ablation (v1.3).
     alpha_abl = perf.get("alpha_ablation") or {}
     lines.append("## §13 — VTSR-C α_c ablation")
@@ -5392,9 +5455,14 @@ def render_json_report(
     schema_version 10 (v1.9, reconstructed accuracy): adds top-level
     ``candidate_axes`` (#21). Strictly additive; not in
     validation_summary.json.
+    schema_version 11 (v1.10, VTSR-C whole-game axes): adds
+    ``vtsr_c_perf.prefixes`` (#12d) and ``promote.confirmation_prefixes``
+    / ``axes_blocked_by_prefix`` / ``close_expected_band``. The close
+    subset is redefined (contested or pre-match expected in [0.40,
+    0.60]). Additive keys; the econ axis names follow the history file.
     """
     return {
-        "schema_version":   10,
+        "schema_version":   11,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -5799,6 +5867,7 @@ def main(argv: list[str] | None = None) -> int:
     print("[validate_elo] [12b] VTSR-C promote rule + legacy early-vs-full ...")
     cmdr_promote = metric_cmdr_promote(cmdr_history, per_match)
     cmdr_legacy = metric_legacy_early_full(cmdr_history, per_match)
+    cmdr_prefixes = metric_cmdr_econ_prefixes(cmdr_history)
     print("[validate_elo] [13/20] VTSR-C alpha_c ablation ...")
     cmdr_alpha_ablation = metric_cmdr_alpha_ablation(cmdr_history)
     print("[validate_elo] [14/20] Balonce Meter T-term ablation ...")
@@ -5922,6 +5991,8 @@ def main(argv: list[str] | None = None) -> int:
             # early-vs-full diagnostic. Additive.
             "promote":        cmdr_promote,
             "legacy_early_full": cmdr_legacy,
+            # v1.10: whole-game axis prefixes (descriptive).
+            "prefixes":       cmdr_prefixes,
         },
         # v1.4: Balonce Meter T-term ablation (pre-registered in
         # critique/decisions/balonce-meter-t-term.md).

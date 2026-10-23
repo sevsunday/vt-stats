@@ -50,6 +50,26 @@ v3 additions (schema 2 -> 3; ratings not comparable with v2 values):
     (`external_skipped_overlap_runtime`) so a backfilled binpb of a
     ledger-covered lobby can never double-count.
 
+v11 (schema 10 -> 11; ratings COMPARABLE with schema 10 -- audit axes
+only). Whole-game composite, still inert at CMDR_ALPHA_C = 1.0.
+Amendment 2026-10-23 in critique/decisions/vtsr-c-v2-composite.md.
+Every axis is measured over the whole game:
+
+  * SCORED (higher = better, hypothesis):
+        pool_lead          mean pool_count
+        non_green_share    share of alive-recycler samples below
+                           20 x pool_count (red or yellow; green and
+                           the cap are the slow band)
+        combat_conversion  non-starter combat-ship BUILD scrap / 1 Hz
+                           income (STARTER_SHIP_STEMS excluded)
+        upgrade_time       mean upgrade_count
+  * AUDIT ONLY, weight 0:
+        replacement_ratio       combat ships built / human deaths
+        replacement_ratio_real  the same without starter ships built
+        loose_share             whole match, unchanged
+  * Audit block gains per-axis `values` and `prefix_diffs` (the same
+    diffs over 0-240 / 0-480 / 0-720 s; never in P).
+
 v7 (schema 6 -> 7; ratings COMPARABLE with schema 6). Weight-0
 `loose_share`. v8 keeps that axis at weight 0 but measures it over the
 whole match (`income_loose / scrap_income`), not the opening window.
@@ -78,9 +98,9 @@ v2 additions (consequence-free while CMDR_ALPHA_C == 1.0):
   * Economy axes computed per duel from the proto-v4 `economy` +
     `builds` match blocks (constructor-free by design -- era-mixed
     structure-completion quality must never feed a rating axis).
-    The 2026-09-04 five-formula freeze is superseded by the v6
-    amendment above; do not restore pool-integral / scrap-per-minute /
-    ships-per-death / float / upgrade-share as scored axes.
+    The 2026-09-04 five-formula freeze is superseded by the v6 and
+    v11 amendments above; axes change only through a new memo
+    amendment with a fresh confirmation clock.
 
   * WITHIN-MATCH DIFFERENTIAL NORMALIZATION (n=2 makes lobby z-scores
     degenerate; the opponent diff controls for map/patch/lobby size):
@@ -228,42 +248,54 @@ DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 # amendment). The pre-amendment corpus is discovery only.
 CMDR_ALPHA_C = 1.0
 
-# Calendar day of the opening-semantics amendment. Confirmation duels are
-# those whose match date is strictly after this day.
-ECON_SEMANTICS_AMENDED_ON = "2026-09-23"
+# Calendar day of the whole-game amendment. Confirmation duels are those
+# whose match date is strictly after this day.
+ECON_SEMANTICS_AMENDED_ON = "2026-10-23"
 
-# Opening window for combat_conversion and regen_tempo. Matches the
-# minimum rated-match length so the window is a decision period.
-OPENING_WINDOW_SEC = 240.0
+# Diagnostic prefixes: each axis is re-measured from 0 to each of these
+# seconds when the match runs past it. Never enters P.
+ECON_PREFIX_SECS = (240.0, 480.0, 720.0)
 
-# Red-band height in the verified regen-segment model: the bottom
-# `20 * upgrade_count` scrap is the fast (2/s) band.
-REGEN_RED_SCRAP_PER_UPGRADE = 20.0
+# Empty starter craft. Re-ships, not an army: excluded from
+# combat_conversion and replacement_ratio_real.
+STARTER_SHIP_STEMS = frozenset({
+    "ivscout_m", "ivscoutm_vsr", "ivscoutm_12xvsr",
+    "fvscout_m", "fvscoutm_vsr", "evscout_m", "evscoutm_vsr",
+})
+
+# Yellow-band ceiling in the verified regen-segment model: below
+# `20 * pool_count` the bank regenerates at 1/s or faster; above it
+# (green, including the cap) at 1/3 per second or not at all.
+REGEN_SCRAP_PER_POOL = 20.0
 
 # Per-axis prior weights. Renormalized over available SCORED axes at
-# runtime (weight 0 is audit-only and never enters P). Priors, not fitted.
-# 0.43 / 0.35 / 0.22 renormalizes the old 0.30 / 0.25 / 0.15 priors.
+# runtime (weight 0 is audit-only and never enters P). Equal priors,
+# not fitted.
 COMMANDER_ECON_WEIGHTS = {
-    "pool_tempo": 0.43,
-    "combat_conversion": 0.35,
-    "regen_tempo": 0.22,
+    "pool_lead": 0.25,
+    "non_green_share": 0.25,
+    "combat_conversion": 0.25,
+    "upgrade_time": 0.25,
     "replacement_ratio": 0.0,
-    "upgrade_share": 0.0,
+    "replacement_ratio_real": 0.0,
     "loose_share": 0.0,
 }
 
 # Seed prior for each axis's DIFFERENTIAL std (team-1-perspective
 # v_own - v_opp spread). One-time scale anchor so z-scores do not
 # saturate the clip. Sign does not depend on these. Do not refit.
-# One-time RMS of team-1-perspective diffs on the 66-match discovery
-# corpus (2026-09-23). Binding scale. Do not refit.
+# One-time RMS of team-1-perspective whole-game diffs over the 138
+# telemetry duels on 2026-10-23, outcome-blind
+# (_investigation/cmdr_axes_preflight.py). loose_share keeps its
+# 2026-09-23 scale (the axis did not change).
 CMDR_ECON_STD_PRIOR = {
-    "pool_tempo": 48.0,          # seconds-sooner diff
-    "combat_conversion": 0.14,   # opening combat-scrap / income diff
-    "regen_tempo": 0.054,        # red-share diff
-    "replacement_ratio": 0.61,   # ships-per-loss diff (unscored)
-    "upgrade_share": 0.25,       # upgrade-share diff (unscored)
-    "loose_share": 0.11,         # whole-match loose/income diff (unscored)
+    "pool_lead": 1.3,                # mean-pools diff
+    "non_green_share": 0.24,         # out-of-green share diff
+    "combat_conversion": 0.13,       # non-starter ship scrap / income diff
+    "upgrade_time": 0.41,            # mean-upgrades diff
+    "replacement_ratio": 0.58,       # ships-per-loss diff (unscored)
+    "replacement_ratio_real": 0.64,  # same without starters (unscored)
+    "loose_share": 0.11,             # whole-match loose/income diff (unscored)
 }
 
 # Shrinkage weight (pseudo-observations) for the rolling differential
@@ -310,6 +342,10 @@ INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 
+# v11: whole-game economy axes (pool_lead, non_green_share,
+# starter-free combat_conversion, upgrade_time; replacement ratios and
+# loose_share at weight 0). Audit keys changed meaning; ratings remain
+# comparable with schema 10 (alpha_c stays 1).
 # v10: campod spectators no longer keep a sub-6 playing lobby on the
 # rated list. Those matches are match_excluded on elo_history, so the
 # commander duel is skipped. Pre-v10 peak_vtsr_c is not comparable
@@ -321,7 +357,7 @@ CMDR_STALE_WINDOW_DAYS = 90
 # comparable with schema 7 (alpha_c stays 1; the axis does not enter P).
 # v7: weight-0 loose_share audit axis. v6: opening-decision axes.
 # v5: display inactivity. v3 ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 10
+CMDR_ELO_SCHEMA_VERSION = 11
 
 
 # ---------------------------------------------------------------------------
@@ -472,14 +508,15 @@ def _resolve_combat_stems(explicit: Any) -> frozenset[str]:
     return _COMBAT_STEMS_CACHE
 
 
-def _opening_sec(tick: Any, t0: float, tick_rate: float) -> float | None:
-    if not isinstance(tick, (int, float)) or tick_rate <= 0:
-        return None
-    return (float(tick) - t0) / tick_rate
+def _in_window(tick: Any, end_tick: float | None) -> bool:
+    """`end_tick` None is the whole game; a number is a prefix cut-off."""
+    if not isinstance(tick, (int, float)):
+        return False
+    return end_tick is None or float(tick) <= end_tick
 
 
-def _opening_income(scrap: list, ticks: list, t0: float, tick_rate: float) -> float:
-    """Sum of positive 1 Hz bank deltas inside the opening window.
+def _window_income(scrap: list, ticks: list, end_tick: float | None) -> float:
+    """Sum of positive 1 Hz bank deltas inside the window.
 
     Downsampled relative to the full-rate Tycoon income. Both sides use
     the same series, so the differential is the quantity that matters.
@@ -487,11 +524,10 @@ def _opening_income(scrap: list, ticks: list, t0: float, tick_rate: float) -> fl
     income = 0.0
     n = min(len(scrap), len(ticks))
     for i in range(1, n):
-        sec = _opening_sec(ticks[i], t0, tick_rate)
-        if sec is None:
+        if not _in_window(ticks[i], end_tick):
+            if isinstance(ticks[i], (int, float)):
+                break
             continue
-        if sec > OPENING_WINDOW_SEC:
-            break
         try:
             delta = float(scrap[i]) - float(scrap[i - 1])
         except (TypeError, ValueError):
@@ -501,14 +537,17 @@ def _opening_income(scrap: list, ticks: list, t0: float, tick_rate: float) -> fl
     return income
 
 
-def _opening_combat_scrap(feed: list, side: int, stems: frozenset[str],
-                          t0: float, tick_rate: float) -> float:
-    """Combat-ship BUILD cost inside the opening window.
+def _window_ship_builds(feed: list, side: int, stems: frozenset[str],
+                        end_tick: float | None) -> tuple[int, int, float]:
+    """(combat ships built, starter ships among them, non-starter scrap)
+    inside the window.
 
     Constructor builds are excluded, matching `combat_ship_value`
     (gun towers on the constructor lane are structures, not ships).
     """
-    total = 0.0
+    built = 0
+    starters = 0
+    real_scrap = 0.0
     for row in feed:
         if row.get("type") != "build":
             continue
@@ -517,39 +556,64 @@ def _opening_combat_scrap(feed: list, side: int, stems: frozenset[str],
         if (row.get("producer") == "constructor"
                 or row.get("producer_resolved") == "constructor"):
             continue
-        sec = _opening_sec(row.get("tick"), t0, tick_rate)
-        if sec is None or sec > OPENING_WINDOW_SEC:
+        if not _in_window(row.get("tick"), end_tick):
             continue
-        if _odf_stem(row.get("odf")) not in stems:
+        stem = _odf_stem(row.get("odf"))
+        if stem not in stems:
+            continue
+        built += 1
+        if stem in STARTER_SHIP_STEMS:
+            starters += 1
             continue
         cost = row.get("scrap_cost")
         if isinstance(cost, (int, float)):
-            total += float(cost)
-    return total
+            real_scrap += float(cost)
+    return built, starters, real_scrap
 
 
-def _regen_tempo(team: dict, ticks: list, t0: float, tick_rate: float
-                 ) -> float | None:
-    """Share of opening samples spent in the fast-regen (red) band.
+def _window_human_deaths(kill_feed: list, side: int, names: set,
+                         end_tick: float | None) -> int:
+    """Human vehicle deaths on `side` inside the window. Pilot victims
+    are excluded, as they are from `leaderboard[].deaths`."""
+    n = 0
+    for row in kill_feed:
+        if row.get("is_pilot_victim"):
+            continue
+        if _slot_team(row.get("victim_team")) != side:
+            continue
+        if row.get("victim") not in names:
+            continue
+        if not _in_window(row.get("tick"), end_tick):
+            continue
+        n += 1
+    return n
 
-    Red = `scrap < 20 * upgrade_count` (verified segment model). Samples
-    with a dead recycler (`max_scrap == 20 * pool_count`, the +40 base
-    gone) are skipped. None when no alive-recycler sample falls in the
+
+def _window_bank(team: dict, ticks: list, end_tick: float | None
+                 ) -> tuple[float | None, float | None, float | None]:
+    """(mean pool_count, non-green share, mean upgrade_count) inside the
     window.
+
+    Non-green = `scrap < 20 * pool_count` (red or yellow in the verified
+    segment model); green, the cap included, is the slow band. Samples
+    with a dead recycler (`max_scrap == 20 * pool_count`, the +40 base
+    gone) are skipped for the share only.
     """
     scrap = team.get("scrap") or []
     pools = team.get("pool_count") or []
     ups = team.get("upgrade_count") or []
     caps = team.get("max_scrap") or []
     n = min(len(scrap), len(pools), len(ups), len(caps), len(ticks))
+    samples = 0
+    pool_sum = 0.0
+    up_sum = 0.0
     alive = 0
-    red = 0
+    non_green = 0
     for i in range(n):
-        sec = _opening_sec(ticks[i], t0, tick_rate)
-        if sec is None:
+        if not _in_window(ticks[i], end_tick):
+            if isinstance(ticks[i], (int, float)):
+                break
             continue
-        if sec > OPENING_WINDOW_SEC:
-            break
         try:
             pool = float(pools[i])
             cap = float(caps[i])
@@ -557,22 +621,30 @@ def _regen_tempo(team: dict, ticks: list, t0: float, tick_rate: float
             upgraded = float(ups[i])
         except (TypeError, ValueError):
             continue
-        if cap == REGEN_RED_SCRAP_PER_UPGRADE * pool:
+        samples += 1
+        pool_sum += pool
+        up_sum += upgraded
+        if cap == REGEN_SCRAP_PER_POOL * pool:
             continue
         alive += 1
-        if bank < REGEN_RED_SCRAP_PER_UPGRADE * upgraded:
-            red += 1
-    if alive == 0:
-        return None
-    return red / alive
+        if bank < REGEN_SCRAP_PER_POOL * pool:
+            non_green += 1
+    if samples == 0:
+        return None, None, None
+    share = (non_green / alive) if alive else None
+    return pool_sum / samples, share, up_sum / samples
 
 
-def _econ_axis_values(md: dict, combat_stems: frozenset[str]
-                      ) -> dict[int, dict[str, float | None]] | None:
+def _econ_axis_values(md: dict, combat_stems: frozenset[str],
+                      ) -> dict[str, Any] | None:
     """Per-side raw economy-axis values for one match, or None when the
     match lacks full v4 telemetry (either flag false / block missing).
 
-    Formulas: critique/decisions/vtsr-c-v2-composite.md, 2026-09-23
+    Returns `{"values": {1: {axis: v}, 2: {...}}, "prefixes": {"240":
+    {1: {...}, 2: {...}}, ...}}`. Every axis is measured over the whole
+    game; a prefix is present only when the match runs past it.
+
+    Formulas: critique/decisions/vtsr-c-v2-composite.md, 2026-10-23
     amendment. An axis is None when that side has no reading; the
     differential layer drops it unless BOTH sides are numeric.
     """
@@ -600,73 +672,52 @@ def _econ_axis_values(md: dict, combat_stems: frozenset[str]
         t0 = 0.0
     ticks = econ.get("ticks") or []
     feed = builds.get("feed") or []
+    kill_feed = (md.get("kills") or {}).get("feed") or []
 
-    lobby = md.get("leaderboard") or []
-    team_deaths = {1: 0, 2: 0}
-    for row in lobby:
+    names: dict[int, set] = {1: set(), 2: set()}
+    for row in md.get("leaderboard") or []:
         team = _slot_team(row.get("slot"))
-        if team is None:
-            continue
-        try:
-            team_deaths[team] += int(row.get("deaths") or 0)
-        except (TypeError, ValueError):
-            pass
+        if team is not None and row.get("name"):
+            names[team].add(row.get("name"))
 
-    out: dict[int, dict[str, float | None]] = {}
-    for side in (1, 2):
+    def side_values(side: int, end_tick: float | None) -> dict[str, float | None]:
         et = econ_teams[str(side)]
-        bt = build_teams[str(side)]
+        pool_mean, non_green, up_mean = _window_bank(et, ticks, end_tick)
+        income = _window_income(et.get("scrap") or [], ticks, end_tick)
+        built, starters, real_scrap = _window_ship_builds(
+            feed, side, combat_stems, end_tick)
+        deaths = _window_human_deaths(kill_feed, side, names[side], end_tick)
+        return {
+            "pool_lead": pool_mean,
+            "non_green_share": non_green,
+            "combat_conversion": real_scrap / max(income, 1.0),
+            "upgrade_time": up_mean,
+            "replacement_ratio": min(
+                THUG_SUPPLY_CAP, built / max(1, deaths)),
+            "replacement_ratio_real": min(
+                THUG_SUPPLY_CAP, (built - starters) / max(1, deaths)),
+        }
 
-        # 3 pools, not 5. On this game's build clock, 5 extractors is a
-        # mid-match event (typical time ~9 min) and almost never falls
-        # inside the opening window, so a "time to 5" axis is a tie on
-        # nearly every duel. 3 pools is the opening milestone (typical
-        # ~3 min). Reaching it after the window, or never, is the same
-        # failed open.
-        t3 = et.get("time_to_3_pools_sec")
-        if (isinstance(t3, (int, float)) and 0 <= float(t3) <= OPENING_WINDOW_SEC):
-            clock = float(t3)
-        else:
-            clock = OPENING_WINDOW_SEC
-        # Higher = sooner. The differential is seconds faster than the
-        # opponent.
-        pool_tempo = -clock
-
-        income = _opening_income(et.get("scrap") or [], ticks, t0, tick_rate)
-        combat = _opening_combat_scrap(feed, side, combat_stems, t0, tick_rate)
-        combat_conversion = combat / max(income, 1.0)
-
-        regen = _regen_tempo(et, ticks, t0, tick_rate)
-
-        ships = bt.get("ships_built")
-        replacement = None
-        if isinstance(ships, (int, float)):
-            replacement = min(
-                THUG_SUPPLY_CAP, float(ships) / max(1, team_deaths[side]))
-
-        upgrades = et.get("upgrades_final")
-        peak_pools = et.get("peak_pools")
-        upgrade_share = None
-        if isinstance(upgrades, (int, float)) and isinstance(
-                peak_pools, (int, float)) and peak_pools >= 1:
-            upgrade_share = min(1.0, float(upgrades) / float(peak_pools))
-
+    values: dict[int, dict[str, float | None]] = {}
+    for side in (1, 2):
+        v = side_values(side, None)
+        et = econ_teams[str(side)]
         loose = et.get("income_loose")
         income_all = et.get("scrap_income")
-        loose_share = None
-        if isinstance(loose, (int, float)) and isinstance(
-                income_all, (int, float)):
-            loose_share = float(loose) / max(float(income_all), 1.0)
+        v["loose_share"] = (
+            float(loose) / max(float(income_all), 1.0)
+            if isinstance(loose, (int, float))
+            and isinstance(income_all, (int, float)) else None)
+        values[side] = v
 
-        out[side] = {
-            "pool_tempo": pool_tempo,
-            "combat_conversion": combat_conversion,
-            "regen_tempo": regen,
-            "replacement_ratio": replacement,
-            "upgrade_share": upgrade_share,
-            "loose_share": loose_share,
-        }
-    return out
+    prefixes: dict[str, dict[int, dict[str, float | None]]] = {}
+    for p_sec in ECON_PREFIX_SECS:
+        if float(duration_sec) <= p_sec:
+            continue
+        end_tick = t0 + p_sec * tick_rate
+        prefixes[str(int(p_sec))] = {s: side_values(s, end_tick) for s in (1, 2)}
+
+    return {"values": values, "prefixes": prefixes}
 
 
 # ---------------------------------------------------------------------------
@@ -704,9 +755,8 @@ def compute_commander_elo(all_match_data: list[dict],
     commanders, same roster, different map).
 
     `combat_ship_stems`: optional combat-ship ODF stems (the pipeline's
-    `build_combat_ship_odfs` set). Used only by the inert
-    `combat_conversion` axis. Omit it and the committed
-    `data/combat_ship_odfs.json` is read once.
+    `build_combat_ship_odfs` set). Used only by the inert economy axes.
+    Omit it and the committed `data/combat_ship_odfs.json` is read once.
 
     Returns `(elo_commander_current, elo_commander_history)`.
     """
@@ -1040,10 +1090,11 @@ def compute_commander_elo(all_match_data: list[dict],
         # duel's diffs into the rolling state only AFTER -- a duel must
         # never normalize against itself (commander_shrunk_baseline
         # mechanics).
-        axis_vals = _econ_axis_values(md, combat_stems)
+        econ_read = _econ_axis_values(md, combat_stems)
         perf_block: dict[str, Any] = {"available": False}
         s_eff = {t: scores[t] for t in (1, 2)}
-        if axis_vals is not None:
+        if econ_read is not None:
+            axis_vals = econ_read["values"]
             axes_audit: dict[str, dict] = {}
             raw_diffs: dict[str, float] = {}
             num = 0.0
@@ -1059,6 +1110,8 @@ def compute_commander_elo(all_match_data: list[dict],
                 z = max(-2.0, min(2.0, d / std)) / 2.0
                 raw_diffs[axis] = d
                 axes_audit[axis] = {
+                    "values": {"1": round(float(v_1), 4),
+                               "2": round(float(v_2), 4)},
                     "diff": round(d, 4),
                     "std": round(std, 4),
                     "z": round(z, 4),
@@ -1072,10 +1125,22 @@ def compute_commander_elo(all_match_data: list[dict],
             if axes_audit and wsum > 0:
                 p1 = num / wsum
                 p_by_team = {1: p1, 2: -p1}
+                prefix_diffs: dict[str, dict[str, float]] = {}
+                for p_key, pv in econ_read["prefixes"].items():
+                    p_row: dict[str, float] = {}
+                    for axis in COMMANDER_ECON_WEIGHTS:
+                        a1 = pv[1].get(axis)
+                        a2 = pv[2].get(axis)
+                        if (isinstance(a1, (int, float))
+                                and isinstance(a2, (int, float))):
+                            p_row[axis] = round(float(a1) - float(a2), 4)
+                    prefix_diffs[p_key] = p_row
                 perf_block = {
                     "available": True,
                     "p": round(p1, 4),
                     "axes": axes_audit,
+                    # Diagnostic only: never enters p.
+                    "prefix_diffs": prefix_diffs,
                 }
                 for t in (1, 2):
                     duels_with_telemetry[keys[t]] = (
@@ -1268,7 +1333,8 @@ def compute_commander_elo(all_match_data: list[dict],
         "econ_weights": dict(COMMANDER_ECON_WEIGHTS),
         "econ_std_prior": dict(CMDR_ECON_STD_PRIOR),
         "econ_std_shrinkage": CMDR_ECON_STD_SHRINKAGE,
-        "opening_window_sec": OPENING_WINDOW_SEC,
+        "econ_prefix_secs": list(ECON_PREFIX_SECS),
+        "starter_ship_stems": sorted(STARTER_SHIP_STEMS),
         "econ_semantics_amended_on": ECON_SEMANTICS_AMENDED_ON,
         "thug_supply_cap": THUG_SUPPLY_CAP,
         "econ_std_observed": {

@@ -8160,11 +8160,6 @@ html.vt-cursor-active * {
     font-size: 0.9rem;
     color: var(--kb-text-primary);
 }
-#match-elo-footer a,
-#section-match-elo-vtsrc .card-footer a {
-    color: var(--kb-primary);
-}
-
 @media (max-width: 640px) {
     .vt-match-elo-row {
         grid-template-columns: 1fr 6rem;
@@ -8752,6 +8747,23 @@ html.vt-cursor-active * {
 }
 .vt-balonce-econ-list li:last-child { border-bottom: 0; }
 .vt-balonce-econ-axis { color: var(--kb-text-primary); }
+.vt-balonce-econ-list li.vt-balonce-econ-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.15rem 0.75rem;
+}
+.vt-balonce-econ-values { white-space: nowrap; }
+.vt-balonce-econ-edge { text-align: right; }
+@media (max-width: 575.98px) {
+    .vt-balonce-econ-list li.vt-balonce-econ-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .vt-balonce-econ-values {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
 
 .vt-balonce-axis-row {
     /* Fixed label column so the bar keeps the room on a wide card —

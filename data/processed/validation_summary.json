@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-22T22:09:55Z",
+  "generated_at": "2026-10-23T05:13:34Z",
   "latest": {
-    "generated_at": "2026-10-22T22:09:55Z",
+    "generated_at": "2026-10-23T05:13:34Z",
     "elo_schema_version": 17,
     "rated_match_count": 248,
     "players_total": 47,
@@ -348,40 +348,64 @@
         "n_scored": 138,
         "axes": [
           {
-            "axis": "regen_tempo",
+            "axis": "pool_lead",
             "n": 138,
-            "sign_agreement": 0.6123188405797102,
+            "sign_agreement": 0.8768115942028986,
             "sign_agreement_ci": [
-              0.5253800550407692,
-              0.6861234812983583
+              0.8115648056280408,
+              0.9216474536809348
             ],
-            "mean_winner_minus_loser": 0.013294927536231883,
-            "weight": 0.22,
+            "mean_winner_minus_loser": 0.9797601449275362,
+            "weight": 0.25,
             "scored": true
           },
           {
-            "axis": "pool_tempo",
+            "axis": "upgrade_time",
             "n": 138,
-            "sign_agreement": 0.5869565217391305,
+            "sign_agreement": 0.8260869565217391,
             "sign_agreement_ci": [
-              0.503535467250704,
-              0.6656673618205982
+              0.7542549492613675,
+              0.8802556597560154
             ],
-            "mean_winner_minus_loser": 11.846014492753623,
-            "weight": 0.43,
+            "mean_winner_minus_loser": 0.20479492753623188,
+            "weight": 0.25,
+            "scored": true
+          },
+          {
+            "axis": "non_green_share",
+            "n": 138,
+            "sign_agreement": 0.8115942028985508,
+            "sign_agreement_ci": [
+              0.7382507783104434,
+              0.8680593591950557
+            ],
+            "mean_winner_minus_loser": 0.15878405797101447,
+            "weight": 0.25,
             "scored": true
           },
           {
             "axis": "combat_conversion",
             "n": 138,
-            "sign_agreement": 0.42028985507246375,
+            "sign_agreement": 0.7971014492753623,
             "sign_agreement_ci": [
-              0.3411867089821718,
-              0.503710697702468
+              0.7223838506625397,
+              0.8557258153310756
             ],
-            "mean_winner_minus_loser": -0.050133333333333335,
-            "weight": 0.35,
+            "mean_winner_minus_loser": 0.07652753623188406,
+            "weight": 0.25,
             "scored": true
+          },
+          {
+            "axis": "replacement_ratio_real",
+            "n": 138,
+            "sign_agreement": 0.8188405797101449,
+            "sign_agreement_ci": [
+              0.7462349631812843,
+              0.8741754100801564
+            ],
+            "mean_winner_minus_loser": 0.38485434782608696,
+            "weight": 0.0,
+            "scored": false
           },
           {
             "axis": "replacement_ratio",
@@ -392,18 +416,6 @@
               0.8306878652908392
             ],
             "mean_winner_minus_loser": 0.27869782608695653,
-            "weight": 0.0,
-            "scored": false
-          },
-          {
-            "axis": "upgrade_share",
-            "n": 138,
-            "sign_agreement": 0.7318840579710145,
-            "sign_agreement_ci": [
-              0.6524322132312959,
-              0.798775330958843
-            ],
-            "mean_winner_minus_loser": 0.13932536231884057,
             "weight": 0.0,
             "scored": false
           },
@@ -450,7 +462,7 @@
               0.5473871480047701,
               0.7064170956021831
             ],
-            "log_loss": 0.6414077503961725,
+            "log_loss": 0.6417020742754959,
             "replay_max_abs_diff": null
           },
           {
@@ -462,7 +474,7 @@
               0.5473871480047701,
               0.7064170956021831
             ],
-            "log_loss": 0.640731238172705,
+            "log_loss": 0.6412365517613555,
             "replay_max_abs_diff": null
           },
           {
@@ -474,7 +486,7 @@
               0.5473871480047701,
               0.7064170956021831
             ],
-            "log_loss": 0.6398513233789628,
+            "log_loss": 0.6404830962287256,
             "replay_max_abs_diff": null
           }
         ],
@@ -483,217 +495,94 @@
       "promote": {
         "available": true,
         "verdict": "HOLD",
-        "amended_on": "2026-09-23",
-        "n_confirmation": 81,
+        "amended_on": "2026-10-23",
+        "n_confirmation": 0,
         "n_confirmation_required": 25,
         "log_loss_min_improvement": 0.01,
         "ci_floor": 0.55,
         "close_floor": 0.5,
         "close_min_n": 15,
+        "close_expected_band": [
+          0.4,
+          0.6
+        ],
+        "prefix_floor": 0.5,
         "reasons": [
-          "0 scored axis(es) have a Wilson lower bound above 0.55 (need 2 of 3)",
-          "no alpha below 1.0 improves log-loss by >= 0.01 without worsening accuracy (best gain 0.0047 at alpha 0.5)"
+          "confirmation sample is 0 (need 25 duels dated after 2026-10-23)",
+          "0 scored axis(es) have a Wilson lower bound above 0.55 (need 2 of 4)",
+          "close subset is 0 (need 15; not yet testable)",
+          "confirmation ablation has no scored duels to compare"
         ],
-        "confirmation_axes": [
-          {
-            "axis": "upgrade_share",
-            "n": 81,
-            "sign_agreement": 0.7469135802469136,
-            "sign_agreement_ci": [
-              0.63595445945254,
-              0.8237256974516202
-            ],
-            "ci_lower": 0.63595445945254,
-            "mean_winner_minus_loser": 0.15144567901234568
-          },
-          {
-            "axis": "replacement_ratio",
-            "n": 81,
-            "sign_agreement": 0.7098765432098766,
-            "sign_agreement_ci": [
-              0.6098194243380317,
-              0.8027140498067273
-            ],
-            "ci_lower": 0.6098194243380317,
-            "mean_winner_minus_loser": 0.27482345679012343
-          },
-          {
-            "axis": "regen_tempo",
-            "n": 81,
-            "sign_agreement": 0.6419753086419753,
-            "sign_agreement_ci": [
-              0.53332859558884,
-              0.737764830277716
-            ],
-            "ci_lower": 0.53332859558884,
-            "mean_winner_minus_loser": 0.014454320987654323
-          },
-          {
-            "axis": "pool_tempo",
-            "n": 81,
-            "sign_agreement": 0.6111111111111112,
-            "sign_agreement_ci": [
-              0.508410467539316,
-              0.7155362755678389
-            ],
-            "ci_lower": 0.508410467539316,
-            "mean_winner_minus_loser": 16.09135802469136
-          },
-          {
-            "axis": "combat_conversion",
-            "n": 81,
-            "sign_agreement": 0.41358024691358025,
-            "sign_agreement_ci": [
-              0.3183079093457035,
-              0.528465371686243
-            ],
-            "ci_lower": 0.3183079093457035,
-            "mean_winner_minus_loser": -0.059654320987654316
-          },
-          {
-            "axis": "loose_share",
-            "n": 81,
-            "sign_agreement": 0.30864197530864196,
-            "sign_agreement_ci": [
-              0.2186306293369854,
-              0.41598257927765636
-            ],
-            "ci_lower": 0.2186306293369854,
-            "mean_winner_minus_loser": -0.06305061728395062
-          }
-        ],
+        "confirmation_axes": [],
         "axes_clearing_ci_floor": [],
+        "axes_blocked_by_prefix": [],
         "close": {
-          "n": 81,
-          "testable": true,
-          "axes": [
-            {
-              "axis": "upgrade_share",
-              "n": 81,
-              "sign_agreement": 0.7469135802469136,
-              "sign_agreement_ci": [
-                0.63595445945254,
-                0.8237256974516202
-              ],
-              "ci_lower": 0.63595445945254,
-              "mean_winner_minus_loser": 0.15144567901234568
-            },
-            {
-              "axis": "replacement_ratio",
-              "n": 81,
-              "sign_agreement": 0.7098765432098766,
-              "sign_agreement_ci": [
-                0.6098194243380317,
-                0.8027140498067273
-              ],
-              "ci_lower": 0.6098194243380317,
-              "mean_winner_minus_loser": 0.27482345679012343
-            },
-            {
-              "axis": "regen_tempo",
-              "n": 81,
-              "sign_agreement": 0.6419753086419753,
-              "sign_agreement_ci": [
-                0.53332859558884,
-                0.737764830277716
-              ],
-              "ci_lower": 0.53332859558884,
-              "mean_winner_minus_loser": 0.014454320987654323
-            },
-            {
-              "axis": "pool_tempo",
-              "n": 81,
-              "sign_agreement": 0.6111111111111112,
-              "sign_agreement_ci": [
-                0.508410467539316,
-                0.7155362755678389
-              ],
-              "ci_lower": 0.508410467539316,
-              "mean_winner_minus_loser": 16.09135802469136
-            },
-            {
-              "axis": "combat_conversion",
-              "n": 81,
-              "sign_agreement": 0.41358024691358025,
-              "sign_agreement_ci": [
-                0.3183079093457035,
-                0.528465371686243
-              ],
-              "ci_lower": 0.3183079093457035,
-              "mean_winner_minus_loser": -0.059654320987654316
-            },
-            {
-              "axis": "loose_share",
-              "n": 81,
-              "sign_agreement": 0.30864197530864196,
-              "sign_agreement_ci": [
-                0.2186306293369854,
-                0.41598257927765636
-              ],
-              "ci_lower": 0.2186306293369854,
-              "mean_winner_minus_loser": -0.06305061728395062
-            }
-          ]
+          "n": 0,
+          "testable": false,
+          "definition": "contested, or pre-match expected score within the band",
+          "axes": []
+        },
+        "confirmation_prefixes": {
+          "240": {
+            "n_duels": 0,
+            "axes": []
+          },
+          "480": {
+            "n_duels": 0,
+            "axes": []
+          },
+          "720": {
+            "n_duels": 0,
+            "axes": []
+          }
         },
         "confirmation_ablation": {
           "available": true,
           "n_duels": 730,
           "n_telemetry_duels": 138,
-          "n_telemetry_scored": 81,
+          "n_telemetry_scored": 0,
           "replay_max_abs_diff": 0.0058,
           "per_alpha": [
             {
               "alpha_c": 1.0,
               "canonical": true,
-              "n_telemetry_scored": 81,
-              "accuracy": 0.5432098765432098,
-              "accuracy_ci": [
-                0.43523822983845284,
-                0.6472684649904988
-              ],
-              "log_loss": 0.6893970780386469,
+              "n_telemetry_scored": 0,
+              "accuracy": null,
+              "accuracy_ci": null,
+              "log_loss": null,
               "replay_max_abs_diff": 0.0058
             },
             {
               "alpha_c": 0.9,
               "canonical": false,
-              "n_telemetry_scored": 81,
-              "accuracy": 0.5432098765432098,
-              "accuracy_ci": [
-                0.43523822983845284,
-                0.6472684649904988
-              ],
-              "log_loss": 0.6879755790675565,
+              "n_telemetry_scored": 0,
+              "accuracy": null,
+              "accuracy_ci": null,
+              "log_loss": null,
               "replay_max_abs_diff": null
             },
             {
               "alpha_c": 0.8,
               "canonical": false,
-              "n_telemetry_scored": 81,
-              "accuracy": 0.5432098765432098,
-              "accuracy_ci": [
-                0.43523822983845284,
-                0.6472684649904988
-              ],
-              "log_loss": 0.686795138862996,
+              "n_telemetry_scored": 0,
+              "accuracy": null,
+              "accuracy_ci": null,
+              "log_loss": null,
               "replay_max_abs_diff": null
             },
             {
               "alpha_c": 0.5,
               "canonical": false,
-              "n_telemetry_scored": 81,
-              "accuracy": 0.5432098765432098,
-              "accuracy_ci": [
-                0.43523822983845284,
-                0.6472684649904988
-              ],
-              "log_loss": 0.6847212655778868,
+              "n_telemetry_scored": 0,
+              "accuracy": null,
+              "accuracy_ci": null,
+              "log_loss": null,
               "replay_max_abs_diff": null
             }
           ],
-          "score_date_after": "2026-09-23"
+          "score_date_after": "2026-10-23"
         },
-        "note": "Pre-amendment telemetry is a discovery sample. It is published under econ_axes and is not a promote sample."
+        "note": "Matches recorded on or before 2026-10-23 are a discovery sample: they are shown above but cannot turn the blend on."
       },
       "legacy_early_full": {
         "available": true,
@@ -809,6 +698,226 @@
           }
         ],
         "note": "Retired full-match formulas. Lagging means the agreement lives in the full match and not in the first 240s. eligible_to_restore is false: this block does not authorize putting an axis back into the score."
+      },
+      "prefixes": {
+        "available": true,
+        "n_duels": 138,
+        "prefixes": {
+          "240": {
+            "n_duels": 138,
+            "axes": [
+              {
+                "axis": "upgrade_time",
+                "n": 138,
+                "sign_agreement": 0.6521739130434783,
+                "sign_agreement_ci": [
+                  0.5695620672968971,
+                  0.7265428835778815
+                ],
+                "ci_lower": 0.5695620672968971,
+                "mean_winner_minus_loser": 0.05066159420289855
+              },
+              {
+                "axis": "pool_lead",
+                "n": 138,
+                "sign_agreement": 0.6376811594202898,
+                "sign_agreement_ci": [
+                  0.5547598406813352,
+                  0.7131446386815596
+                ],
+                "ci_lower": 0.5547598406813352,
+                "mean_winner_minus_loser": 0.14330434782608695
+              },
+              {
+                "axis": "non_green_share",
+                "n": 138,
+                "sign_agreement": 0.5615942028985508,
+                "sign_agreement_ci": [
+                  0.48184923695119963,
+                  0.6450528848522769
+                ],
+                "ci_lower": 0.48184923695119963,
+                "mean_winner_minus_loser": 0.03508985507246377
+              },
+              {
+                "axis": "replacement_ratio",
+                "n": 138,
+                "sign_agreement": 0.4855072463768116,
+                "sign_agreement_ci": [
+                  0.40364772101389473,
+                  0.5681518074742216
+                ],
+                "ci_lower": 0.40364772101389473,
+                "mean_winner_minus_loser": -0.056893478260869566
+              },
+              {
+                "axis": "combat_conversion",
+                "n": 138,
+                "sign_agreement": 0.44565217391304346,
+                "sign_agreement_ci": [
+                  0.3687765028092076,
+                  0.5325218468991996
+                ],
+                "ci_lower": 0.3687765028092076,
+                "mean_winner_minus_loser": -0.019429710144927535
+              },
+              {
+                "axis": "replacement_ratio_real",
+                "n": 138,
+                "sign_agreement": 0.4384057971014493,
+                "sign_agreement_ci": [
+                  0.35494711514772304,
+                  0.5181507630488004
+                ],
+                "ci_lower": 0.35494711514772304,
+                "mean_winner_minus_loser": -0.07443260869565217
+              }
+            ]
+          },
+          "480": {
+            "n_duels": 128,
+            "axes": [
+              {
+                "axis": "pool_lead",
+                "n": 128,
+                "sign_agreement": 0.69921875,
+                "sign_agreement_ci": [
+                  0.6189931578757643,
+                  0.7754195312906295
+                ],
+                "ci_lower": 0.6189931578757643,
+                "mean_winner_minus_loser": 0.364946875
+              },
+              {
+                "axis": "non_green_share",
+                "n": 128,
+                "sign_agreement": 0.67578125,
+                "sign_agreement_ci": [
+                  0.5865623991215974,
+                  0.7471714147884281
+                ],
+                "ci_lower": 0.5865623991215974,
+                "mean_winner_minus_loser": 0.068409375
+              },
+              {
+                "axis": "upgrade_time",
+                "n": 128,
+                "sign_agreement": 0.65625,
+                "sign_agreement_ci": [
+                  0.5704946622111811,
+                  0.7328997140706601
+                ],
+                "ci_lower": 0.5704946622111811,
+                "mean_winner_minus_loser": 0.08392265625
+              },
+              {
+                "axis": "combat_conversion",
+                "n": 128,
+                "sign_agreement": 0.54296875,
+                "sign_agreement_ci": [
+                  0.46052480149159786,
+                  0.6304935113929545
+                ],
+                "ci_lower": 0.46052480149159786,
+                "mean_winner_minus_loser": 0.00670859375
+              },
+              {
+                "axis": "replacement_ratio_real",
+                "n": 128,
+                "sign_agreement": 0.5234375,
+                "sign_agreement_ci": [
+                  0.43749638578492134,
+                  0.6080127706573549
+                ],
+                "ci_lower": 0.43749638578492134,
+                "mean_winner_minus_loser": 0.06714140625
+              },
+              {
+                "axis": "replacement_ratio",
+                "n": 128,
+                "sign_agreement": 0.515625,
+                "sign_agreement_ci": [
+                  0.42986091219393446,
+                  0.6004785254342495
+                ],
+                "ci_lower": 0.42986091219393446,
+                "mean_winner_minus_loser": 0.04323984375
+              }
+            ]
+          },
+          "720": {
+            "n_duels": 99,
+            "axes": [
+              {
+                "axis": "pool_lead",
+                "n": 99,
+                "sign_agreement": 0.696969696969697,
+                "sign_agreement_ci": [
+                  0.6004855409718445,
+                  0.7787384306505342
+                ],
+                "ci_lower": 0.6004855409718445,
+                "mean_winner_minus_loser": 0.4884060606060606
+              },
+              {
+                "axis": "upgrade_time",
+                "n": 99,
+                "sign_agreement": 0.6717171717171717,
+                "sign_agreement_ci": [
+                  0.5691185836060462,
+                  0.7517632385359663
+                ],
+                "ci_lower": 0.5691185836060462,
+                "mean_winner_minus_loser": 0.08522424242424242
+              },
+              {
+                "axis": "replacement_ratio_real",
+                "n": 99,
+                "sign_agreement": 0.6515151515151515,
+                "sign_agreement_ci": [
+                  0.5484341356971444,
+                  0.7335529201246244
+                ],
+                "ci_lower": 0.5484341356971444,
+                "mean_winner_minus_loser": 0.13198484848484848
+              },
+              {
+                "axis": "non_green_share",
+                "n": 99,
+                "sign_agreement": 0.6464646464646465,
+                "sign_agreement_ci": [
+                  0.5484341356971444,
+                  0.7335529201246244
+                ],
+                "ci_lower": 0.5484341356971444,
+                "mean_winner_minus_loser": 0.0823919191919192
+              },
+              {
+                "axis": "combat_conversion",
+                "n": 99,
+                "sign_agreement": 0.5757575757575758,
+                "sign_agreement_ci": [
+                  0.4773648481449719,
+                  0.6684905255559431
+                ],
+                "ci_lower": 0.4773648481449719,
+                "mean_winner_minus_loser": 0.011068686868686867
+              },
+              {
+                "axis": "replacement_ratio",
+                "n": 99,
+                "sign_agreement": 0.5656565656565656,
+                "sign_agreement_ci": [
+                  0.4673727835155469,
+                  0.659035207025246
+                ],
+                "ci_lower": 0.4673727835155469,
+                "mean_winner_minus_loser": 0.14479090909090908
+              }
+            ]
+          }
+        },
+        "sample": "all telemetry duels (discovery + confirmation)"
       }
     },
     "accuracy_timeline": [
@@ -5951,7 +6060,7 @@
       "rating_spread_std": 107.52686021512463
     },
     {
-      "generated_at": "2026-10-22T22:09:55Z",
+      "generated_at": "2026-10-23T05:13:34Z",
       "elo_schema_version": 17,
       "rated_match_count": 248,
       "players_total": 47,

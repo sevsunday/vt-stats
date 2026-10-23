@@ -2,6 +2,10 @@
 
 ## TL;DR
 
+**Current semantics: the 2026-10-23 amendment (whole-game axes,
+confirmation clock reset).** The sections below record each freeze in
+order.
+
 VTSR-C v2 ships an economy-performance composite computed on every duel
 with proto-v4 telemetry, **structurally inert behind `CMDR_ALPHA_C = 1.0`**.
 Duel scores are byte-identical to v1 (golden test passed on the full
@@ -246,6 +250,152 @@ confirmation sample:
 5. An α ablation in {1.0, 0.9, 0.8, 0.5}, scored only on confirmation
    duels, improves log-loss by at least 0.01 and does not worsen
    accuracy. The discovery-sample dip of 0.0002 does not qualify.
+
+Anything else: HOLD. No partial blend. No weight refit on the
+confirmation sample.
+
+## Amendment (2026-10-23) — whole-game axes, reset clock
+
+The 2026-09-23 axes stay on record above. They are no longer what the
+composite records. This section replaces them. `CMDR_ALPHA_C` stays
+1.0, published `vtsr_c` values stay comparable with schema 10, and
+`CMDR_ELO_SCHEMA_VERSION` bumps 10 → 11 because the audit-block axis
+keys change meaning.
+
+### Why
+
+The justification is commander play and engine mechanics, supplied by
+the operator before any outcome test on these formulas:
+
+- A 240 s opening window measures the first few builds, not how a
+  commander runs the economy. Pools reaching 3 inside 4 minutes says
+  little about who held the map.
+- Red only exists with upgrades (red band = `20 × upgrade_count`), so
+  opening red share mostly read "did you upgrade early." The real
+  spending failure is green: the top band (`20 × pool_count` up to the
+  cap) regenerates at ⅓ scrap/s, three times slower than yellow, and
+  not at all at the cap. Time in green is usually a symptom of too few
+  pools planted or too few scavengers on loose.
+- Opening combat spend is dominated by empty scouts and Xypos rebuilt
+  for thugs who died. That is a thug-death proxy, and it competes with
+  teching (power, factory, armory). Starter craft are excluded.
+- An upgrade snapshot forgets how long upgrades were held. Two upgrades
+  held for the rest of the game beat two that were built earlier and
+  then half lost.
+
+The whole-game versions of pools, float and upgrades were seen on the
+discovery sample before this amendment (`legacy_early_full` in
+`validation_summary.json`). That is why the clock below starts fresh:
+the new formulas are judged only on matches played after this date.
+
+### Measurement span: the whole game (FROZEN)
+
+Every axis is measured over the whole recorded game. Every telemetry
+game carries a recorded outcome (host attestation or adjudication), so
+the end of the game is the decision; the few minutes after a building
+falls add too little to change what the axes track.
+
+Revision note: a draft of this amendment, dated 2026-10-22, ended the
+measurement at the first enemy kill of a recycler or factory. It was
+dropped before any confirmation duel existed (the newest match on disk
+was dated 2026-10-21), and the clock moved to 2026-10-23 so only games
+recorded under these final formulas count.
+
+Whole-game values can partly read the scoreboard: a side that is
+winning keeps its pools. The prefix gate (condition 4 below) is the
+guard against that.
+
+### Scored axes (FROZEN; higher is the hypothesized better)
+
+| Axis | Per-side value over the whole game | Weight |
+|---|---|---|
+| `pool_lead` | Mean `pool_count` over the 1 Hz samples. The differential is the mean pool lead. | 0.25 |
+| `non_green_share` | Share of live-recycler samples with `scrap < 20 × pool_count` (red or yellow). Green counts as bad everywhere, including time at the cap and green caused by having no pools. Samples with a dead recycler (`max_scrap == 20 × pool_count`) are skipped. | 0.25 |
+| `combat_conversion` | Combat-ship BUILD scrap (constructor lane excluded, starter ships excluded) divided by `max(income, 1)`, income = positive 1 Hz bank deltas. | 0.25 |
+| `upgrade_time` | Mean `upgrade_count` over the 1 Hz samples. | 0.25 |
+
+Equal weights are priors. They are not fitted.
+
+Starter ships (`STARTER_SHIP_STEMS`): `ivscout_m`, `ivscoutm_vsr`,
+`ivscoutm_12xvsr`, `fvscout_m`, `fvscoutm_vsr`, `evscout_m`,
+`evscoutm_vsr`. `cvscoutm_vsr` stays a combat ship.
+
+### Recorded, weight 0
+
+| Axis | Value |
+|---|---|
+| `replacement_ratio` | `min(3, combat ships built / max(1, human vehicle deaths))`, whole game. Deaths come from `kills.feed` rows whose victim is a leaderboard player on that side, pilot victims excluded. |
+| `replacement_ratio_real` | The same, with starter ships removed from "ships built". |
+| `loose_share` | Unchanged: whole-match `income_loose / max(scrap_income, 1)`. |
+
+Retired: `pool_tempo`, `regen_tempo`, `upgrade_share`, and the 240 s
+opening window.
+
+### Diagnostic prefixes (never in P)
+
+`performance.prefix_diffs` holds every axis diff re-measured from 0 to
+240, 480 and 720 seconds, present only when the match runs past that
+point. They exist to separate a signal that appears early in the game
+from one that only reads the scoreboard.
+
+### Seed differential-std priors (one-time scale anchor)
+
+One-time RMS of team-1-perspective whole-game diffs over the 138
+telemetry duels on disk on 2026-10-23, computed outcome-blind by
+`_investigation/cmdr_axes_preflight.py` (it never reads a winner).
+Scale only. Do not refit.
+
+```
+pool_lead               1.3
+non_green_share         0.24
+combat_conversion       0.13
+upgrade_time            0.41
+replacement_ratio       0.58   (unscored)
+replacement_ratio_real  0.64   (unscored)
+loose_share             0.11   (unscored; 2026-09-23 scale kept)
+```
+
+### What the outcome-blind preflight showed
+
+Recorded here so nobody rediscovers it on the confirmation sample:
+
+- `pool_lead` and `non_green_share` diffs correlate at r = 0.91. More
+  pools widen the yellow band, so the two largely move together; at
+  equal weights they act like one axis at double weight. Weights stay
+  frozen; this is a known overlap, not a reason to refit.
+- `loose_share` runs opposite to both (r = −0.70 and −0.83): a side
+  with fewer pools leans on loose.
+- `combat_conversion` is 0 for both sides in 10 of 138 duels (no
+  non-starter combat ship built all game); `replacement_ratio_real`
+  in the same 10.
+- Prefix coverage: 138 duels run past 4 minutes, 128 past 8, 99 past
+  12.
+- Feed-counted ships built and human deaths reproduce
+  `builds.teams.ships_built` and the sum of `leaderboard[].deaths`
+  exactly (0 mismatches).
+
+### Promote rule (replaces the 2026-09-23 rule)
+
+Confirmation = telemetry duels whose match date is **after 2026-10-23**.
+Earlier telemetry is discovery only. Flip `CMDR_ALPHA_C` below 1.0 only
+when ALL of these hold on the confirmation sample:
+
+1. At least 25 confirmation duels.
+2. At least 2 of the 4 scored axes have a Wilson **lower bound** above
+   0.55 on same-match sign agreement.
+3. **Close subset, redefined.** The 2026-09-23 test (loser's recycler
+   alive at 75% of the match) classified every confirmation duel as
+   close, because a recycler kill usually ends the game. A duel is now
+   close when `decided_by == "contested"` or its own pre-match expected
+   score (team 1) lies within [0.40, 0.60]. That uses no in-match data.
+   Those same axes must not be below 0.50 there. Fewer than 15 close
+   duels blocks a flip ("not yet testable").
+4. **Prefix gate.** An axis whose sign agreement is at or below 0.50 in
+   every prefix (0–240, 0–480, 0–720 s) cannot count toward condition
+   2, however well it agrees over the whole game.
+5. The α ablation in {1.0, 0.9, 0.8, 0.5}, scored only on confirmation
+   duels, improves log-loss by at least 0.01 and does not worsen
+   accuracy.
 
 Anything else: HOLD. No partial blend. No weight refit on the
 confirmation sample.

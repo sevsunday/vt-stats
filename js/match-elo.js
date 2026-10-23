@@ -133,12 +133,10 @@
     const body = document.getElementById('match-elo-empty-body');
     const lobby = document.getElementById('section-match-elo-lobby');
     const detail = document.getElementById('section-match-elo-detail');
-    const footer = document.getElementById('match-elo-footer');
     if (empty) empty.classList.remove('d-none');
     if (body) body.textContent = message;
     if (lobby) lobby.classList.add('d-none');
     if (detail) detail.classList.add('d-none');
-    if (footer) footer.classList.add('d-none');
     hideVtsrc();
     destroyScatter();
   }
@@ -147,11 +145,9 @@
     const empty = document.getElementById('match-elo-empty');
     const lobby = document.getElementById('section-match-elo-lobby');
     const detail = document.getElementById('section-match-elo-detail');
-    const footer = document.getElementById('match-elo-footer');
     if (empty) empty.classList.add('d-none');
     if (lobby) lobby.classList.remove('d-none');
     if (detail) detail.classList.remove('d-none');
-    if (footer) footer.classList.remove('d-none');
   }
 
   function joinLobby(currentData) {

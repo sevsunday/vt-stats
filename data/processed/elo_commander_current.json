@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "anchor": 1500.0,
   "k_base": 40.0,
   "k_floor": 20.0,
@@ -13,7 +13,7 @@
   "comeback_games_required": 3,
   "command_stale_window_days": 90,
   "corpus_latest_date": "2026-10-21",
-  "computed_at": "2026-10-22T22:09:44Z",
+  "computed_at": "2026-10-23T05:13:27Z",
   "rated_match_count": 225,
   "matches_skipped_undetermined": 23,
   "matches_skipped_missing_commander": 0,
@@ -27,45 +27,64 @@
   },
   "alpha_c": 1.0,
   "econ_weights": {
-    "pool_tempo": 0.43,
-    "combat_conversion": 0.35,
-    "regen_tempo": 0.22,
+    "pool_lead": 0.25,
+    "non_green_share": 0.25,
+    "combat_conversion": 0.25,
+    "upgrade_time": 0.25,
     "replacement_ratio": 0.0,
-    "upgrade_share": 0.0,
+    "replacement_ratio_real": 0.0,
     "loose_share": 0.0
   },
   "econ_std_prior": {
-    "pool_tempo": 48.0,
-    "combat_conversion": 0.14,
-    "regen_tempo": 0.054,
-    "replacement_ratio": 0.61,
-    "upgrade_share": 0.25,
+    "pool_lead": 1.3,
+    "non_green_share": 0.24,
+    "combat_conversion": 0.13,
+    "upgrade_time": 0.41,
+    "replacement_ratio": 0.58,
+    "replacement_ratio_real": 0.64,
     "loose_share": 0.11
   },
   "econ_std_shrinkage": 10.0,
-  "opening_window_sec": 240.0,
-  "econ_semantics_amended_on": "2026-09-23",
+  "econ_prefix_secs": [
+    240.0,
+    480.0,
+    720.0
+  ],
+  "starter_ship_stems": [
+    "evscout_m",
+    "evscoutm_vsr",
+    "fvscout_m",
+    "fvscoutm_vsr",
+    "ivscout_m",
+    "ivscoutm_12xvsr",
+    "ivscoutm_vsr"
+  ],
+  "econ_semantics_amended_on": "2026-10-23",
   "thug_supply_cap": 3.0,
   "econ_std_observed": {
-    "pool_tempo": {
+    "pool_lead": {
       "count": 138,
-      "std": 50.3518
+      "std": 1.308
+    },
+    "non_green_share": {
+      "count": 138,
+      "std": 0.2375
     },
     "combat_conversion": {
       "count": 138,
-      "std": 0.1565
+      "std": 0.1272
     },
-    "regen_tempo": {
+    "upgrade_time": {
       "count": 138,
-      "std": 0.0544
+      "std": 0.4121
     },
     "replacement_ratio": {
       "count": 138,
-      "std": 0.582
+      "std": 0.5799
     },
-    "upgrade_share": {
+    "replacement_ratio_real": {
       "count": 138,
-      "std": 0.2612
+      "std": 0.6426
     },
     "loose_share": {
       "count": 138,

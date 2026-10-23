@@ -1307,11 +1307,12 @@
 
   function econAxisLabel(axis) {
     switch (axis) {
-      case 'pool_tempo': return 'pool tempo';
-      case 'combat_conversion': return 'combat conversion';
-      case 'regen_tempo': return 'regen tempo';
-      case 'replacement_ratio': return 'replacement ratio';
-      case 'upgrade_share': return 'upgrade share';
+      case 'pool_lead': return 'pools held';
+      case 'non_green_share': return 'time out of green';
+      case 'combat_conversion': return 'real-ship spending';
+      case 'upgrade_time': return 'upgrades held';
+      case 'replacement_ratio': return 'ships per loss';
+      case 'replacement_ratio_real': return 'real ships per loss';
       case 'loose_share': return 'loose share';
       default: return axis;
     }
@@ -1368,12 +1369,22 @@
     return `<p class="vt-balonce-duel-line">${line}${tail}.</p>`;
   }
 
-  // Per-axis commander economy from duel.performance.axes. Recorded, not
-  // scored (alpha_c = 1): it never moved the rating.
+  // Per-axis commander economy from duel.performance.axes, measured over
+  // the whole game. Recorded, not scored (alpha_c = 1): it never moved
+  // the rating.
   const ECON_AXIS_COPY = {
-    pool_tempo: 'Pool tempo (sooner to 3 pools)',
-    combat_conversion: 'Combat conversion (opening scrap into combat ships)',
-    regen_tempo: 'Regen tempo (opening time in fast regen)',
+    pool_lead: 'Pools held (average)',
+    non_green_share: 'Time out of green scrap',
+    combat_conversion: 'Real-ship spending (empty scouts excluded)',
+    upgrade_time: 'Upgrades held (average)',
+  };
+
+  const econPct = (x) => `${Math.round(x * 100)}%`;
+  const ECON_VALUE_FMT = {
+    pool_lead: (a, b) => `${a.toFixed(1)} vs ${b.toFixed(1)} pools`,
+    non_green_share: (a, b) => `${econPct(a)} vs ${econPct(b)} of the time`,
+    combat_conversion: (a, b) => `${econPct(a)} vs ${econPct(b)} of income`,
+    upgrade_time: (a, b) => `${a.toFixed(1)} vs ${b.toFixed(1)} upgrades`,
   };
 
   function commanderEconHtml(joined) {
@@ -1384,18 +1395,22 @@
       .map(([axis, v]) => {
         const mag = Math.abs(v.z);
         const label = esc(ECON_AXIS_COPY[axis] || econAxisLabel(axis));
+        const vals = v.values || {};
+        const fmt = ECON_VALUE_FMT[axis];
+        const numbers = `<span class="vt-balonce-econ-values text-muted vt-mono">${
+          fmt && isNum(vals['1']) && isNum(vals['2']) ? esc(fmt(vals['1'], vals['2'])) : ''}</span>`;
         if (mag < 0.1) {
-          return `<li><span class="vt-balonce-econ-axis">${label}</span><span class="text-muted">even</span></li>`;
+          return `<li class="vt-balonce-econ-row"><span class="vt-balonce-econ-axis">${label}</span>${numbers}<span class="vt-balonce-econ-edge text-muted">even</span></li>`;
         }
         const side = v.z > 0 ? 1 : 2;
         const strength = mag < 0.4 ? 'narrow' : mag < 0.8 ? 'clear' : 'commanding';
-        return `<li><span class="vt-balonce-econ-axis">${label}</span>
-          <span>${strength} edge to <strong>${esc(commanderName(joined, side) || `Team ${side}`)}</strong></span></li>`;
+        return `<li class="vt-balonce-econ-row"><span class="vt-balonce-econ-axis">${label}</span>${numbers}
+          <span class="vt-balonce-econ-edge">${strength} edge to <strong>${esc(commanderName(joined, side) || `Team ${side}`)}</strong></span></li>`;
       }).join('');
     if (!rows) return '';
     return `<div class="vt-balonce-econ">
         <div class="vt-balonce-econ-head" data-bs-toggle="tooltip" data-bs-placement="top"
-          title="The commanders' opening economy read from match telemetry. Recorded, not scored: the commander rating stays win/loss until a fresh sample clears the promote rule.">
+          title="The commanders' economy read from match telemetry, Team 1 first, across the whole game. Recorded, not scored: the commander rating stays win/loss until a fresh sample clears the promote rule.">
           Commander economy <span class="text-muted">\u00b7 recorded, not scored</span></div>
         <ul class="vt-balonce-econ-list">${rows}</ul>
       </div>`;
