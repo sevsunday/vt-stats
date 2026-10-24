@@ -1,8 +1,9 @@
 """VTSR-T (VT Stats Rating - Thug): pipeline-side Thug ELO.
 
-Computes a per-player rating from chronological match data using a
-four-axis thug composite + ELO-style updates with loss aversion and a
-soft floor. Pure module (no I/O); writer lives in process_stats.py.
+Computes a per-player rating from chronological match data using the
+player's share of the lobby's enemy damage (v2.14; one axis, every enemy
+target paid the same per point) + ELO-style updates with loss aversion
+and a soft floor. Pure module (no I/O); writer lives in process_stats.py.
 
 The published rating is ``VTSR-T = alpha * R^W + (1 - alpha) * R^T``.
 With ``alpha = 0`` (current ship), VTSR-T collapses to the Thug ELO
@@ -19,12 +20,12 @@ Per-match update:
 
 v2.4: per-match commander role adjustment. For each commander
 match-row, post-clip per-axis z-scores get shifted by the negation of a
-typical-commander baseline (then re-clipped to [-1, +1]). 3 audit-derived
-priors apply with shrinkage strength 30; 1 hand-tuned prior (pve_share)
-is locked (no shrinkage). v2.11 retired snipe_bonus and
-target_lock_pct; v2.12 retired thug_accuracy (the collector never
-recorded non-human BulletHits); v2.13 retired thug_efficiency (sign
-agreement 38.8%, CI entirely below 50%). They are no longer axes.
+typical-commander baseline (then re-clipped to [-1, +1]). Since v2.14
+one prior (enemy_damage_share) applies with shrinkage strength 30.
+v2.11 retired snipe_bonus and target_lock_pct; v2.12 retired
+thug_accuracy; v2.13 retired thug_efficiency; v2.14 replaced net damage
+share, thug kill rate, PvE share and mobility with enemy_damage_share
+(critique/decisions/vtsr-t-enemy-damage.md).
 Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
@@ -118,33 +119,29 @@ ELO_K_LOSS_AVERSION = 0.85
 ELO_RATING_FLOOR = 1000.0
 ELO_FLOOR_TAPER_WINDOW = 150.0
 
-# Fractional weight for PvE kills on thug_kill_rate, the only axis that
-# still uses it. PvE kills count at this fraction of equivalent PvP
-# kills. Lobby z-scoring still rewards exceptional PvE on pve_share.
-# Surfaced in elo_current.json for auditability; tunable without a
-# schema bump. v2.12 retired thug_accuracy and v2.13 retired
-# thug_efficiency, which used to share this constant.
+# Fractional weight for PvE kills on thug_kill_rate. v2.14 took that axis
+# out of the composite, so this only matters to the retired axis and to
+# scripts/vtsr_t_variants.py. Surfaced in elo_current.json.
 ALPHA_PVE = 0.5
 
-# Thug composite weights (v2.13: four axes). v2.11 retired snipe_bonus
-# and target_lock_pct. v2.12 retired thug_accuracy: BulletHit requires
-# both shooter and victim to be players, so rounds into extractors were
-# scored as misses (sign agreement 39.5%). v2.13 retired thug_efficiency:
-# the damage-mix ratio scored winners lower (sign agreement 38.8%, CI
-# entirely below 50%, including on v4). _thug_accuracy_lobby stays for
-# the reconstructed-hits candidate. _thug_efficiency_lobby stays
-# uncalled so the retirement memo's formula remains reproducible; it is
-# not a re-admit candidate. Snipes, T-key usage, and the accuracy column
-# are display stats, never rating inputs. The raw dict sums to 0.60.
-# compute_performance_index() always renormalizes available-axis weights
-# at runtime (`weights[a] = THUG_WEIGHTS[a] / sum(available)`). Per-row
-# inline comments describe what each axis measures.
+# Thug composite weights. v2.14: a single axis, the player's share of the
+# lobby's enemy damage, with every enemy target paid the same per point
+# (critique/decisions/vtsr-t-enemy-damage.md). The v2.13 axes (net damage
+# share 0.20, thug kill rate 0.20, PvE share 0.12, mobility 0.08) stay in
+# AXIS_BUILDERS, uncalled, so the variant harness can replay them. Kill
+# rate mostly repeated damage (r = 0.72) and missed bail-outs and snipes;
+# mobility repeated damage (r = 0.62); PvE share paid for the mix of a
+# player's damage rather than its amount. Snipes, T-key usage, and the
+# accuracy column are display stats, never rating inputs.
+# compute_performance_index() renormalizes available-axis weights at
+# runtime (`weights[a] = THUG_WEIGHTS[a] / sum(available)`).
 THUG_WEIGHTS = {
-    "net_damage_share":  0.20,   # damage you dealt minus what you took, vs lobby total
-    "thug_kill_rate":    0.20,   # (pvp_kills + ALPHA_PVE * pve_kills) / minutes
-    "pve_share":         0.12,   # pve_dealt / total_dealt (asset disruption)
-    "mobility":          0.08,   # activity_score from positioning data
+    "enemy_damage_share": 1.0,   # enemy_dealt / lobby enemy_dealt
 }
+
+# Enemy-damage axes only: leave out building damage in the last
+# STRUCTURE_LATE_SEC of a match (personal.enemy_structure_dealt_late).
+ENEMY_DAMAGE_TRIM_LATE_STRUCTURE = False
 
 ALPHA = 0.0   # Wins-ELO blend weight. Stays 0 until the pre-registered
               # promote rule (critique/decisions/phase-5-wins-blend.md)
@@ -176,39 +173,13 @@ WINS_DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested
 # so they share units with the audit's measurement space. Asymmetric by
 # design - see DEVELOPER_GUIDE.md §13 v2.4 for the full rationale.
 COMMANDER_AXIS_PRIOR = {
-    # ---- Audit-derived structural penalty relief (use shrinkage strength 30).
-    # Commanders are tied to base / building / not in dedicated combat ships,
-    # so we don't ding them as hard for the natural commander shortfall.
-    # thug_efficiency (-0.106) left with the axis in v2.13.
-    "mobility":         -0.488,
-    "thug_kill_rate":   -0.164,
-    "net_damage_share": -0.131,
-
-    # ---- Hand-tuned: PvE reward boost (LOCKED, no shrinkage).
-    # Seed-era audit said +0.111 (commanders naturally do more PvE). We
-    # invert the sign so this becomes a +0.05 reward shift on commander
-    # rows: hitting enemy assets is the work commanders SHOULD do.
-    #
-    # HONESTY NOTE (June 2026 fable review (git history)): the live empirical commander
-    # mean on this axis is +0.049 (n=214) -- commanders ALREADY out-PvE
-    # the lobby without help. The lock therefore no longer "protects a
-    # reward from drift"; it grants a bonus ON TOP of an axis commanders
-    # already lead (~0.10 post-clip z vs the descriptive baseline). We
-    # keep it as a deliberate double-reward: the Phase 2B priors ablation
-    # measured the total cost of both locks at <= 3.9 ELO per player vs a
-    # ~30 ELO bootstrap noise floor, and the normative intent (commanders
-    # should never be discouraged from PvE work) stands. Revisit if the
-    # commander cohort delta from the locks ever exceeds the noise floor
-    # (see critique/decisions/phase-2b-priors-ablation.md).
-    "pve_share":        -0.05,
-
-    # ---- Omitted.
-    # thug_efficiency left the composite in v2.13 (sign agreement 38.8%;
-    # see critique/decisions/thug-efficiency-retirement.md).
-    # thug_accuracy left the composite in v2.12 (collector never recorded
-    # non-human BulletHits; the axis scored economy fire as misses).
-    # snipe_bonus and target_lock_pct left in v2.11. None of them
-    # are axes.
+    # Commanders sit at base building, so they deal less enemy damage than
+    # thugs. Seed = the observed commander running mean on this axis when
+    # v2.14 was promoted (508 commander rows); it shrinks toward the live
+    # mean at strength 30. The v2.13 priors (mobility -0.488, kill rate
+    # -0.164, net damage -0.131, locked PvE share -0.05) left with their
+    # axes; scripts/vtsr_t_variants.py keeps them for the v17 replay.
+    "enemy_damage_share": -0.171,
 }
 
 # Shrinkage strength (in pseudo-observations) for audit-derived axes.
@@ -219,8 +190,9 @@ COMMANDER_BASELINE_SHRINKAGE = 30.0
 # data over time. These always use the seed value from COMMANDER_AXIS_PRIOR.
 # The running mean is still tracked (visibility only) so anyone reading
 # elo_current.json can see when reality has diverged enough from intent
-# to warrant a seed-value revisit.
-COMMANDER_BASELINE_LOCKED_AXES = {"pve_share"}
+# to warrant a seed-value revisit. Empty since v2.14 (the locked
+# pve_share prior left with its axis).
+COMMANDER_BASELINE_LOCKED_AXES: set[str] = set()
 
 # Phase 2C (current): expected-performance opponent-reference modes.
 # Three options for aggregating per-opponent ratings into the single
@@ -256,8 +228,12 @@ K_INACTIVITY_BOOST_RATE = 0.05    # ELO per day inactive.
 K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 
 # v2.8 (current): low-tier at-base lift. Established-low-tier thug rows get
-# their thug_kill_rate recomputed over EFFECTIVE time (match minus the
-# player's "at-base on-foot" ship-denied seconds, from positioning), and the
+# their LOWTIER_LIFT_AXIS value recomputed over EFFECTIVE time (match minus
+# the player's "at-base on-foot" ship-denied seconds, from positioning). Since
+# v2.14 that axis is enemy_damage_share: the player's enemy damage is scaled
+# by minutes / effective minutes against the unchanged lobby total. The
+# thug_kill_rate form (kills / effective minutes) is kept for the v17 replay.
+# The
 # improvement is applied as an additive post-clip z-shift on that row only
 # (mirrors the v2.4 commander axis-shift; lobby mean/std stay canonical so
 # non-eligible players are unaffected). Eligibility is derived from the
@@ -282,7 +258,7 @@ K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 LOWTIER_LIFT_ENABLED      = True
 LOWTIER_LIFT_CUTOFF       = 1460.0   # eligibility hits 0 at/above this VTSR
 LOWTIER_LIFT_TAPER        = 60.0     # taper width below the cutoff
-LOWTIER_LIFT_AXIS         = "thug_kill_rate"
+LOWTIER_LIFT_AXIS         = "enemy_damage_share"
 LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-ship minutes
 
 # Phase 3 (rank-scoring trial): per-axis lobby score modes. "zclip" is the
@@ -385,12 +361,18 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # misses and was anti-predictive. Output shape: `weights`, `axis_means`,
 # and `axis_contributions` carry 5 keys. Ratings move, so
 # **pre-v16 `peak_vtsr` is no longer comparable**.
-# v17 (current) = v2.13 efficiency-axis retirement. `thug_efficiency`
+# v17 = v2.13 efficiency-axis retirement. `thug_efficiency`
 # leaves the composite. The damage-mix ratio scored the winning side
 # lower (sign agreement 38.8%, CI entirely below 50%). Output shape:
 # `weights`, `axis_means`, and `axis_contributions` carry 4 keys.
 # Ratings move, so **pre-v17 `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 17
+# v18 (current) = v2.14 enemy-damage rating. One axis,
+# `enemy_damage_share` (match.schema_version 33 `personal.enemy_dealt`),
+# replaces net damage, kill rate, PvE share and mobility, promoted by
+# critique/decisions/vtsr-t-enemy-damage.md. Output shape: `weights`,
+# `axis_means`, and `axis_contributions` carry 1 key. Ratings move, so
+# **pre-v18 `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 18
 
 
 # ---------------------------------------------------------------------------
@@ -834,6 +816,41 @@ def _mobility_lobby(lobby: list[dict], pos_players: dict) -> list[float] | None:
     return out if any_present else None
 
 
+def _enemy_fields(p: dict) -> tuple[float, float]:
+    """(enemy damage dealt, enemy damage received) for one row.
+
+    match.schema_version 33 fields. Pre-v33 rows fall back to ``dealt`` /
+    ``received``. With ``ENEMY_DAMAGE_TRIM_LATE_STRUCTURE`` the end-of-game
+    base demolition (``enemy_structure_dealt_late``) is left out.
+    """
+    pd = p.get("personal", {}) or {}
+    if "enemy_dealt" in pd:
+        dealt = pd.get("enemy_dealt", 0) or 0
+        if ENEMY_DAMAGE_TRIM_LATE_STRUCTURE:
+            dealt -= pd.get("enemy_structure_dealt_late", 0) or 0
+        return max(0.0, dealt), (pd.get("enemy_received", 0) or 0)
+    return (pd.get("dealt", 0) or 0), (pd.get("received", 0) or 0)
+
+
+def _enemy_damage_share_lobby(lobby: list[dict]) -> list[float]:
+    """Share of the lobby's enemy damage this player dealt.
+
+    Every enemy target counts the same per point of damage: players,
+    scavengers, extractors, AI units and buildings. Friendly units, loose
+    scrap and props are left out.
+    """
+    vals = [_enemy_fields(p)[0] for p in lobby]
+    denom = max(1.0, sum(vals))
+    return [v / denom for v in vals]
+
+
+def _enemy_net_damage_share_lobby(lobby: list[dict]) -> list[float]:
+    """(enemy damage dealt - enemy damage taken) / lobby enemy damage."""
+    pairs = [_enemy_fields(p) for p in lobby]
+    denom = max(1.0, sum(d for d, _ in pairs))
+    return [(d - r) / denom for d, r in pairs]
+
+
 def _pve_share_lobby(lobby: list[dict]) -> list[float] | None:
     """Player-dealt damage to enemy non-human assets / total dealt.
 
@@ -854,6 +871,22 @@ def _pve_share_lobby(lobby: list[dict]) -> list[float] | None:
             any_present = True
         out.append(pve_d / max(1.0, total))
     return out if any_present else None
+
+
+# Axis name -> lobby builder ``(lobby, minutes, pos_players) -> list | None``.
+# compute_performance_index builds the axes named in THUG_WEIGHTS only, so
+# retired and candidate axes stay reproducible (scripts/vtsr_t_variants.py)
+# without being computed on canonical runs.
+AXIS_BUILDERS = {
+    "net_damage_share":       lambda lobby, minutes, pos: _net_damage_share_lobby(lobby),
+    "thug_kill_rate":         lambda lobby, minutes, pos: _thug_kill_rate_lobby(lobby, minutes),
+    "pve_share":              lambda lobby, minutes, pos: _pve_share_lobby(lobby),
+    "mobility":               lambda lobby, minutes, pos: _mobility_lobby(lobby, pos),
+    "thug_accuracy":          lambda lobby, minutes, pos: _thug_accuracy_lobby(lobby),
+    "thug_efficiency":        lambda lobby, minutes, pos: _thug_efficiency_lobby(lobby),
+    "enemy_damage_share":     lambda lobby, minutes, pos: _enemy_damage_share_lobby(lobby),
+    "enemy_net_damage_share": lambda lobby, minutes, pos: _enemy_net_damage_share_lobby(lobby),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1036,10 +1069,7 @@ def compute_performance_index(
     # v2.13: thug_efficiency is not assembled. _thug_efficiency_lobby
     # remains uncalled (forensic formula only; not a re-admit candidate).
     raw: dict[str, list[float] | None] = {
-        "net_damage_share": _net_damage_share_lobby(lobby),
-        "thug_kill_rate":   _thug_kill_rate_lobby(lobby, minutes),
-        "pve_share":        _pve_share_lobby(lobby),
-        "mobility":         _mobility_lobby(lobby, pos_players),
+        a: AXIS_BUILDERS[a](lobby, minutes, pos_players) for a in THUG_WEIGHTS
     }
 
     available = [a for a, v in raw.items() if v is not None]
@@ -1095,10 +1125,10 @@ def compute_performance_index(
         z_by_axis[axis] = clipped
 
     # v2.8: low-tier at-base lift. For eligible (established-low-tier) thug
-    # rows, recompute thug_kill_rate over EFFECTIVE time (match minus the
-    # player's at-base on-foot "ship-denied" seconds) and apply the
+    # rows, recompute the LOWTIER_LIFT_AXIS value over EFFECTIVE time (match
+    # minus the player's at-base on-foot "ship-denied" seconds) and apply the
     # improvement as an additive post-clip z-shift on that row only. The
-    # lobby mean/std stay canonical (computed from full-time kill rate), so
+    # lobby mean/std stay canonical (computed from full-time values), so
     # every non-eligible player's score is byte-identical. Mirrors the v2.4
     # commander shift. Commanders excluded (they build their own ships).
     if (
@@ -1131,12 +1161,15 @@ def compute_performance_index(
                 eff_min = minutes - at_base / 60.0
                 if eff_min < LOWTIER_LIFT_MIN_SHIP_MIN:
                     continue  # small-sample guard: too little ship-time to trust
-                pd = p.get("personal", {}) or {}
-                if "pvp_kills" in pd or "pve_kills" in pd:
-                    blended = (pd.get("pvp_kills", 0) or 0) + ALPHA_PVE * (pd.get("pve_kills", 0) or 0)
+                if LOWTIER_LIFT_AXIS == "thug_kill_rate":
+                    pd = p.get("personal", {}) or {}
+                    if "pvp_kills" in pd or "pve_kills" in pd:
+                        blended = (pd.get("pvp_kills", 0) or 0) + ALPHA_PVE * (pd.get("pve_kills", 0) or 0)
+                    else:
+                        blended = p.get("kills", 0) or 0
+                    kr_eff = blended / eff_min
                 else:
-                    blended = p.get("kills", 0) or 0
-                kr_eff = blended / eff_min
+                    kr_eff = kr_full[i] * minutes / eff_min
                 if use_rank:
                     # Re-rank this player's effective rate against everyone
                     # else's canonical full-time rates (their own full-time
@@ -1317,7 +1350,7 @@ def _rating_pass(
     When ``lowtier_eligibility`` is provided (the second of ``compute_elo``'s
     two passes), the per-match composite passes it into
     ``compute_performance_index`` so eligible low-tier thug rows get the
-    at-base ``thug_kill_rate`` lift. ``None`` (the first pass) yields the
+    at-base lift on ``LOWTIER_LIFT_AXIS``. ``None`` (the first pass) yields the
     canonical, unbuffered ratings.
 
     Match order is ``(match.date, match.id)`` — ELO is path-dependent,
@@ -1325,11 +1358,9 @@ def _rating_pass(
 
     Phase 2B unlocked-priors mode: when ``exclude_locked_priors=True``
     every commander axis listed in ``COMMANDER_AXIS_PRIOR`` rides the
-    shrunk rolling baseline. The hand-tuned LOCKED axis (``pve_share``
-    reward boost) loses its hand-tuned override and is blended with the
-    live empirical mean at shrinkage strength
-    ``COMMANDER_BASELINE_SHRINKAGE``, same as the audit-derived axes.
-    The output dicts gain
+    shrunk rolling baseline, including any axis in
+    ``COMMANDER_BASELINE_LOCKED_AXES`` (empty since v2.14, so this mode
+    now matches canonical). The output dicts gain
     ``excludes_locked_priors: True`` and ``commander_baseline_locked_axes``
     is empty on the alt JSON pair.
 
@@ -2019,7 +2050,7 @@ def _rating_pass(
         "commander_axis_prior":           dict(COMMANDER_AXIS_PRIOR),
         "commander_baseline_shrinkage":   COMMANDER_BASELINE_SHRINKAGE,
         # Effective lock set used during this rating run. Canonical:
-        # mirrors the module constant (``pve_share``).
+        # mirrors the module constant (empty since v2.14).
         # Unlocked alt mode: empty list -- every axis rode the shrunk
         # rolling baseline. The module-constant view stays available via
         # ``commander_baseline_locked_axes_module_default`` for forensics.

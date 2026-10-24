@@ -14,7 +14,7 @@
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
  *                             example (from the shared js/vtsr-explainers.js).
- *   The 4 axes              — annotated mixing-board + weights table.
+ *   What counts             — the scored axis (enemy damage share) + what stopped counting.
  *   Commanders & fairness   — the fairness rules as plain-language cards.
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
@@ -79,19 +79,16 @@
   // scripts/elo.py ELO_LADDER_MIN_MATCHES. Independent of the
   // 10-match Provisional badge.
   const ELO_LADDER_MIN_MATCHES_FALLBACK = 25;
-  const VTSR_TIERS = [
-    { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity },
-    { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800 },
-    { id: 3, label: 'Tier 3', short: 'III', min: 1500, max: 1650 },
-    { id: 4, label: 'Tier 4', short: 'IV',  min: 1350, max: 1500 },
-    { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350 },
-  ];
+  // Tier list (top first) from elo_current.json band_config via
+  // js/vtsr-display.js. Tier 0 is a real tier; provisional rows use the
+  // PROVISIONAL_TIER id instead.
+  const PROVISIONAL_TIER = 'provisional';
+  const vtsrTiers = () => VTSRDisplay.tiers();
   function resolveTier(vtsr, matchesPlayed) {
     if (matchesPlayed < ELO_PROVISIONAL_THRESHOLD) {
-      return { id: 0, label: 'Provisional', short: '?' };
+      return { id: PROVISIONAL_TIER, label: 'Provisional', short: '?' };
     }
-    return VTSR_TIERS.find(t => vtsr >= t.min && vtsr < t.max)
-      || VTSR_TIERS[VTSR_TIERS.length - 1];
+    return VTSRDisplay.tierFor(vtsr);
   }
   function vtsrLadderMinMatches(elo) {
     return (elo && elo.leaderboard_min_matches != null)
@@ -204,7 +201,7 @@
   // Corpus-wide: no picker filter exists here, so every rated player shows.
   // ----------------------------------------------------------------------
 
-  let vtsrSortState = { key: 'band', asc: false };
+  let vtsrSortState = { key: 'position', asc: false };
   const expandedVtsrRows = new Set();
   let _vtsrCareerStats = null;
 
@@ -285,25 +282,10 @@
   // Per-axis metadata for the expand panel's hover tooltips (local copy of
   // the catalog in js/app.js — keys mirror elo_current.json `weights`).
   const VTSR_AXIS_META = {
-    net_damage_share: {
-      label: 'Net damage share',
-      formula: '(dealt - received) / sum_lobby(dealt)',
-      desc:    'All damage you dealt minus all damage you took (players, friendly fire, AI, and buildings), as a share of total damage dealt in the lobby. Your own splash cancels out. Damage from turrets and scavengers you own is not included.',
-    },
-    thug_kill_rate: {
-      label: 'Thug kill rate',
-      formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
-      desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
-    },
-    pve_share: {
-      label: 'PvE share',
-      formula: 'pve_dealt / max(1, total_dealt)',
-      desc:    'Your damage to enemy non-human assets (structures + AI tanks + scavs + extractors) as a share of your total damage. Rewards economy disruption.',
-    },
-    mobility: {
-      label: 'Mobility',
-      formula: 'activity_score / 100  (positioning data)',
-      desc:    'How much of the map you actually moved across. Driven by the same metric as the per-match Movement Profile column.',
+    enemy_damage_share: {
+      label: 'Enemy damage share',
+      formula: 'enemy_dealt / sum_lobby(enemy_dealt)',
+      desc:    'Your damage to the enemy as a share of all the damage your lobby did to the enemy. Players, scavengers, extractors, AI units and buildings all count the same per point. Damage to your own team\u2019s units, loose scrap and map props does not count.',
     },
   };
 
@@ -576,7 +558,7 @@
   }
 
   function vtsrTierGroupHeaderHtml(tier, count, colSpan) {
-    const badge = tier.id === 0
+    const badge = tier.id === PROVISIONAL_TIER
       ? '<span class="vt-vtsr-provisional">?</span>'
       : `<span class="vt-tier-badge vt-tier-${tier.id}">${tier.short}</span>`;
     const nLabel = count === 1 ? '1 player' : `${count} players`;
@@ -692,7 +674,7 @@
     </tr>`;
   }
 
-  // Tier groups (1 -> 5, reversed when the Band column sorts ascending).
+  // Tier groups (0 -> 5, reversed when the Band column sorts ascending).
   // Band and Position each keep the Upper / Lower sub-groups. Band
   // sorts names A-Z inside a half; Position sorts by the white pin
   // inside that half and does not flip which half comes first. Any
@@ -707,16 +689,16 @@
     for (const r of ranked) {
       const tier = resolveTier(r.vtsr, r.matches_played);
       const band = VTSRDisplay.bandFor(r);
-      const id = band.provisional ? 0 : band.tier;
-      const t = id === 0 ? tier : (VTSR_TIERS.find(x => x.id === id) || tier);
+      const id = band.provisional ? PROVISIONAL_TIER : band.tier;
+      const t = id === PROVISIONAL_TIER ? tier : (vtsrTiers().find(x => x.id === id) || tier);
       if (!buckets.has(id)) buckets.set(id, { tier: t, rows: [] });
       buckets.get(id).rows.push(r);
     }
     for (const b of buckets.values()) b.rows.sort(sorter);
 
-    let tierOrder = VTSR_TIERS.map(t => t.id);
+    let tierOrder = vtsrTiers().map(t => t.id);
     if (bandSort && vtsrSortState.asc) tierOrder = tierOrder.slice().reverse();
-    if (buckets.has(0)) tierOrder = [...tierOrder, 0];
+    if (buckets.has(PROVISIONAL_TIER)) tierOrder = [...tierOrder, PROVISIONAL_TIER];
 
     const rowHtml = r => renderVtsrLadderRow(r, elo, { noiseSigma, showProgress: false });
     let html = '';
@@ -724,7 +706,7 @@
       const b = buckets.get(id);
       if (!b || !b.rows.length) continue;
       html += vtsrTierGroupHeaderHtml(b.tier, b.rows.length, colSpan);
-      if (halfSort && id !== 0) {
+      if (halfSort && id !== PROVISIONAL_TIER) {
         // Only the Band column reverses half order. Position keeps
         // Upper above Lower and reorders players inside each half.
         const halves = (bandSort && vtsrSortState.asc) ? ['lower', 'upper'] : ['upper', 'lower'];
@@ -1401,7 +1383,7 @@
            on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.)</span></p>
          </section>`
       : '';
-    const formLead = `VTSR-T is your <strong>thug form</strong>. Each game it grades damage traded, kills, base and scav damage, and map coverage against the people in that lobby. You go up when that grade beats what your current rating predicted, and down when it falls short; each game reads as <strong>Beat expectation</strong>, <strong>On par</strong> or <strong>Below expectation</strong>. Winning the game does not move it; commanders have their own win rating, VTSR-C. The site shows VTSR-T as a band, never a number. Under the hood everyone starts at <strong>1500</strong>. Walk through the formula:`;
+    const formLead = `VTSR-T is your <strong>thug form</strong>. Each game it grades your share of the lobby&rsquo;s damage to the enemy (players, scavs, extractors, AI units and buildings all count the same per point) against the people in that lobby. You go up when that grade beats what your current rating predicted, and down when it falls short; each game reads as <strong>Beat expectation</strong>, <strong>On par</strong> or <strong>Below expectation</strong>. Winning the game does not move it; commanders have their own win rating, VTSR-C. The site shows VTSR-T as a band, never a number. Under the hood everyone starts at <strong>1500</strong>. Walk through the formula:`;
     pane.innerHTML = `<div class="vt-elo-doc">
       <section class="vt-vtsr-doc-section">
         <h6>The one formula</h6>
@@ -1443,7 +1425,7 @@
   }
 
   // ----------------------------------------------------------------------
-  // Tab: The 4 axes.
+  // Tab: What counts (the scored axis).
   // ----------------------------------------------------------------------
 
   function renderAxesTab() {
@@ -1453,21 +1435,21 @@
     pane.innerHTML = `<div class="vt-elo-doc">
       <section class="vt-vtsr-doc-section">
         <h6>What gets measured</h6>
-        <p class="mb-1">Your match score isn&rsquo;t one stat &mdash; it&rsquo;s <strong>4 of them, mixed by share</strong>. Think of it as a mixing board: the wider the slider, the more that axis moves your rating. Step through each one:</p>
-        ${E.axesBoardHtml()}
-        <p class="mb-0 mt-2 text-muted small">Every axis is scored <em>against the lobby you played in</em> &mdash; being average earns roughly zero, beating the room earns positive, trailing it earns negative.</p>
+        <p class="mb-1">Your match score is <strong>one stat</strong>: your share of the damage your lobby did to the enemy. Hitting an enemy tank, a scavenger, an extractor or a building all pays the same per point of damage.</p>
+        ${E.AXES.length > 1 ? E.axesBoardHtml() : ''}
+        <p class="mb-0 mt-2 text-muted small">It is scored <em>against the lobby you played in</em> &mdash; an average share earns roughly zero, beating the room earns positive, trailing it earns negative.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The shares</h6>
+        <h6>Share of the match score</h6>
         ${E.weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE kills count at half-weight on kill rate, so role players still get credit without crowding out pure dogfighters. Damage to bases and scavengers is its own axis (PvE share). Shot accuracy and fight efficiency are not rating inputs: accuracy scored economy fire as misses, and the efficiency ratio scored the winning side lower.</div>
+        <div class="vt-katex-caveat">${E.RETIRED_AXES_NOTE}</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 4 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record a commander economy read across the whole game &mdash; pools held, time the scrap bank spent out of green, scrap spent on real combat ships (empty scouts excluded), and upgrades held, plus unscored ships-per-loss and loose-share readouts &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Oct 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
-        <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
+        <p class="mb-1">Enemy damage powers <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record a commander economy read across the whole game &mdash; pools held, time the scrap bank spent out of green, scrap spent on real combat ships (empty scouts excluded), and upgrades held, plus unscored ships-per-loss and loose-share readouts &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Oct 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
+        <p class="mb-0 text-muted small">The choice was <strong>checked against real match outcomes</strong> before it shipped (see <code>critique/decisions/vtsr-t-enemy-damage.md</code>); how well it lines up with winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;
     E.initIn(pane);
@@ -1510,7 +1492,7 @@
       },
       {
         icon: 'bi-life-preserver', title: 'Stranded at base? Not your fault',
-        body: `<p>Lower-rated players sometimes spend long stretches shipless at base waiting on a rebuild. For established low-tier players that <strong>waiting time is excluded</strong> from the kill-rate clock, so the rating measures what you did with a ship, not how long you went without one.</p>`,
+        body: `<p>Lower-rated players sometimes spend long stretches shipless at base waiting on a rebuild. For established low-tier players that <strong>waiting time is excluded</strong>: their damage is scaled up to the time they actually had a ship, so the rating measures what you did with a ship, not how long you went without one.</p>`,
         verdict: 'Caveat: for low-tier players, time spent outside of base as a pilot still counts against you like normal.',
       },
       {
@@ -1805,7 +1787,7 @@
       }).join('');
       axisOutcomeHtml = `<div class="vt-elo-acc-section">
         <h6>Which axes actually win games?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% that axis lined up with the losing side. The four bars are the axes that score today. Updated every pipeline run. (50% = the axis says nothing about winning; a self-omitting axis has a smaller sample, so treat a thin one with care.)</p>
+        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% that axis lined up with the losing side. The bar is the axis that scores today; it is measured inside the same match, so it says the winners did more damage, not that the rating predicts winners in advance (thug ratings do not yet). Updated every pipeline run. (50% = the axis says nothing about winning; a self-omitting axis has a smaller sample, so treat a thin one with care.)</p>
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;
     }

@@ -179,13 +179,11 @@ SYNTHETIC_WINNER_THRESHOLD = 0.85
 # pipeline THUG_WEIGHTS change, the validator will pick them up via
 # elo_current.json's ``weights`` block; this constant is the fallback.
 THUG_WEIGHTS_FALLBACK = {
-    "net_damage_share":  0.20,
-    "thug_kill_rate":    0.20,
-    "pve_share":         0.12,
-    "mobility":          0.08,
+    "enemy_damage_share": 1.0,
 }
-# Weight the reconstructed-accuracy candidate would have if it were
-# re-admitted beside the five live axes (0.15 / 0.91).
+# Weight the reconstructed-accuracy candidate was scored at against the
+# v2.12 composite it was proposed for (0.15 / 0.91). Kept so the §21
+# numbers stay comparable across runs.
 CANDIDATE_ACCURACY_WEIGHT = 0.15 / 0.91
 
 # Self-consistency floor: minimum matches per player to be included in

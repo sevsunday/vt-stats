@@ -36,16 +36,13 @@
 
   // ---- Constants --------------------------------------------------------
 
-  // Mirrors VTSR_TIERS in js/app.js. Duplicated here because that file
-  // wraps its tier helpers in an IIFE, so we can't import. Keep the
-  // numbers identical or the directory chips will mismatch the dashboard.
-  const VTSR_TIERS = [
-    { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity, token: 'vt-tier-1' },
-    { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800,     token: 'vt-tier-2' },
-    { id: 3, label: 'Tier 3', short: 'III', min: 1500, max: 1650,     token: 'vt-tier-3' },
-    { id: 4, label: 'Tier 4', short: 'IV',  min: 1350, max: 1500,     token: 'vt-tier-4' },
-    { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350,     token: 'vt-tier-5' },
-  ];
+  // Tier list (top first) from elo_current.json band_config via
+  // js/vtsr-display.js, so the directory chips match every other page.
+  const vtsrTiers = () => VTSRDisplay.tiers();
+  // Directory tier-filter keys: the tier id as a string, or 'p' for
+  // provisional (Tier 0 is a real tier, so it can't mark provisional).
+  const PROVISIONAL_KEY = 'p';
+  const tierKeyForBand = band => (band.provisional ? PROVISIONAL_KEY : String(band.tier));
   const ELO_PROVISIONAL_THRESHOLD = 10;
   // Display-only ranked-ladder gate. Live value comes from
   // elo_current.json `leaderboard_min_matches`. Mirrors
@@ -169,7 +166,8 @@
     const q = (state.filters.query || '').trim();
     if (q) params.set('q', q);
     if (state.filters.tiers.size) {
-      params.set('tier', [...state.filters.tiers].sort((a, b) => a - b).join(','));
+      const order = vtsrTiers().map(t => String(t.id)).concat(PROVISIONAL_KEY);
+      params.set('tier', [...state.filters.tiers].sort((a, b) => order.indexOf(a) - order.indexOf(b)).join(','));
     }
     if (state.filters.role && state.filters.role !== 'any') params.set('role', state.filters.role);
     if (state.filters.activity && state.filters.activity !== 'active') {
@@ -191,7 +189,7 @@
     if (!root) return;
     root.querySelectorAll('.vt-chip').forEach(b => {
       const on = attr === 'tier'
-        ? selected.has(Number(b.dataset.tier))
+        ? selected.has(b.dataset.tierKey)
         : b.dataset[attr] === selected;
       b.setAttribute('data-selected', on ? 'true' : 'false');
     });
@@ -203,11 +201,10 @@
     if (dom.searchInput) dom.searchInput.value = state.filters.query;
 
     const tiers = new Set();
+    const validKeys = new Set(vtsrTiers().map(t => String(t.id)).concat(PROVISIONAL_KEY));
     for (const part of (params.get('tier') || '').split(',')) {
       const s = part.trim();
-      if (!s) continue;
-      const n = Number(s);
-      if (n === 0 || (n >= 1 && n <= 5)) tiers.add(n);
+      if (validKeys.has(s)) tiers.add(s);
     }
     state.filters.tiers = tiers;
     paintChipGroup(dom.tierChips, 'tier', tiers);
@@ -313,7 +310,7 @@
     // Directory UI state
     filters: {
       query:     '',
-      tiers:     new Set(),    // Set<number>; empty = all
+      tiers:     new Set(),    // Set<string> of tier keys ('0'..'5', 'p'); empty = all
       role:      'any',
       activity:  'active',
       sort:      DEFAULT_SORT,
@@ -328,14 +325,6 @@
   };
 
   // ---- Helpers ----------------------------------------------------------
-
-  function resolveTier(vtsr, matchesPlayed) {
-    if (matchesPlayed < ELO_PROVISIONAL_THRESHOLD) {
-      return { id: 0, label: 'Provisional', short: '?', token: 'vt-vtsr-provisional', provisional: true };
-    }
-    const t = VTSR_TIERS.find(x => vtsr >= x.min && vtsr < x.max) || VTSR_TIERS[VTSR_TIERS.length - 1];
-    return { ...t, provisional: false };
-  }
 
   function commanderShare(rating) {
     const m = safeNum(rating.matches_played);
@@ -554,7 +543,7 @@
       if (!b || b.provisional) continue;
       tierCounts.set(b.tier, (tierCounts.get(b.tier) || 0) + 1);
     }
-    const tierPills = VTSR_TIERS
+    const tierPills = vtsrTiers()
       .filter(t => tierCounts.get(t.id))
       .map(t => `<span class="vt-tier-badge vt-tier-${t.id}" title="${t.label}">${t.short}</span><span class="num">${tierCounts.get(t.id)}</span>`)
       .join(' ');
@@ -578,10 +567,10 @@
 
   function buildTierChips() {
     const out = [`<span class="vt-chip-group-label">Tier</span>`];
-    for (const t of VTSR_TIERS) {
-      out.push(`<button type="button" class="vt-chip" data-tier="${t.id}" title="${t.label}">${t.short}</button>`);
+    for (const t of vtsrTiers()) {
+      out.push(`<button type="button" class="vt-chip" data-tier="${t.id}" data-tier-key="${t.id}" title="${t.label}">${t.short}</button>`);
     }
-    out.push(`<button type="button" class="vt-chip" data-tier="0" title="Fewer than ${ELO_PROVISIONAL_THRESHOLD} rated matches">?</button>`);
+    out.push(`<button type="button" class="vt-chip" data-tier="provisional" data-tier-key="${PROVISIONAL_KEY}" title="Fewer than ${ELO_PROVISIONAL_THRESHOLD} rated matches">?</button>`);
     return out.join('');
   }
 
@@ -592,7 +581,7 @@
       if (q && !String(r.name || '').toLowerCase().includes(q)) return false;
       if (f.tiers.size) {
         const b = VTSRDisplay.bandFor(r);
-        if (!f.tiers.has(b.provisional ? 0 : b.tier)) return false;
+        if (!f.tiers.has(tierKeyForBand(b))) return false;
       }
       if (f.role !== 'any') {
         const share = commanderShare(r);
@@ -619,7 +608,7 @@
 
   function renderCard(row) {
     const band = VTSRDisplay.bandFor(row);
-    const t = { id: band.provisional ? 0 : band.tier };
+    const t = { id: band.provisional ? 'provisional' : band.tier };
     const role = roleLabel(row);
     const href = playerHref(row.steam64);
     const selected = state.selection.has(String(row.steam64));
@@ -887,27 +876,64 @@
     window.location.href = u.pathname + (u.search || '') + (u.hash || '');
   }
 
-  // ---- VTSR-T axes (the four composite axes the rating is built on) ---
+  // ---- VTSR-T axes (the axes the rating is built on) -------------------
   //
   // Distinct from RADAR_AXIS_LABELS in charts-radar.js: those are the
   // career_stats-derived visualization axes (All Matches / per-match
   // radars). These are the elo.py axes that drive the actual VTSR-T
-  // number. Overview radar, Compare radar, strengths/weaknesses,
-  // coaching cards, and quick-wins all live in this space. Order is
-  // the canonical display order matching elo_current.weights
-  // (heaviest first).
-  const VTSR_AXES = [
-    { key: 'net_damage_share', label: 'Net Damage Share', icon: 'bi-fire' },
-    { key: 'thug_kill_rate',   label: 'Thug Kill Rate',   icon: 'bi-crosshair' },
-    { key: 'pve_share',        label: 'PvE Share',        icon: 'bi-building' },
-    { key: 'mobility',         label: 'Mobility',         icon: 'bi-arrows-move' },
-  ];
+  // number. Overview profile, Compare overlay, strengths/weaknesses,
+  // coaching cards, and quick-wins all live in this space. The list is
+  // whatever elo_current.weights scores, heaviest first.
+  const VTSR_AXIS_CATALOG = {
+    enemy_damage_share: { label: 'Enemy Damage Share', icon: 'bi-fire' },
+  };
+  // A radar needs at least this many spokes; below it the profile is bars.
+  const VTSR_RADAR_MIN_AXES = 3;
+
+  function vtsrAxes() {
+    const weights = (state.elo && state.elo.weights) || { enemy_damage_share: 1 };
+    return Object.keys(weights)
+      .sort((a, b) => (+weights[b] || 0) - (+weights[a] || 0))
+      .map(key => ({ key, ...(VTSR_AXIS_CATALOG[key] || { label: key, icon: 'bi-dot' }) }));
+  }
 
   // True when a rating row carries at least one finite VTSR-T axis mean.
   function hasVtsrMeans(rating) {
     const means = rating && rating.axis_means;
     if (!means) return false;
-    return VTSR_AXES.some(a => Number.isFinite(+means[a.key]));
+    return vtsrAxes().some(a => Number.isFinite(+means[a.key]));
+  }
+
+  // Bar profile for fewer than VTSR_RADAR_MIN_AXES axes. series = [{label,
+  // color, axisMeans}]; medianRaw = per-axis corpus median (or null).
+  function vtsrAxisBarsHtml(series, medianRaw) {
+    const axes = vtsrAxes();
+    const rows = [];
+    axes.forEach((axis, ai) => {
+      const med = medianRaw && Number.isFinite(+medianRaw[ai]) ? +medianRaw[ai] : null;
+      const medMark = med == null ? ''
+        : `<span class="vt-axis-bar-median" style="left:${(50 + Math.max(-1, Math.min(1, med)) * 50).toFixed(2)}%;"
+                 title="Corpus median ${med >= 0 ? '+' : ''}${med.toFixed(2)}"></span>`;
+      series.forEach(s => {
+        const z = Number.isFinite(+(s.axisMeans || {})[axis.key]) ? +(s.axisMeans || {})[axis.key] : null;
+        const cls = z == null ? '' : z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
+        const width = z == null ? 0 : Math.min(50, Math.abs(z) * 50);
+        const fill = z == null ? '' : (z >= 0
+          ? `left:50%; width:${width.toFixed(2)}%;`
+          : `right:50%; width:${width.toFixed(2)}%;`);
+        const name = series.length > 1 ? s.label : axis.label;
+        rows.push(`<div class="vt-axis-bar-row ${cls}">
+          <span class="vt-axis-bar-name"${series.length > 1 ? ` style="color:${s.color};"` : ''}>${escapeHtml(name)}</span>
+          <span class="vt-axis-bar-track">
+            <span class="vt-axis-bar-center"></span>
+            ${medMark}
+            <span class="vt-axis-bar-fill" style="${fill}"></span>
+          </span>
+          <span class="vt-axis-bar-z">${z == null ? '\u2014' : `${z >= 0 ? '+' : ''}${z.toFixed(2)}`}</span>
+        </div>`);
+      });
+    });
+    return `<div class="vt-axis-bar-grid">${rows.join('')}</div>`;
   }
 
   // Clip z to [-2, +2] (elo.py's pre-/2 clip) and map onto the radar's
@@ -923,7 +949,7 @@
   function corpusMedianVtsr(ratings) {
     const rows = (ratings || []).filter(hasVtsrMeans);
     if (rows.length < 2) return null;
-    const raw = VTSR_AXES.map(axis => {
+    const raw = vtsrAxes().map(axis => {
       const col = [];
       for (const r of rows) {
         const z = r.axis_means && r.axis_means[axis.key];
@@ -947,10 +973,11 @@
       try { prior.destroy(); } catch (_) {}
     }
     const series = (opts && opts.series) || [];
-    const labels = VTSR_AXES.map(a => a.label);
+    const axes = vtsrAxes();
+    const labels = axes.map(a => a.label);
     const datasets = series.map(s => {
       const means = s.axisMeans || {};
-      const rawZ = VTSR_AXES.map(a => {
+      const rawZ = axes.map(a => {
         const z = means[a.key];
         return Number.isFinite(+z) ? +z : null;
       });
@@ -1016,7 +1043,7 @@
                 if (!Number.isFinite(+z)) return `${ctx.dataset.label}: \u2014`;
                 return `${ctx.dataset.label}: z = ${fmtZ(z)}`;
               },
-              title: (items) => items.length ? VTSR_AXES[items[0].dataIndex].label : '',
+              title: (items) => items.length ? axes[items[0].dataIndex].label : '',
             },
           },
         },
@@ -1041,21 +1068,9 @@
   // one-liner action. Surfaced only when the player's axis_mean
   // is below median (z < 0). Tone: pragmatic, no condescension.
   const COACHING_COPY = {
-    net_damage_share: {
-      head: 'You\u2019re losing the damage trade vs the lobby.',
-      body: 'This axis is (dealt minus received) divided by the lobby\u2019s total dealt \u2014 structure damage counts on both sides. The denominator is fixed by the lobby, so volume is the bigger lever: stay alive in fights longer (every 5s on a target adds more here than a passive disengage), and pick targets your team is already pressuring so the kill credit shows up on the dealt side instead of theirs.',
-    },
-    thug_kill_rate: {
-      head: 'You\u2019re closing fewer kills per minute than peers.',
-      body: 'This is (PvP kills + 0.5 \u00d7 PvE kills) divided by total match minutes \u2014 dying or sitting back hurts it because the denominator keeps ticking. Close the distance on enemies and follow through on damaged targets so they don\u2019t escape to heal up.',
-    },
-    pve_share: {
-      head: 'You\u2019re not doing a lot of damage to non-human stuff.',
-      body: 'This is your damage to enemy non-human assets as a share of your total dealt.\n\n<u>If you are typically someone assigned to hit pools and scavs</u> \u2014 raise your VTSR-T by doing exactly that! For maximum VTSR-T gain, avoid dying as much as possible. Proactively use radar, t-key and your eyes to evade enemies!\n\n<u>If you are a dogfighter/aggressive roleplayer</u> (typical of higher-tier players) \u2014 this metric typically isn\u2019t an actual issue, it\u2019s just a byproduct of the role you play.',
-    },
-    mobility: {
-      head: 'You\u2019re not moving enough.',
-      body: 'This is your positioning activity score \u2014 how much of the map you covered relative to peers. Don\u2019t stay in base if you can help it, and use the minimap to find opportunities for PvE.',
+    enemy_damage_share: {
+      head: 'You\u2019re dealing less damage to the enemy than the lobby average.',
+      body: 'VTSR-T is your share of the damage your lobby did to the enemy. Every point counts the same whether it lands on a tank, a scavenger, an extractor or a building, so the lever is time spent putting damage on something of theirs.\n\n<u>If you raid pools and scavs</u> \u2014 that work counts in full; staying alive between targets keeps the damage coming.\n\n<u>If you dogfight</u> \u2014 damage you land counts even when the pilot bails out before the kill.\n\nDamage to your own team\u2019s units, loose scrap and map props does not count.',
     },
   };
 
@@ -1583,10 +1598,9 @@
     };
   }
 
-  // Inline plugin: paints 5 translucent tier bands as the y-axis
-  // background. Reads tier thresholds from VTSR_TIERS to stay in
-  // lockstep with the badge colors. ~30 LOC; no annotation plugin
-  // dependency.
+  // Inline plugin: paints a translucent band per tier as the y-axis
+  // background. Reads tier thresholds from VTSRDisplay.tiers() to stay
+  // in lockstep with the badge colors. No annotation plugin dependency.
   function ratingTierBandPlugin() {
     return {
       id: 'vt-rating-tier-bands',
@@ -1598,8 +1612,8 @@
         const right = chartArea.right;
 
         ctx.save();
-        for (const tier of VTSR_TIERS) {
-          const yTop = Math.max(chartArea.top, yScale.getPixelForValue(Math.min(tier.max, 2100)));
+        for (const tier of vtsrTiers()) {
+          const yTop = Math.max(chartArea.top, yScale.getPixelForValue(Math.min(tier.max, yScale.max)));
           const yBot = Math.min(chartArea.bottom, yScale.getPixelForValue(Math.max(tier.min, yScale.min)));
           if (yBot <= yTop) continue;
           const color = getCSSVar(`--vt-tier-${tier.id}`) || themeFallback(tier.id);
@@ -1723,7 +1737,7 @@
     return c;
   }
   function themeFallback(tierId) {
-    const FALLBACKS = { 1: '#f5c518', 2: '#84d6e6', 3: '#36a2eb', 4: '#f0a93b', 5: '#888' };
+    const FALLBACKS = { 0: '#ff5fa2', 1: '#f5c518', 2: '#84d6e6', 3: '#36a2eb', 4: '#f0a93b', 5: '#888' };
     return FALLBACKS[tierId] || '#888';
   }
 
@@ -1962,7 +1976,7 @@
     if (!Object.keys(ax).length) {
       return '<p class="text-secondary small mb-0">Match was excluded from the rated pool, so no per-axis contributions are recorded.</p>';
     }
-    const rows = VTSR_AXES.map(def => {
+    const rows = vtsrAxes().map(def => {
       const v = +ax[def.key];
       if (!Number.isFinite(v)) return '';
       const pct = Math.min(100, Math.max(0, ((v + 1) / 2) * 100));
@@ -2083,7 +2097,7 @@
       return;
     }
 
-    const cards = VTSR_AXES.map(def => {
+    const cards = vtsrAxes().map(def => {
       const vals = series.map(e => +e.axis[def.key]).filter(v => Number.isFinite(v));
       if (!vals.length) {
         return `<div class="col-12 col-md-6 col-xl-3">
@@ -3502,12 +3516,12 @@
           </div>
         </div>
 
-        <!-- Radar card (VTSR-T axis_means with corpus-median ghost) -->
+        <!-- Profile card (VTSR-T axis_means vs corpus median; radar at 3+ axes) -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">
               <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-bullseye me-1"></i>Performance radar
+                <i class="bi bi-bullseye me-1"></i>Performance profile
               </h2>
               <div id="vt-player-overview-radar-body">
                 <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
@@ -3569,6 +3583,19 @@
       if (radarBody) {
         radarBody.innerHTML = '<p class="text-secondary text-center my-4 small mb-0">Needs rated matches.</p>';
       }
+    } else if (vtsrAxes().length < VTSR_RADAR_MIN_AXES) {
+      if (radarBody) {
+        const ratings = (state.elo && state.elo.ratings) || [];
+        const med = corpusMedianVtsr(ratings);
+        const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : '#36a2eb';
+        radarBody.innerHTML = `
+          ${vtsrAxisBarsHtml([{ label: rating.name, color, axisMeans: rating.axis_means }], med && med.raw)}
+          <p class="text-secondary small mb-0 mt-3">
+            Career-average score on the <strong>VTSR-T axis</strong>, against the lobbies
+            this player was in. The dashed tick is the corpus median.
+            <a href="?tab=axes" data-vt-open-tab="axes">Over time</a>
+          </p>`;
+      }
     } else {
       const ratings = (state.elo && state.elo.ratings) || [];
       const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : '#36a2eb';
@@ -3581,16 +3608,16 @@
       } catch (e) {
         console.warn('player.js: renderVtsrRadar failed', e);
       }
-      const axesLink = radarBody && radarBody.querySelector('[data-vt-open-tab="axes"]');
-      if (axesLink) {
-        axesLink.addEventListener('click', (e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-          const btn = document.querySelector('#vt-player-tabs [data-bs-target="#vt-player-tab-axes"]');
-          if (!btn || !(window.bootstrap && window.bootstrap.Tab)) return;
-          e.preventDefault();
-          window.bootstrap.Tab.getOrCreateInstance(btn).show();
-        });
-      }
+    }
+    const axesLink = radarBody && radarBody.querySelector('[data-vt-open-tab="axes"]');
+    if (axesLink) {
+      axesLink.addEventListener('click', (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        const btn = document.querySelector('#vt-player-tabs [data-bs-target="#vt-player-tab-axes"]');
+        if (!btn || !(window.bootstrap && window.bootstrap.Tab)) return;
+        e.preventDefault();
+        window.bootstrap.Tab.getOrCreateInstance(btn).show();
+      });
     }
   }
 
@@ -3667,7 +3694,7 @@
       { axisDef, z } entries — drops any axis the player has no entry
       for (handles pre-v2.3 corpora gracefully). */
   function rankAxisMeans(axisMeans) {
-    return VTSR_AXES
+    return vtsrAxes()
       .map(def => ({ axisDef: def, z: Number.isFinite(+axisMeans[def.key]) ? +axisMeans[def.key] : null }))
       .filter(e => e.z != null)
       .sort((a, b) => b.z - a.z);
@@ -3678,11 +3705,10 @@
       return '<p class="text-secondary mb-0">No axis breakdown available for this player.</p>';
     }
     // Order by axis weight descending (heaviest signal first) rather than
-    // by z. Primary key = elo.weights[key]; tiebreak = canonical VTSR_AXES
-    // order (already authored heaviest-first), so this degrades gracefully
-    // if elo.weights is missing (404).
+    // by z. Primary key = elo.weights[key]; tiebreak = vtsrAxes() order,
+    // so this degrades gracefully if elo.weights is missing (404).
     const weights = (state.elo && state.elo.weights) || {};
-    const axisOrder = new Map(VTSR_AXES.map((def, i) => [def.key, i]));
+    const axisOrder = new Map(vtsrAxes().map((def, i) => [def.key, i]));
     const ordered = ranked.slice().sort((a, b) => {
       const wDiff = (+weights[b.axisDef.key] || 0) - (+weights[a.axisDef.key] || 0);
       if (wDiff !== 0) return wDiff;
@@ -4023,18 +4049,20 @@
     // matches. Two-column at lg+; single-column on phones.
     const html = `
       <div class="row g-3">
-        <!-- 5-axis radar overlay (top-left) -->
+        <!-- VTSR-T axis overlay (top-left): radar at 3+ axes, bars below -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">
               <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-bullseye me-1"></i>Axis radar overlay
+                <i class="bi bi-bullseye me-1"></i>VTSR-T axis overlay
               </h2>
-              <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
-                <canvas id="vt-compare-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+              <div id="vt-compare-radar-body">
+                <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
+                  <canvas id="vt-compare-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+                </div>
               </div>
               <p class="text-secondary small mb-0 mt-2 text-center">
-                Career-mean post-clip z per axis. Bigger polygon = stronger profile across the four VTSR-T axes.
+                Career-mean post-clip z per VTSR-T axis, against the lobbies each player was in.
               </p>
             </div>
           </div>
@@ -4114,6 +4142,17 @@
     }
     const canvas = $('vt-compare-radar');
     if (!canvas) return;
+    if (vtsrAxes().length < VTSR_RADAR_MIN_AXES) {
+      const body = $('vt-compare-radar-body');
+      if (body) {
+        body.innerHTML = vtsrAxisBarsHtml(found.map(f => ({
+          label: f.rating.name,
+          color: f.color,
+          axisMeans: (f.rating && f.rating.axis_means) || {},
+        })), null);
+      }
+      return;
+    }
     compareState.radarChart = renderVtsrRadar(canvas, {
       series: found.map(f => ({
         label: f.rating.name,
@@ -4329,7 +4368,7 @@
                                   format: ratio,    dir: 'hi' },
       { label: 'T-Key usage',    accessor: ({career}) => career ? safeNum(career.mean_target_lock_pct) : null,
                                   format: pct,      dir: 'hi' },
-      { label: 'Mobility (z)',   accessor: ({rating}) => rating && rating.axis_means ? safeNum(rating.axis_means.mobility) : null,
+      { label: 'Enemy damage (z)', accessor: ({rating}) => rating && rating.axis_means ? safeNum(rating.axis_means.enemy_damage_share) : null,
                                   format: (v) => Number.isFinite(+v) ? (Math.round(+v * 100) / 100).toFixed(2) : '—',
                                   dir: 'hi' },
     ];
@@ -4794,7 +4833,7 @@
     dom.tierChips.addEventListener('click', (e) => {
       const btn = e.target.closest('.vt-chip');
       if (!btn) return;
-      const id = +btn.dataset.tier;
+      const id = btn.dataset.tierKey;
       const selected = btn.getAttribute('data-selected') === 'true';
       if (selected) {
         state.filters.tiers.delete(id);
@@ -4997,7 +5036,6 @@
   window.VTPlayer = {
     boot,
     get state() { return state; },
-    resolveTier,
     playerHref,
     sparkSvg,
   };

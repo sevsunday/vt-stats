@@ -3,7 +3,7 @@
 // Joins the currently loaded match against elo_history.json (already
 // fetched on dashboard boot into window.__vtEloHistory) and explains
 // how this lobby moved VTSR-T: a full-lobby Δ list, a selected-player
-// verdict + 5-axis breakdown, and a P-vs-E scatter. When
+// verdict + axis breakdown, and a P-vs-E scatter. When
 // elo_commander_history.json has a duel for this match, a compact
 // VTSR-C two-row strip is appended (hidden on the historical
 // undetermined corpus — no empty card).
@@ -34,32 +34,17 @@
 
   const EXPECTED_TIP_HTML =
     '<div><strong>Played vs expected</strong></div>' +
-    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s 4-axis composite versus everyone here. Above the dashed line means you beat that prediction \u2014 that is what moves VTSR-T, win or lose.</div>';
+    '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s share of the lobby\u2019s damage to the enemy, versus everyone here. Above the dashed line means you beat that prediction \u2014 that is what moves VTSR-T, win or lose.</div>';
 
   const VTSR_AXIS_META = {
-    net_damage_share: {
-      label: 'Net damage share',
-      desc: 'Damage dealt minus damage taken, as a share of the lobby. Offense and survivability together.',
-    },
-    thug_kill_rate: {
-      label: 'Thug kill rate',
-      desc: 'Kills per minute (PvE kills count at half). How often you converted fights.',
-    },
-    pve_share: {
-      label: 'PvE share',
-      desc: 'Share of your damage that hit enemy buildings and AI — economy disruption.',
-    },
-    mobility: {
-      label: 'Mobility',
-      desc: 'How much of the map you actually moved across this match.',
+    enemy_damage_share: {
+      label: 'Enemy damage share',
+      desc: 'Your share of the lobby\u2019s damage to the enemy. Players, scavengers, extractors, AI units and buildings all count the same per point.',
     },
   };
 
   const MATCH_ELO_COPY = {
-    net_damage_share: { noun: 'net damage' },
-    thug_kill_rate: { noun: 'kill rate' },
-    pve_share: { noun: 'PvE work' },
-    mobility: { noun: 'mobility' },
+    enemy_damage_share: { noun: 'enemy damage' },
   };
 
   let selectedKey = null;
@@ -402,7 +387,7 @@
     const weights = redistributedWeights(d.axis_contributions || {});
     const sentence = axisSentence(d.axis_contributions || {}, weights);
     const cmdrNote = d.axis_contributions_meta
-      ? '<p class="vt-match-elo-cmdr-note mb-2">Commander role cushion applied — this rating is compared against other commanders\' typical thug-axis floors.</p>'
+      ? '<p class="vt-match-elo-cmdr-note mb-2">Commander role cushion applied — this score is compared against the enemy damage commanders typically deal.</p>'
       : '';
     const sentenceHtml = sentence
       ? `<p class="vt-match-elo-sentence mb-3">${esc(sentence)}</p>`

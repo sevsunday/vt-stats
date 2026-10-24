@@ -34,6 +34,7 @@ import unicodedata
 from pathlib import Path
 
 import identity_aliases
+import vtsr_bands
 
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
@@ -62,7 +63,8 @@ SITE_URL = "https://vtstats.bz"
 # v19 adds Weapons (the /weapons/ Weapons Lab) to the ODF dropdown.
 # v22 drops the VTSR-T directory sorts (adds VTSR-C), loads
 # js/vtsr-display.js, and takes VTSR-T numbers out of the OG description.
-PLAYER_TEMPLATE_VERSION = 22
+# v23 re-renders every stub for the six-tier ladder (Tier 0 at the top).
+PLAYER_TEMPLATE_VERSION = 23
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,
@@ -74,18 +76,10 @@ PLAYER_STUBS_DIR = "player"
 # run.
 TEMPLATE_FILENAME = "player_template.html"
 
-# Mirrors VTSR_TIERS in js/app.js:1448-1454. Used to compute the tier
-# label shown in OG descriptions and the slug-map summary. Keep
-# field order, ids, and thresholds in lockstep with the JS copy --
-# resolveTier() in app.js is the consumer when rendering the live page,
-# but Python needs an identical view to build the static OG fallback.
-VTSR_TIERS = [
-    {"id": 1, "label": "Tier 1", "short": "I",   "min": 1800.0, "max": float("inf")},
-    {"id": 2, "label": "Tier 2", "short": "II",  "min": 1650.0, "max": 1800.0},
-    {"id": 3, "label": "Tier 3", "short": "III", "min": 1500.0, "max": 1650.0},
-    {"id": 4, "label": "Tier 4", "short": "IV",  "min": 1350.0, "max": 1500.0},
-    {"id": 5, "label": "Tier 5", "short": "V",   "min": 1000.0, "max": 1350.0},
-]
+# Tier list (top first) from scripts/vtsr_bands.py, the same lines the
+# UI reads from elo_current.json band_config. Used for the static OG
+# fallback when a rating row carries no band_label.
+VTSR_TIERS = vtsr_bands.tiers()
 
 # Matches ELO_PROVISIONAL_THRESHOLD in js/app.js. Players under this
 # count render as Provisional ("?") in the tier badge, regardless of
@@ -353,16 +347,15 @@ def _stable_equals(existing: str, new: str) -> bool:
     return a == b
 
 
-# -- Tier classifier (Python mirror of js/app.js resolveTier) -----------
+# -- Tier classifier (raw tier from vtsr_bands lines) --------------------
 
 def resolve_tier(vtsr: float, matches_played: int) -> dict:
-    """Mirror of resolveTier() in js/app.js. Used by Phase 3 to render
-    static OG descriptions when the live JS isn't available (crawler
-    fetch). Returns a dict matching the VTSR_TIERS entry shape with
-    an extra `provisional` flag.
+    """Raw tier for a rating, used to render static OG descriptions when
+    the live JS isn't available (crawler fetch). Returns a dict matching
+    the VTSR_TIERS entry shape with an extra `provisional` flag.
     """
     if matches_played < ELO_PROVISIONAL_THRESHOLD:
-        return {"id": 0, "label": "Provisional", "short": "?", "provisional": True}
+        return {"id": None, "label": "Provisional", "short": "?", "provisional": True}
     for tier in VTSR_TIERS:
         if vtsr >= tier["min"] and vtsr < tier["max"]:
             return {**tier, "provisional": False}

@@ -21,12 +21,9 @@
  *   3. steamid_to_name.txt -> broader community roster
  *   4. lobby nickname (passed in by caller) -> last-resort fallback
  *
- * Tier resolution (mirror of js/app.js VTSR_TIERS):
- *   TIER 1: VTSR >= 1800
- *   TIER 2: 1650-1799
- *   TIER 3: 1500-1649
- *   TIER 4: 1350-1499
- *   TIER 5: < 1350
+ * Tier resolution: VTSRDisplay.tierFor() (tier lines from
+ * elo_current.json band_config; Tier 0 is the top, Tier 5 the bottom).
+ * Provisional / unknown players resolve to null.
  *
  * Commander hint thresholds:
  *   strong  : matches_as_commander >= 5 AND cmdr_share >= 0.4
@@ -74,7 +71,7 @@
  *     matchesAsCmdr,         // number or 0
  *     matchesAsThug,         // number or 0
  *     cmdrShare,             // matches_as_cmdr / matches_played, or 0
- *     tier,                  // 1..7 or null
+ *     tier,                  // 0..5 (0 = top) or null
  *     cmdrHint,              // 'strong' | 'curious' | 'rare' | null
  *     isProvisional,         // bool
  *     isUnknown,             // bool — not in any registry
@@ -294,11 +291,8 @@
   function resolveTier(vtsr, matches) {
     if (!Number.isFinite(vtsr)) return null;
     if (Number.isFinite(matches) && matches < PROVISIONAL_THRESHOLD) return null;
-    if (vtsr >= 1800) return 1;
-    if (vtsr >= 1650) return 2;
-    if (vtsr >= 1500) return 3;
-    if (vtsr >= 1350) return 4;
-    return 5;
+    const t = window.VTSRDisplay ? window.VTSRDisplay.tierFor(vtsr) : null;
+    return t ? t.id : null;
   }
 
   function resolveCmdrHint(matchesAsCmdr, cmdrShare) {

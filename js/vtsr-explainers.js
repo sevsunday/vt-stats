@@ -65,7 +65,7 @@
 
   const DELTA_R_STEPS = [
     { term: 'eq-perf', title: 'Your match score', x: 8, y: 63,
-      body: 'Your 4 stats &mdash; kill rate, net damage, PvE share, and mobility &mdash; measured against everyone in the lobby and blended into one number.' },
+      body: 'Your share of the damage your lobby did to the enemy &mdash; players, scavs, extractors, AI units and buildings, every point paid the same &mdash; measured against everyone in the lobby.' },
     { term: 'eq-exp', title: 'The expected bar', x: 63, y: 63,
       body: 'What a player at your current rating was predicted to score against this exact lobby. The higher your rating, the higher the bar.' },
     { term: 'eq-gap', title: 'The surprise', x: 70, y: 5,
@@ -81,7 +81,7 @@
   // 13.1 final equation: the published rating is a blend of two dials.
   const BLEND_STEPS = [
     { term: 'eq-rt', title: 'The Performance dial', x: 63, y: 63,
-      body: 'The performance rating &mdash; everything on this page: the 4-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
+      body: 'The performance rating &mdash; everything on this page: the enemy-damage match scores, move speed, the lot. This is the dial doing all the work today.' },
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
       body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
@@ -93,23 +93,18 @@
     + '\\htmlId{eq-alpha}{\\alpha} \\cdot \\htmlId{eq-rw}{R^{W}} \\;+\\; '
     + '(1 - \\alpha) \\cdot \\htmlId{eq-rt}{R^{T}}';
 
-  // The 4 axes (v2.13). Single source for the mixing board, the
-  // weights table, and the methodology modal table. Raw weights sum to
-  // 0.60; the pipeline renormalizes over present axes at runtime.
-  // Snipes, T-key usage, the accuracy column, and fight efficiency are
-  // display stats or retired axes. thug_accuracy left in v2.12 (BulletHit
-  // never recorded non-human targets). thug_efficiency left in v2.13
-  // (the damage-mix ratio scored winners lower).
+  // The scored axis (v2.14). Single source for the mixing board, the
+  // weights table, and the methodology modal table; mirrors THUG_WEIGHTS
+  // in scripts/elo.py. v2.14 replaced net damage share, thug kill rate,
+  // PvE share and mobility (critique/decisions/vtsr-t-enemy-damage.md).
+  // Snipes, T-key usage and the accuracy column are display stats.
   const AXES = [
-    { key: 'net_damage_share', label: 'Net damage share', weight: 0.20,
-      blurb: 'All damage dealt minus all damage taken (players, friendly fire, AI, and buildings), as a share of the lobby total. Your own splash cancels out. Damage from turrets and scavengers you own is not included.' },
-    { key: 'thug_kill_rate', label: 'Thug kill rate', weight: 0.20,
-      blurb: 'Kills per minute (PvE kills count for half).' },
-    { key: 'pve_share', label: 'PvE share', weight: 0.12,
-      blurb: 'Damage on enemy bases, scavs, AI tanks.' },
-    { key: 'mobility', label: 'Mobility', weight: 0.08,
-      blurb: 'How much of the map you covered.' },
+    { key: 'enemy_damage_share', label: 'Enemy damage share', weight: 1.0,
+      blurb: 'Your damage to the enemy as a share of all the damage your lobby did to the enemy. Players, scavengers, extractors, AI units and buildings all count the same per point. Damage to your own team&rsquo;s units, loose scrap and map props does not count.' },
   ];
+  // Copy for the retired v2.13 axes, used where a page explains what
+  // stopped counting.
+  const RETIRED_AXES_NOTE = 'Kills, map coverage and PvE share stopped counting in v2.14. Kills mostly repeated damage and missed bail-outs and snipes, coverage mostly repeated damage, and PvE share paid for the mix of your damage rather than the amount. Shot accuracy and fight efficiency are not rating inputs either.';
 
   // Share of the match score when every axis is present. Raw weights
   // stay in AXES so they keep matching THUG_WEIGHTS; the scorer divides
@@ -385,7 +380,7 @@
         title="${esc(a.label)} \u00b7 ${axisShareLabel(a.weight)}">${label}</span>`;
     }).join('');
     const board = `<div class="vt-axesboard" role="img"
-      aria-label="The 4 scoring axes sized by weight">${segs}</div>`;
+      aria-label="The scoring axes sized by weight">${segs}</div>`;
     return buildStageBlock('axes', AXES_STEPS, board,
       { mode: 'solo', hint: 'Press <strong>Next</strong> to spotlight each axis.' });
   }
@@ -399,22 +394,22 @@
        <td class="text-end align-top">${axisShareLabel(a.weight)}</td></tr>`).join('');
     return `<table class="vt-katex-weights">
       <thead><tr><th>Axis</th><th class="text-end">Share</th></tr></thead>
-      <tbody>${rows}
-        <tr><td><strong>Total</strong></td><td class="text-end align-top">100%</td></tr>
-      </tbody>
-    </table>
-    <p class="mb-0 mt-2 text-muted small">These are the shares when all four axes are present.</p>`;
+      <tbody>${rows}</tbody>
+    </table>`;
   }
 
   // Plain tier-ladder table (shared by the modal + the How tab).
+  // Rows come from VTSRDisplay.tiers() (elo_current.json band_config).
   function tierTableHtml() {
-    const rows = [
-      ['Tier 1', '&ge; 1800', 'top of the ladder'],
-      ['Tier 2', '1650 \u2013 1799', ''],
-      ['Tier 3', '1500 \u2013 1649', 'anchor band'],
-      ['Tier 4', '1350 \u2013 1499', ''],
-      ['Tier 5', '1000 \u2013 1349', 'wide band; soft floor at 1000'],
-    ].map(([n, r, note]) =>
+    const tiers = window.VTSRDisplay ? window.VTSRDisplay.tiers() : [];
+    const last = tiers.length - 1;
+    const rows = tiers.map((t, i) => {
+      const range = t.max === Infinity ? `&ge; ${t.min}` : `${t.min} \u2013 ${t.max - 1}`;
+      const note = i === 0 ? 'top of the ladder, open-ended'
+        : t.min === 1500 ? 'anchor band (everyone starts at 1500)'
+          : i === last ? `soft floor at ${t.min}` : '';
+      return [t.label, range, note];
+    }).map(([n, r, note]) =>
       `<tr><td><strong>${n}</strong></td><td class="text-end"><code>${r}</code></td>
        <td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
     return `<table class="vt-katex-tiers">
@@ -425,27 +420,23 @@
 
   // Shared prose sections (modal + How tab reuse these verbatim).
   function commanderSectionHtml() {
-    return `<p class="mb-2">Commanders typically score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To offset this, the bar adjusts per axis on commander matches:</p>
-      <ul class="mb-2">
-        <li><strong>Easier on 3 axes</strong> &middot; mobility, kill rate, damage share &mdash; the role-driven shortfalls.</li>
-        <li><strong>Small bonus on PvE share</strong> &middot; commanders get a little extra credit for hitting enemy base / scavs.</li>
-      </ul>
+    return `<p class="mb-2">Commanders spend the game at base building, so they deal less damage to the enemy than thugs do. On commander matches the bar drops by the typical commander shortfall, learned from past commander games, so commanding doesn&rsquo;t drag the rating down.</p>
       <p class="mb-0 text-muted small">A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
   }
 
   // Worked example (real numbers from data/processed/elo_history.json:
-  // Domakus 2026-05-08T23-46-02 — before=1712.77, after=1724.76,
-  // delta=+11.99, performance=+0.4796, expected=+0.2667, K back-solved
-  // = 11.99 / (2.5 * 0.2129) = 22.53). Re-read that history entry after
+  // Domakus 2026-05-08T23-46-02 — before=1790.45, after=1818.78,
+  // delta=+28.33, performance=+0.8895, expected=+0.3865, K back-solved
+  // = 28.33 / (2.5 * 0.5030) = 22.53). Re-read that history entry after
   // any re-rate; the values shift even though the story doesn't.
   function workedExampleHtml() {
-    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1712.8</strong> to <strong>1724.8</strong> (+12.0).</p>
+    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1790.5</strong> to <strong>1818.8</strong> (+28.3).</p>
       <ul class="mb-2">
-        <li>Match performance: <strong>+0.48</strong> (top of the lobby &mdash; the scale runs roughly &minus;1 to +1, where 0 is an average game)</li>
-        <li>Expected: <strong>+0.27</strong> (already a high-rated player &mdash; the bar was high)</li>
+        <li>Match performance: <strong>+0.89</strong> (top of the lobby &mdash; the scale runs roughly &minus;1 to +1, where 0 is an average game)</li>
+        <li>Expected: <strong>+0.39</strong> (already a high-rated player &mdash; the bar was high)</li>
         <li>Move speed (K): <strong>~23</strong> (settled veteran)</li>
       </ul>
-      <p class="mb-0">He beat the bar by +0.21, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
+      <p class="mb-0">He beat the bar by +0.50, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
   }
 
   // ------------------------------------------------------------------
@@ -490,15 +481,15 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>How it works</h6>
-        <p class="mb-1">VTSR-T is your <strong>thug form</strong>. Each game it grades damage traded, kills, base and scav damage, and map coverage against the people in that lobby. You go up when that grade beats what your current number predicted, and down when it falls short. Winning the game does not move it; commanders have their own win rating, VTSR-C. Everyone starts at <strong>1500</strong>. Walk through the formula:</p>
+        <p class="mb-1">VTSR-T is your <strong>thug form</strong>. Each game it grades your share of the lobby&rsquo;s damage to the enemy against the people in that lobby. You go up when that grade beats what your current number predicted, and down when it falls short. Winning the game does not move it; commanders have their own win rating, VTSR-C. Everyone starts at <strong>1500</strong>. Walk through the formula:</p>
         ${deltaBlock}
         <p class="mb-0 mt-2 text-muted small">Losses sting a little less than wins reward, and your rating never drops below <strong>1000</strong>.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>The 4 axes</h6>
+        <h6>What counts</h6>
         ${weightsTableHtml()}
-        <div class="vt-katex-caveat">PvE kills count at half-weight on kill rate, so role players still get credit without crowding out pure dogfighters. Damage to bases and scavengers is its own axis (PvE share). Shot accuracy and fight efficiency are not rating inputs: accuracy scored economy fire as misses, and the efficiency ratio scored the winning side lower.</div>
+        <div class="vt-katex-caveat">${RETIRED_AXES_NOTE}</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -508,7 +499,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. To appear on the ladder requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible under <strong>Not on the ladder yet</strong>. The ladder groups by tier and does not number players.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Each is 200 points wide and splits into an Upper and a Lower half; Tier 0 at the top has no ceiling. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. To appear on the ladder requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible under <strong>Not on the ladder yet</strong>. The ladder groups by tier and does not number players.</p>
         ${tierTableHtml()}
       </section>
 
@@ -523,6 +514,7 @@
 
   window.VTSRExplain = {
     AXES,
+    RETIRED_AXES_NOTE,
     initIn,
     deltaRBlockHtml,
     blendBlockHtml,

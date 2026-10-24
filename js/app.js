@@ -1985,13 +1985,10 @@
     });
   }
 
-  // --- VTSR-T tier ladder (render-layer policy, NOT pipeline data) ---
-  // Numeric Tier 1–5 only (no flavor names). Tier 5 spans 1000–1349
-  // (350 pts wide); Tiers 2–4 stay 150 pts wide; Tier 1 is open above
-  // 1800. Threshold tuning lives here so elo_current.json's schema
-  // stays stable. ELO_PROVISIONAL_THRESHOLD (10 rated matches) gates
-  // the "?" Provisional chip — separate from MIN_CAREER_MATCHES (5)
-  // which gates whether the row is visible at all.
+  // --- VTSR-T ladder gates (tier lines live in elo_current.json
+  // band_config, read by js/vtsr-display.js). ELO_PROVISIONAL_THRESHOLD
+  // (10 rated matches) gates the "?" Provisional chip — separate from
+  // MIN_CAREER_MATCHES (5) which gates whether the row is visible at all.
   const ELO_PROVISIONAL_THRESHOLD = 10;
   // Display-only ranked-ladder gate. Live value comes from
   // elo_current.json `leaderboard_min_matches`. Mirrors
@@ -2007,20 +2004,6 @@
   function vtsrLadderEligible(r, elo) {
     if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
     return (r.matches_played || 0) >= vtsrLadderMinMatches(elo);
-  }
-  const VTSR_TIERS = [
-    { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity, token: '--vt-tier-1' },
-    { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800,     token: '--vt-tier-2' },
-    { id: 3, label: 'Tier 3', short: 'III', min: 1500, max: 1650,     token: '--vt-tier-3' },
-    { id: 4, label: 'Tier 4', short: 'IV',  min: 1350, max: 1500,     token: '--vt-tier-4' },
-    { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350,     token: '--vt-tier-5' },
-  ];
-  function resolveTier(vtsr, matchesPlayed) {
-    if (matchesPlayed < ELO_PROVISIONAL_THRESHOLD) {
-      return { id: 0, label: 'Provisional', short: '?', token: null };
-    }
-    return VTSR_TIERS.find(t => vtsr >= t.min && vtsr < t.max)
-      || VTSR_TIERS[VTSR_TIERS.length - 1];
   }
   // v2.3: compact `TOTAL (PvP/PvE)` chip cell renderer. Drives the
   // Player Leaderboard + Career Leaderboard Kills/Deaths columns.
@@ -2049,7 +2032,7 @@
     if (kind === 'deaths') {
       tip = `PvP: ${pvpN} from players · PvE: ${pveN} from AI / world`;
     } else {
-      tip = `PvP: ${pvpN} on players · PvE: ${pveN} on AI / structures (thug_kill_rate weights PvP at 1.0 and PvE at α=0.5)`;
+      tip = `PvP: ${pvpN} on players · PvE: ${pveN} on AI / structures (kills are a display stat; VTSR-T scores enemy damage)`;
       if (eff != null) {
         tip += ` · Effective PvP kills: ${eff.toFixed(2)} (damage-share + finisher-floor weighted)`;
       }
@@ -8325,25 +8308,10 @@
   // dedicated /elo/ page with its own copy.) Keys mirror the axis-name
   // keys in elo_current.json `weights` / `axis_means` / `axis_contributions`.
   const VTSR_AXIS_META = {
-    net_damage_share: {
-      label: 'Net damage share',
-      formula: '(dealt - received) / sum_lobby(dealt)',
-      desc:    'Your damage output minus damage taken, as a share of total damage dealt in the lobby. Captures both offensive output and survivability.',
-    },
-    thug_kill_rate: {
-      label: 'Thug kill rate',
-      formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
-      desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
-    },
-    pve_share: {
-      label: 'PvE share',
-      formula: 'pve_dealt / max(1, total_dealt)',
-      desc:    'Your damage to enemy non-human assets (structures + AI tanks + scavs + extractors) as a share of your total damage. Rewards economy disruption.',
-    },
-    mobility: {
-      label: 'Mobility',
-      formula: 'activity_score / 100  (positioning data)',
-      desc:    'How much of the map you actually moved across. Driven by the same metric as the per-match Movement Profile column.',
+    enemy_damage_share: {
+      label: 'Enemy damage share',
+      formula: 'enemy_dealt / sum_lobby(enemy_dealt)',
+      desc:    'Your damage to the enemy as a share of all the damage your lobby did to the enemy. Players, scavengers, extractors, AI units and buildings all count the same per point.',
     },
   };
 

@@ -1069,7 +1069,7 @@
                 || (team === 2 && commanderSetup.team2 === key);
     const cmdrChip = isCmdr ? '<span class="vt-tools-balonce-row-cmdrchip">CMDR</span>' : '';
     // VTSR-T shows as a band chip, never a number.
-    const band = p.band || (p.tier && window.VTSRDisplay ? VTSRDisplay.rawBandFor(p.vtsr) : null);
+    const band = p.band || (p.tier != null && window.VTSRDisplay ? VTSRDisplay.rawBandFor(p.vtsr) : null);
     const tierBadge = (band && window.VTSRDisplay)
       ? `<span class="vt-tools-balonce-row-tier">${VTSRDisplay.bandChipHtml(band, { compact: true, bsTooltip: false, title: `VTSR-T ${band.label}` })}</span>`
       : '';

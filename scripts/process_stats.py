@@ -150,7 +150,18 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # accuracy was a human hit rate. DamageDealt is 1:1 with BulletHit on
 # post-fix v4 and ~2.15x on earlier recordings (one event per game
 # world). match.schema_version 32.
-PIPELINE_VERSION = 56
+# 56 -> 57: enemy-side damage split on leaderboard[].personal (enemy_dealt,
+# enemy_received, enemy_pvp_dealt, enemy_pve_dealt, enemy_structure_dealt_late,
+# friendly_pvp_dealt, friendly_ai_dealt, noteam_scrap_dealt,
+# noteam_other_dealt). `dealt` / `pve_dealt` never checked the victim's
+# side, so friendly AI, loose scrap and map props read as PvE. Additive;
+# ratings unmoved. match.schema_version 33.
+PIPELINE_VERSION = 57
+
+# Building damage inside this many seconds of the last recorded tick is
+# reported separately as `enemy_structure_dealt_late` (the winners' end-of-
+# game base demolition). Display / rating-candidate input only.
+STRUCTURE_LATE_SEC = 180
 
 # Damage-event / BulletHit calibration (match.schema_version 32).
 # A weapon joins the in-match ratio only with this many PvP BulletHits
@@ -3962,6 +3973,59 @@ def _prefix_movement_metrics(positioning, end_sec):
     return out
 
 
+DAMAGE_CATEGORIES = (
+    "enemy_pvp", "enemy_pve", "friendly_pvp", "friendly_ai",
+    "self", "noteam_scrap", "noteam_other",
+)
+
+
+def _damage_category(shooter, shooter_team, victim, victim_team, victim_odf, s64_to_slot):
+    """Bucket one player-dealt damage event by whose unit it hit.
+
+    ``victim`` is None when the event carries no victim side (an unpaired
+    v1 DamageDealt). A player victim without a valid ``victim_team`` falls
+    back to that player's slot. ``noteam_scrap`` is loose scrap (``npscr*``);
+    ``noteam_other`` is pools, props, powerups, and anything without a side.
+    """
+    if victim is None:
+        return "noteam_other"
+    if victim > 0:
+        if victim == shooter:
+            return "self"
+        v_side = _slot_side(victim_team) or _slot_side(s64_to_slot.get(victim) or 0)
+    elif 1 <= (victim_team or 0) <= 10:
+        v_side = _slot_side(victim_team)
+    else:
+        return "noteam_scrap" if (victim_odf or "").startswith("npscr") else "noteam_other"
+    s_side = _slot_side(shooter_team)
+    if not s_side or not v_side:
+        return "noteam_other"
+    if victim > 0:
+        return "enemy_pvp" if s_side != v_side else "friendly_pvp"
+    return "enemy_pve" if s_side != v_side else "friendly_ai"
+
+
+def _enemy_damage_fields(cats, enemy_received, structure_late):
+    """``personal`` fields for the enemy-side damage split.
+
+    The seven categories partition ``dealt`` (``self`` is already
+    ``self_dealt``), so ``enemy_dealt`` is damage to enemy players plus
+    enemy AI and structures only.
+    """
+    cats = cats or {}
+    return {
+        "enemy_dealt": round(cats.get("enemy_pvp", 0.0) + cats.get("enemy_pve", 0.0), 1),
+        "enemy_received": round(enemy_received, 1),
+        "enemy_pvp_dealt": round(cats.get("enemy_pvp", 0.0), 1),
+        "enemy_pve_dealt": round(cats.get("enemy_pve", 0.0), 1),
+        "enemy_structure_dealt_late": round(structure_late, 1),
+        "friendly_pvp_dealt": round(cats.get("friendly_pvp", 0.0), 1),
+        "friendly_ai_dealt": round(cats.get("friendly_ai", 0.0), 1),
+        "noteam_scrap_dealt": round(cats.get("noteam_scrap", 0.0), 1),
+        "noteam_other_dealt": round(cats.get("noteam_other", 0.0), 1),
+    }
+
+
 def fold_bench_combat(
     cutoff_tick,
     dealt_log,
@@ -3981,12 +4045,29 @@ def fold_bench_combat(
     slot_to_faction,
     team_factions,
     mirror_match,
+    cat_log=(),
+    enemy_recv_log=(),
+    structure_log=(),
+    late_ticks=0,
 ):
     """Sum the classified combat journal for events with tick < cutoff_tick.
 
     The journal is appended at the same sites as the full-match accumulators,
-    so a cutoff past the last tick reproduces those personals.
+    so a cutoff past the last tick reproduces those personals. Late building
+    damage is measured against the cutoff, not the recording's last tick.
     """
+    cats = defaultdict(lambda: defaultdict(float))
+    enemy_recv = defaultdict(float)
+    struct_late = defaultdict(float)
+    for tick, s64, cat, amount in cat_log:
+        if tick < cutoff_tick:
+            cats[s64][cat] += amount
+    for tick, s64, amount in enemy_recv_log:
+        if tick < cutoff_tick:
+            enemy_recv[s64] += amount
+    for tick, s64, amount in structure_log:
+        if cutoff_tick - late_ticks <= tick < cutoff_tick:
+            struct_late[s64] += amount
     dealt = defaultdict(float)
     recv = defaultdict(float)
     self_d = defaultdict(float)
@@ -4053,6 +4134,7 @@ def fold_bench_combat(
 
     s64s = set(dealt) | set(recv) | set(self_d) | set(pvp_d) | set(struct)
     s64s |= set(shots) | set(hits) | set(kills) | set(effective)
+    s64s |= set(cats) | set(enemy_recv)
     out = {}
     for s64 in s64s:
         d = dealt.get(s64, 0.0)
@@ -4081,6 +4163,9 @@ def fold_bench_combat(
                 "pvp_kills": pk,
                 "pve_kills": max(0, kk - pk - sk),
                 "effective_pvp_kills": round(effective.get(s64, 0.0), 2),
+                **_enemy_damage_fields(
+                    cats.get(s64), enemy_recv.get(s64, 0.0), struct_late.get(s64, 0.0),
+                ),
             },
             "weapon_breakdown": weapons,
         }
@@ -5974,6 +6059,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     player_self_kills     = Counter()                                   # s64 -> rare self-kills
     player_self_shots_hit = defaultdict(lambda: defaultdict(int))       # s64 -> {odf: count}
 
+    # Enemy-side damage split (match.schema_version 33). Every player-dealt
+    # event lands in one DAMAGE_CATEGORIES bucket by shooter side vs victim
+    # side, so `dealt` is partitioned. Received counts only enemy shooters
+    # (players and their AI). Building damage to the enemy is journaled per
+    # tick so the last STRUCTURE_LATE_SEC can be reported on its own.
+    player_dmg_cat = defaultdict(lambda: defaultdict(float))  # s64 -> {category: amount}
+    player_enemy_received = defaultdict(float)
+    enemy_structure_log = []                                   # (tick, s64, amount)
+
     # Asset (AI/structure) accumulators per owning slot
     asset_dealt = defaultdict(float)
     asset_received = defaultdict(float)
@@ -6015,6 +6109,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     bench_shot_log = []     # (tick, s64, odf)
     bench_hit_log = []      # (tick, s64, odf, is_pvp)
     bench_kill_log = []     # (tick, s64, is_pvp, is_self)
+    bench_cat_log = []      # (tick, s64, damage_category, amount)
+    bench_enemy_recv_log = []
     pvp_kill_log = []                  # [(tick, killer_s64, victim_s64, feed_idx), ...]
 
     # Combat engagement capture (match.schema_version 27, display-only).
@@ -6813,6 +6909,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         if v_fc:
                             player_structure_dealt_by_vfc[shooter][v_fc] += de_amount
                             bench_struct_log.append((de_tick, shooter, v_fc, de_amount))
+
+                    _cat = _damage_category(
+                        shooter, de_shooter_team,
+                        de_victim if has_paired_dr else None,
+                        de_victim_team, v_odf, s64_to_slot,
+                    )
+                    player_dmg_cat[shooter][_cat] += de_amount
+                    bench_cat_log.append((de_tick, shooter, _cat, de_amount))
+                    if _cat == "enemy_pve" and v_odf and v_odf in building_odfs:
+                        enemy_structure_log.append((de_tick, shooter, de_amount))
                 else:
                     asset_dealt[de_shooter_team] += de_amount
 
@@ -6826,6 +6932,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 if victim > 0:
                     player_received[victim] += de_victim_amount
                     bench_recv_log.append((de_tick, victim, de_victim_amount))
+                    _s_side = _slot_side(de_shooter_team)
+                    _v_side = _slot_side(de_victim_team)
+                    if _s_side and _v_side and _s_side != _v_side:
+                        player_enemy_received[victim] += de_victim_amount
+                        bench_enemy_recv_log.append((de_tick, victim, de_victim_amount))
                     if odf:
                         player_weapon_received[victim][odf] += de_victim_amount
                 else:
@@ -8049,6 +8160,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # Per-slot lookup for the identity-reroute provenance field on each
     # leaderboard row. Empty dict when no reroutes apply to this match.
     reroute_by_slot = {r["slot"]: r for r in match_reroutes}
+    _late_start = max_tick + 1 - STRUCTURE_LATE_SEC * tick_rate
+    enemy_structure_late = defaultdict(float)
+    for _t, _s64, _amt in enemy_structure_log:
+        if _t >= _late_start:
+            enemy_structure_late[_s64] += _amt
     for slot in sorted(all_slots):
         name = nick_map.get(slot, f"Player {slot}")
         s64 = slot_to_s64.get(slot)
@@ -8377,6 +8493,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pvp_received": round(pvp_r, 1),
                 "pve_received": round(pve_r, 1),
                 "structure_dealt": round(player_structure_dealt.get(s64, 0), 1) if s64 else 0.0,
+                # match.schema_version 33: enemy-side damage split. The
+                # categories partition `dealt` together with `self_dealt`;
+                # `enemy_dealt` / `enemy_received` leave out friendly units,
+                # loose scrap and props.
+                **_enemy_damage_fields(
+                    player_dmg_cat.get(s64) if s64 else None,
+                    player_enemy_received.get(s64, 0.0) if s64 else 0.0,
+                    enemy_structure_late.get(s64, 0.0) if s64 else 0.0,
+                ),
                 "net": round(net, 1),
                 "ratio": round(ratio, 2) if ratio != float("inf") else None,
                 "shots_fired": total_fired,
@@ -9295,10 +9420,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # fighting after a sticky leave stays rated; VTSR-T uses the
             # prefix. Absent when the pattern does not fire. Not in
             # contributions. Career stats stay the full match.
-            # v32 (this version): event_calibration + reconstructed hits
+            # v32: event_calibration + reconstructed hits
             # (pve_hits_est / hits_est / accuracy_est) and a damage_scale
             # that undoes the pre-2026-08-30 per-world damage duplication.
-            "schema_version": 32,
+            # v33 (this version): enemy-side damage split on
+            # leaderboard[].personal (and bench_prefix.personal).
+            "schema_version": 33,
             "event_calibration": {
                 "r_by_weapon": event_calibration["r_by_weapon"],
                 "r_lobby": event_calibration["r_lobby"],
@@ -9480,6 +9607,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         _bench_hit = None
     if _bench_hit:
         _bench_cut = min_tick + _bench_hit["effective_end_sec"] * tick_rate
+        _enemy_journal = {
+            "cat_log": bench_cat_log,
+            "enemy_recv_log": bench_enemy_recv_log,
+            "structure_log": enemy_structure_log,
+            "late_ticks": STRUCTURE_LATE_SEC * tick_rate,
+        }
         _prefix_by_s64, _prefix_snipes = fold_bench_combat(
             _bench_cut,
             bench_dealt_log, bench_recv_log, bench_self_log, bench_struct_log,
@@ -9487,6 +9620,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             dmg_by_victim, pvp_kill_log, snipe_feed,
             tick_rate, nick_for_s64, wpn_name,
             s64_to_slot, slot_to_faction, _team_factions_pre, mirror_match,
+            **_enemy_journal,
         )
         _full_by_s64, _full_snipes = fold_bench_combat(
             (max_tick if max_tick < float("inf") else 0) + 1,
@@ -9495,6 +9629,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             dmg_by_victim, pvp_kill_log, snipe_feed,
             tick_rate, nick_for_s64, wpn_name,
             s64_to_slot, slot_to_faction, _team_factions_pre, mirror_match,
+            **_enemy_journal,
         )
         _prefix_move = _prefix_movement_metrics(
             positioning_block, _bench_hit["effective_end_sec"],
@@ -9507,6 +9642,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             for _key in (
                 "dealt", "received", "pvp_dealt", "pve_dealt", "structure_dealt",
                 "pvp_kills", "pve_kills", "effective_pvp_kills",
+                "enemy_dealt", "enemy_received", "enemy_structure_dealt_late",
             ):
                 if abs((_full.get(_key) or 0) - (_pers.get(_key) or 0)) > 0.15:
                     print(
@@ -9518,6 +9654,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     "dealt": 0.0, "received": 0.0, "pvp_dealt": 0.0,
                     "pve_dealt": 0.0, "structure_dealt": 0.0,
                     "pvp_kills": 0, "pve_kills": 0, "effective_pvp_kills": 0.0,
+                    **_enemy_damage_fields(None, 0.0, 0.0),
                 },
                 "weapon_breakdown": {},
             }

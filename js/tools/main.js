@@ -284,14 +284,14 @@
   // VTSR-T band chip for a resolved player (never the number). Falls back
   // to the raw band for players without a pipeline band.
   function bandBadgeHtml(p) {
-    if (!window.VTSRDisplay) return p.tier ? `T${p.tier}` : '?';
+    if (!window.VTSRDisplay) return p.tier != null ? `T${p.tier}` : '?';
     const band = p.band || (Number.isFinite(p.vtsr) ? VTSRDisplay.rawBandFor(p.vtsr) : null);
     if (!band) return '?';
     return VTSRDisplay.bandChipHtml(band, { compact: true, bsTooltip: false, title: `VTSR-T ${band.label}` });
   }
 
   function renderRosterRow(p, idx) {
-    const tierBadge = p.tier ? bandBadgeHtml(p) : '';
+    const tierBadge = p.tier != null ? bandBadgeHtml(p) : '';
     const provisionalChip = p.isCustom
       ? '<span class="vt-tools-roster-row-provisional-chip" title="Custom (non-Steam) entry — counted at the starting rating">custom</span>'
       : p.isProvisional
@@ -636,7 +636,7 @@
       // their name muted via Bootstrap's `text-muted`; rated players
       // get a primary-colored tier badge.
       const isRated = (p.matchesPlayed || 0) > 0;
-      const tierHtml = isRated && p.tier ? bandBadgeHtml(p) : '?';
+      const tierHtml = isRated && p.tier != null ? bandBadgeHtml(p) : '?';
       const tierClass = `vt-tools-picker-card-tier${isRated ? ' vt-tools-picker-card-tier--rated' : ''}`;
       const nameClass = `vt-tools-picker-card-name${isRated ? '' : ' text-muted'}`;
       return `
@@ -669,7 +669,7 @@
       } else {
         pickerCartListEl.innerHTML = pickerCart.map((p) => {
           const isRated = (p.matchesPlayed || 0) > 0;
-          const tierHtml = isRated && p.tier ? bandBadgeHtml(p) : '?';
+          const tierHtml = isRated && p.tier != null ? bandBadgeHtml(p) : '?';
           const tierClass = `vt-tools-picker-cart-row-tier${isRated ? ' vt-tools-picker-cart-row-tier--rated' : ''}`;
           const nameClass = `vt-tools-picker-cart-row-name${isRated ? '' : ' text-muted'}`;
           return `

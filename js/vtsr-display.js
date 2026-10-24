@@ -19,25 +19,53 @@
   'use strict';
 
   const DEFAULT_CONFIG = {
-    edges: [1175, 1350, 1425, 1500, 1575, 1650, 1725, 1800, 1875],
-    tier_lines: [1350, 1500, 1650, 1800],
-    splits: [1175, 1425, 1575, 1725, 1875],
+    edges: [1150, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200],
+    tier_lines: [1300, 1500, 1700, 1900, 2100],
+    splits: [1150, 1400, 1600, 1800, 2000, 2200],
+    tier_width: 200,
+    floor: 1000,
     buffer_pts: 20,
     on_par_delta_pts: 3,
   };
-  // Display track per tier. Tier 1 is open-ended; its track is drawn as
-  // if 150 wide so the Upper / Lower split sits at 1875.
-  const TIER_TRACK = {
-    1: [1800, 1950],
-    2: [1650, 1800],
-    3: [1500, 1650],
-    4: [1350, 1500],
-    5: [1000, 1350],
-  };
-  const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V' };
+  const ROMAN = { 0: '0', 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII' };
 
   let config = DEFAULT_CONFIG;
   let provisionalThreshold = 10;
+  // Derived from config by rebuild(): display track per tier, tier list
+  // (top first), and the chart axis ticks. The top tier is open-ended;
+  // its track is drawn one tier_width wide.
+  let TIER_TRACK = {};
+  let TIERS = [];
+  let TIER_TICKS = [];
+
+  function bottomTier() {
+    return config.tier_lines.length;
+  }
+
+  function rebuild() {
+    const lines = config.tier_lines;
+    const width = Number(config.tier_width) || (lines[lines.length - 1] - lines[lines.length - 2]);
+    const floor = Number.isFinite(config.floor) ? config.floor : 1000;
+    const bounds = [floor].concat(lines, [lines[lines.length - 1] + width]);
+    const bottom = bottomTier();
+    TIER_TRACK = {};
+    TIERS = [];
+    TIER_TICKS = [];
+    for (let i = 0; i < bounds.length - 1; i++) {
+      const tier = bottom - i;
+      TIER_TRACK[tier] = [bounds[i], bounds[i + 1]];
+      TIERS.push({
+        id: tier,
+        label: `Tier ${tier}`,
+        short: ROMAN[tier] || String(tier),
+        min: bounds[i],
+        max: tier === 0 ? Infinity : bounds[i + 1],
+      });
+      TIER_TICKS.push({ value: config.splits[i], label: `Tier ${tier}` });
+    }
+    TIERS.reverse();
+  }
+  rebuild();
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -48,8 +76,11 @@
   function setConfig(elo) {
     if (!elo || typeof elo !== 'object') return;
     const bc = elo.band_config;
-    if (bc && Array.isArray(bc.edges) && bc.edges.length === DEFAULT_CONFIG.edges.length) {
+    if (bc && Array.isArray(bc.edges) && Array.isArray(bc.tier_lines) && Array.isArray(bc.splits)
+        && bc.splits.length === bc.tier_lines.length + 1
+        && bc.edges.length === bc.tier_lines.length + bc.splits.length) {
       config = Object.assign({}, DEFAULT_CONFIG, bc);
+      rebuild();
     }
     if (Number.isFinite(elo.provisional_threshold)) {
       provisionalThreshold = elo.provisional_threshold;
@@ -65,13 +96,13 @@
   }
 
   const PROVISIONAL = Object.freeze({
-    provisional: true, index: -1, tier: 0, half: null,
+    provisional: true, index: -1, tier: null, half: null,
     roman: '?', label: 'Provisional', shortLabel: 'Provisional',
   });
 
   function fromIndex(index) {
     if (index == null || !Number.isFinite(index)) return null;
-    const tier = 5 - Math.floor(index / 2);
+    const tier = bottomTier() - Math.floor(index / 2);
     const half = index % 2 ? 'upper' : 'lower';
     const halfLabel = half === 'upper' ? 'Upper' : 'Lower';
     return {
@@ -122,7 +153,7 @@
     if (band.provisional) {
       const t = opts.title != null ? opts.title
         : `Provisional — fewer than ${provisionalThreshold} rated matches. Rated, but still moving fast.`;
-      return `<span class="vt-band-chip" data-tier="0"${tooltipAttrs(t, opts)}>`
+      return `<span class="vt-band-chip" data-tier="provisional"${tooltipAttrs(t, opts)}>`
         + '<span class="vt-vtsr-provisional">?</span>'
         + (opts.compact ? '' : '<span class="vt-band-half">Provisional</span>')
         + '</span>';
@@ -164,7 +195,7 @@
     const span = track[1] - track[0];
     const s = Number.isFinite(sigma) && sigma > 0 ? sigma : 50;
     const width = Math.min(100, Math.max(12, ((2 * s) / span) * 100));
-    const splitPct = band.tier === 5
+    const splitPct = band.tier === bottomTier()
       ? ((config.splits[0] - track[0]) / span) * 100
       : 50;
     const title = opts.title != null ? opts.title
@@ -232,15 +263,8 @@
   }
 
   // Chart.js y-axis that labels tiers instead of rating numbers. Ticks
-  // sit at each tier's midpoint; tier lines are drawn by the caller's
-  // band plugin.
-  const TIER_TICKS = [
-    { value: 1175, label: 'Tier 5' },
-    { value: 1425, label: 'Tier 4' },
-    { value: 1575, label: 'Tier 3' },
-    { value: 1725, label: 'Tier 2' },
-    { value: 1875, label: 'Tier 1' },
-  ];
+  // (TIER_TICKS, built in rebuild()) sit at each tier's midpoint; tier
+  // lines are drawn by the caller's band plugin.
   function tierAxisLabel(value) {
     const hit = TIER_TICKS.find(t => t.value === value);
     return hit ? hit.label : '';
@@ -272,7 +296,14 @@
     winShiftText,
     applyTierAxis,
     tierAxisLabel,
-    TIER_TICKS,
+    get TIER_TICKS() { return TIER_TICKS; },
+    // Tiers top first: { id, label, short, min, max } (top tier max is Infinity).
+    tiers() { return TIERS.slice(); },
+    tierFor(vtsr) {
+      const v = Number(vtsr);
+      if (!Number.isFinite(v)) return null;
+      return TIERS.find(t => v >= t.min && v < t.max) || TIERS[TIERS.length - 1];
+    },
     BAND_EXPLAINER,
     get config() { return config; },
     get provisionalThreshold() { return provisionalThreshold; },

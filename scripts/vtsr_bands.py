@@ -13,7 +13,8 @@ Nothing here changes ratings, K, or match history. ``scripts/elo.py``
 emits the result as additive ``band_*`` fields on ``elo_current.json``
 plus a top-level ``band_config`` the UI reads instead of hardcoding.
 
-Band index 0 is Tier 5 Lower, 9 is Tier 1 Upper.
+Six tiers, 200 points wide, anchored at 1500 (the start rating is the
+bottom of Tier 3). Band index 0 is Tier 5 Lower, 11 is Tier 0 Upper.
 """
 
 from __future__ import annotations
@@ -21,11 +22,16 @@ from __future__ import annotations
 from bisect import bisect_right
 from typing import Iterable
 
-# Tier lines (mirror the VTSR_TIERS tables in js/elo.js, js/app.js,
-# js/player.js and scripts/generate_player_pages.py) plus each tier's
-# midpoint split. Tier 1 is open-ended and splits as if 150 wide.
-TIER_LINES = (1350, 1500, 1650, 1800)
-TIER_SPLITS = (1175, 1425, 1575, 1725, 1875)
+# Tier lines plus each tier's midpoint split. The UI reads them from
+# band_config (js/vtsr-display.js); scripts/generate_player_pages.py
+# imports tiers(). Tier 0 is open-ended and splits as if 200 wide, so its
+# position bar pins once a rating passes TIER_0_TRACK_TOP; re-space the
+# lines if the top of the ladder gets there.
+TIER_WIDTH = 200
+TIER_LINES = (1300, 1500, 1700, 1900, 2100)
+TIER_SPLITS = (1150, 1400, 1600, 1800, 2000, 2200)
+RATING_FLOOR = 1000
+TIER_0_TRACK_TOP = TIER_LINES[-1] + TIER_WIDTH
 BAND_EDGES = tuple(sorted(TIER_LINES + TIER_SPLITS))
 BAND_COUNT = len(BAND_EDGES) + 1
 
@@ -41,8 +47,12 @@ def band_for(rating: float) -> int:
     return bisect_right(BAND_EDGES, float(rating))
 
 
+TOP_TIER = 0
+BOTTOM_TIER = len(TIER_LINES)
+
+
 def band_tier(index: int) -> int:
-    return 5 - index // 2
+    return BOTTOM_TIER - index // 2
 
 
 def band_half(index: int) -> str:
@@ -82,12 +92,24 @@ def walk_bands(after_sequence: Iterable[float], buffer: float = BAND_BUFFER) -> 
     return state
 
 
+def tiers() -> list[dict]:
+    """Tiers top first: ``{id, label, min, max}`` (Tier 0 max is inf)."""
+    bounds = (RATING_FLOOR,) + TIER_LINES + (float("inf"),)
+    out = []
+    for i in range(len(bounds) - 1):
+        tier = BOTTOM_TIER - i
+        out.append({"id": tier, "label": f"Tier {tier}", "min": float(bounds[i]), "max": float(bounds[i + 1])})
+    return out[::-1]
+
+
 def band_config() -> dict:
     """Top-level metadata block for elo_current.json."""
     return {
         "edges": list(BAND_EDGES),
         "tier_lines": list(TIER_LINES),
         "splits": list(TIER_SPLITS),
+        "tier_width": TIER_WIDTH,
+        "floor": RATING_FLOOR,
         "buffer_pts": BAND_BUFFER,
         "on_par_delta_pts": ON_PAR_DELTA,
     }

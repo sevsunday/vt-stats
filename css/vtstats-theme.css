@@ -5858,6 +5858,7 @@ td.vt-col-split {
    ============================================================================ */
 
 :root {
+    --vt-tier-0: #ff5fa2;                     /* Tier 0 — rose, above gold */
     --vt-tier-1: #f5c518;                     /* Tier 1 — gold */
     --vt-tier-2: #84d6e6;                     /* Tier 2 — silver-cyan */
     --vt-tier-3: var(--kb-primary);           /* Tier 3 — anchor band, brand */
@@ -5882,6 +5883,7 @@ td.vt-col-split {
     user-select: none;
 }
 
+.vt-tier-badge.vt-tier-0 { background: var(--vt-tier-0); color: #1f0612; }
 .vt-tier-badge.vt-tier-1 { background: var(--vt-tier-1); color: #1a1306; }
 .vt-tier-badge.vt-tier-2 { background: var(--vt-tier-2); color: #061520; }
 .vt-tier-badge.vt-tier-3 { background: var(--vt-tier-3); color: var(--kb-bg-primary); }
@@ -5913,6 +5915,7 @@ td.vt-col-split {
    VTSR-T display layer (js/vtsr-display.js): band chip, fuzzy position bar,
    per-game verdict chip. VTSR-T never renders as a number.
    ============================================================================ */
+:is(.vt-band-chip, .vt-band-bar)[data-tier="0"] { --vt-band-color: var(--vt-tier-0); }
 :is(.vt-band-chip, .vt-band-bar)[data-tier="1"] { --vt-band-color: var(--vt-tier-1); }
 :is(.vt-band-chip, .vt-band-bar)[data-tier="2"] { --vt-band-color: var(--vt-tier-2); }
 :is(.vt-band-chip, .vt-band-bar)[data-tier="3"] { --vt-band-color: var(--vt-tier-3); }
@@ -6878,6 +6881,14 @@ td.vt-col-split {
     top: 0;
     height: 100%;
     border-radius: 4px;
+}
+.vt-axis-bar-median {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 0;
+    border-left: 2px dashed var(--kb-text-muted);
+    z-index: 1;
 }
 .vt-axis-bar-row.is-positive .vt-axis-bar-fill {
     background: var(--kb-success);

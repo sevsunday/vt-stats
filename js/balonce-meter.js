@@ -113,10 +113,7 @@
   ];
 
   const AXIS_LABELS = {
-    net_damage_share: 'net damage',
-    thug_kill_rate: 'kill rate',
-    pve_share: 'PvE work',
-    mobility: 'mobility',
+    enemy_damage_share: 'enemy damage',
   };
 
   // ---------------------------------------------------------------- Helpers
@@ -1016,7 +1013,7 @@
   /**
    * "How it was going" — the shadow read on a cancelled match.
    *
-   * The result was lost, but the 4-axis composite still measured the whole
+   * The result was lost, but the VTSR-T match score still measured the whole
    * game, so this answers the question the crash left hanging: who was
    * actually out-playing their rating when the plug got pulled. Every
    * number comes from the never-applied `shadow` block in elo_history
@@ -1039,7 +1036,7 @@
         : diff < -0.05 ? 'was under-performing'
           : 'was playing to form';
       return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Mean of this side\u2019s players: what the 4-axis composite measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
+        title="Mean of this side\u2019s players: what the VTSR-T match score (share of enemy damage) measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
         <span class="vt-balonce-perf-team">${phrase}</span>
         <span class="vt-balonce-perf-verdict">${verdict}</span>
         <span class="vt-mono">${fmtSigned(diff, 2)}</span>
@@ -1101,7 +1098,7 @@
         </div>
         <div class="vt-balonce-whatif-note">
           The result was lost, but the whole game was still recorded. This is
-          what the 4-axis composite measured over those
+          what the VTSR-T match score measured over those
           ${Math.round((joined.match.duration_sec || 0) / 60)} minutes \u2014
           measured, never applied.
         </div>
@@ -1429,7 +1426,7 @@
       const cls = diff > 0.05 ? 'is-positive' : diff < -0.05 ? 'is-negative' : '';
       const verdict = diff > 0.05 ? 'over-performed' : diff < -0.05 ? 'under-performed' : 'played to form';
       return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Mean of this side\u2019s rated players: what the 4-axis composite measured this match, against what their pre-match ratings predicted for this lobby.">
+        title="Mean of this side\u2019s rated players: what the VTSR-T match score (share of enemy damage) measured this match, against what their pre-match ratings predicted for this lobby.">
         <span class="vt-balonce-perf-team">${phrase}</span>
         <span class="vt-balonce-perf-verdict">${verdict}</span>
         <span class="vt-mono">${fmtSigned(diff, 2)}</span>
