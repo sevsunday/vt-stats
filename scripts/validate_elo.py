@@ -123,7 +123,7 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 10  # v1.10: VTSR-C whole-game axes (#12d prefixes)
+VALIDATOR_VERSION = 11  # v1.11: VTSR-1v1 prediction replay (#22)
 
 # 2026-10-23 VTSR-C amendment. Confirmation duels are dated strictly after
 # this day. Mirrors elo_commander.ECON_SEMANTICS_AMENDED_ON; the history
@@ -1690,6 +1690,91 @@ def metric_vtsr_c(cmdr_history: dict[str, Any] | None) -> dict[str, Any]:
         "log_loss": canonical_row["log_loss"],
         "replay_max_abs_diff": canonical_row["replay_max_abs_diff"],
         "per_lambda": per_lambda,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #22 (v1.11): VTSR-1v1 head-to-head prediction
+# ---------------------------------------------------------------------------
+
+
+def metric_vtsr_1v1(history_1v1: dict[str, Any] | None) -> dict[str, Any]:
+    """Chronological replay of the separate 1v1 ladder predicting each
+    game's winner from PRE-match ratings (elo_1v1_history.json alone).
+
+    Forensic only: report.json, never validation_summary.json, no UI
+    card (critique/decisions/vtsr-1v1-ladder.md). The replay re-derives
+    every rating from the ladder's own constants (one K per game, the
+    mean of both scheduled values) and cross-checks the emitted `after`
+    values (`replay_max_abs_diff` should be ~0).
+
+    Scoring mirrors metric_vtsr_c: draws leave the denominator, an exact
+    E = 0.5 earns half credit. `n_coin_flip` counts games scored at
+    exactly 0.5 (usually two debutants), which carry no rating signal.
+    """
+    duels = (history_1v1 or {}).get("duels") or []
+    if not duels:
+        return {
+            "available": False,
+            "skipped_reason": "elo_1v1_history.json missing or empty",
+        }
+
+    anchor = float(history_1v1.get("anchor", 1500.0))
+    k_base = float(history_1v1.get("k_base", 40.0))
+    k_floor = float(history_1v1.get("k_floor", 20.0))
+    prior = float(history_1v1.get("provisional_prior", 5.0))
+    scale = float(history_1v1.get("logistic_scale", 400.0))
+
+    def key(p: dict[str, Any]) -> str:
+        return str(p.get("steam64")) if p.get("steam64") else f"name:{p.get('name', '')}"
+
+    rating: dict[str, float] = {}
+    games: dict[str, int] = {}
+    correct = 0.0
+    scored = 0
+    draws = 0
+    coin_flip = 0
+    ll_sum = 0.0
+    max_abs_diff = 0.0
+    for duel in duels:
+        p1, p2 = duel["players"]["1"], duel["players"]["2"]
+        k1, k2 = key(p1), key(p2)
+        r1, r2 = rating.get(k1, anchor), rating.get(k2, anchor)
+        e1 = 1.0 / (1.0 + 10.0 ** (-(r1 - r2) / scale))
+        outcome = duel.get("outcome")
+        if outcome == "draw":
+            s1 = 0.5
+            draws += 1
+        else:
+            s1 = 1.0 if outcome == "team1" else 0.0
+            scored += 1
+            if e1 == 0.5:
+                correct += 0.5
+                coin_flip += 1
+            elif (e1 > 0.5) == (s1 == 1.0):
+                correct += 1.0
+            e_realized = e1 if s1 == 1.0 else 1.0 - e1
+            ll_sum += -math.log(max(1e-9, e_realized))
+        g1, g2 = games.get(k1, 0), games.get(k2, 0)
+        kf1 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g1 / prior)
+        kf2 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g2 / prior)
+        d1 = (kf1 + kf2) / 2.0 * (s1 - e1)
+        rating[k1], rating[k2] = r1 + d1, r2 - d1
+        games[k1], games[k2] = g1 + 1, g2 + 1
+        for k, p in ((k1, p1), (k2, p2)):
+            if isinstance(p.get("after"), (int, float)):
+                max_abs_diff = max(max_abs_diff, abs(rating[k] - p["after"]))
+
+    return {
+        "available": True,
+        "n_duels": len(duels),
+        "n_scored": scored,
+        "n_draws": draws,
+        "n_coin_flip": coin_flip,
+        "accuracy": (correct / scored) if scored else None,
+        "accuracy_ci": list(wilson_ci(int(round(correct)), scored)) if scored else None,
+        "log_loss": (ll_sum / scored) if scored else None,
+        "replay_max_abs_diff": round(max_abs_diff, 4),
     }
 
 
@@ -5458,9 +5543,12 @@ def render_json_report(
     / ``axes_blocked_by_prefix`` / ``close_expected_band``. The close
     subset is redefined (contested or pre-match expected in [0.40,
     0.60]). Additive keys; the econ axis names follow the history file.
+    schema_version 12 (v1.11, VTSR-1v1): adds top-level ``vtsr_1v1``
+    (#22 -- head-to-head ladder prediction replay). Strictly additive;
+    not in validation_summary.json.
     """
     return {
-        "schema_version":   11,
+        "schema_version":   12,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -5916,6 +6004,16 @@ def main(argv: list[str] | None = None) -> int:
                                      manifest, cmdr_history, current)
     print("[validate_elo] [21/21] reconstructed-accuracy candidate ...")
     candidate_axes = metric_candidate_axes(history, per_match)
+    # v1.11: the separate 1v1 ladder. Absent-safe; forensic only.
+    history_1v1 = None
+    history_1v1_path = processed_dir / "elo_1v1_history.json"
+    if history_1v1_path.exists():
+        try:
+            history_1v1 = _load_json(history_1v1_path)
+        except Exception as exc:
+            print(f"  WARN: failed to load {history_1v1_path}: {exc}")
+    print("[validate_elo] [22] VTSR-1v1 prediction replay ...")
+    vtsr_1v1 = metric_vtsr_1v1(history_1v1)
 
     # Player count totals (corpus-wide, for the report header).
     seen_keys: set[str] = set()
@@ -6007,6 +6105,8 @@ def main(argv: list[str] | None = None) -> int:
         "rated_rows_join":        rated_rows_meta,
         # v1.8: format-gate audit (#20). Descriptive; not in the summary.
         "format_gate":            format_gate,
+        # v1.11: separate 1v1 ladder (#22). Forensic; not in the summary.
+        "vtsr_1v1":               vtsr_1v1,
     }
 
     # Write outputs.
@@ -6124,6 +6224,12 @@ def main(argv: list[str] | None = None) -> int:
               f"{(format_gate.get('profile') or {}).get('n_small_format')} "
               f"({tr.get('n_determined')} determined); transfer VTSR-T "
               f"{tt.get('correct')}/{tt.get('n')}, VTSR-C {tc.get('correct')}/{tc.get('n')}")
+    if vtsr_1v1.get("available"):
+        ci_1 = vtsr_1v1.get("accuracy_ci") or [None, None]
+        print(f"  VTSR-1v1 prediction (sec 22): {_fmt_pct(vtsr_1v1.get('accuracy'))} "
+              f"({_fmt_pair(ci_1[0], ci_1[1])})  log-loss {_fmt_num(vtsr_1v1.get('log_loss'))}  "
+              f"n={vtsr_1v1.get('n_scored')} ({vtsr_1v1.get('n_coin_flip')} coin flips)  "
+              f"replay {_fmt_num(vtsr_1v1.get('replay_max_abs_diff'), decimals=4)}")
     print("==================================================")
     return 0
 

@@ -467,6 +467,25 @@
   }
 
   // ------------------------------------------------------------------
+  // The 1v1 ladder (VTSR-1v1) — static How-tab section. Plain Elo, no
+  // handicap. Worked-example digits are real (elo_1v1_history.json,
+  // 2026-10-15T23-37-32 Mojave: Maverick 1500.00 expected 0.5076, Nomad
+  // 1494.74 expected 0.4924, shared K 32, delta 16.24). Re-read that
+  // game after any re-rate.
+  // ------------------------------------------------------------------
+  function oneVOneLadderHtml() {
+    const eq = renderEq(
+      'E_A \\;=\\; \\frac{1}{1 + 10^{-\\left(R_A - R_B\\right) / 400}}'
+    ) || '';
+    return `<p class="mb-2">Head-to-head games get a <strong>third, separate rating</strong>: VTSR-1v1. In a 1v1 both players are commanders and nobody else is on the field, so neither of the other ladders fits. VTSR-T needs a lobby of at least six to grade thug form, and VTSR-C weighs each commander&rsquo;s thugs. Both already leave 1v1s out, so this ladder never changes either of them.</p>
+      <p class="mb-2">It is plain chess Elo. A game counts when exactly one player sits on each side (camera pods don&rsquo;t count), it ran at least four minutes, and it has a verified winner. Draws give each player half a win.</p>
+      ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
+      <p class="mb-2">There is no handicap term, because there are no thugs. Both players in a game use the same K (the average of their two schedules, 40 for a debut falling to 20 after five games), so the points one player gains are exactly the points the other loses.</p>
+      <p class="mb-2">Only recorded games count. F9bomber&rsquo;s spreadsheet logs only the two commanders on every game before 2025, so a 1v1 and a team game look the same there, and none of its later roster-less rows can be confirmed as a 1v1.</p>
+      <p class="mb-0 text-muted small">Real example: on Mojave (2026-10-15), Maverick played his first 1v1 at 1500 against Nomad at 1495, so Maverick was a <strong>51% favorite</strong>. Nomad won: <strong>+16.2</strong> for Nomad, <strong>&minus;16.2</strong> for Maverick, at a shared K of 32. Players stay <strong>provisional</strong> below 5 rated 1v1s. A ranked <code>#</code> needs 5 rated 1v1s and a game of any kind within 90 days of the newest match; everyone else stays visible in the Unranked table.</p>`;
+  }
+
+  // ------------------------------------------------------------------
   // Dashboard methodology modal body (quick reference). Preserves the
   // v3 5-section structure but the "How it works" section is now the
   // annotated deltaR stage. Cached after first successful build; null
@@ -523,6 +542,7 @@
     tierTableHtml,
     commanderSectionHtml,
     commanderLadderHtml,
+    oneVOneLadderHtml,
     workedExampleHtml,
     methodologyModal,
   };

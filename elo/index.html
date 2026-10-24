@@ -132,6 +132,13 @@
           </button>
         </li>
         <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-1v1-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-1v1" type="button" role="tab"
+                  aria-controls="elo-tab-1v1" aria-selected="false">
+            <i class="bi bi-people me-1"></i>1v1
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
           <button class="nav-link" id="elo-tab-how-btn" data-bs-toggle="pill"
                   data-bs-target="#elo-tab-how" type="button" role="tab"
                   aria-controls="elo-tab-how" aria-selected="false">
@@ -253,6 +260,29 @@
           <div class="card-body text-center text-muted py-5">
             <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
             No ratings published yet &mdash; run the pipeline to generate <code>elo_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: 1v1 (lazy). The head-to-head ladder, separate from VTSR-T
+           and VTSR-C. Recorded games only. 404-safe: the card stays hidden
+           and the empty state shows when elo_1v1_current.json is absent. -->
+      <div class="tab-pane fade" id="elo-tab-1v1" role="tabpanel" aria-labelledby="elo-tab-1v1-btn">
+        <div class="card mb-4 d-none" id="section-vtsr-1v1">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">
+              <i class="bi bi-people me-2"></i>1v1 Ratings &mdash; VTSR-1v1
+            </h5>
+            <button type="button" class="btn btn-sm vt-vtsr-info-btn" id="vtsr-1v1-how-link">
+              <i class="bi bi-info-circle me-1"></i>How It's Calculated
+            </button>
+          </div>
+          <div class="card-body" id="vtsr-1v1-body"></div>
+        </div>
+        <div class="vt-elo-empty card d-none" id="elo-vtsr-1v1-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-people d-block mb-2" style="font-size: 1.6rem;"></i>
+            No 1v1 ratings published yet &mdash; run the pipeline to generate <code>elo_1v1_current.json</code>.
           </div>
         </div>
       </div>

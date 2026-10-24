@@ -303,6 +303,9 @@
     cmdrElo:       undefined, // parsed elo_commander_current.json (lazy; undefined = unfetched, null = 404)
     cmdrEloHistory: undefined, // parsed elo_commander_history.json (lazy; undefined = unfetched, null = 404)
     cmdrRatingChart: null,   // Chart.js instance for the VTSR-C time-series (Commander tab)
+    v1Elo:         undefined, // parsed elo_1v1_current.json (lazy; undefined = unfetched, null = 404)
+    v1EloHistory:  undefined, // parsed elo_1v1_history.json (lazy; same contract)
+    v1RatingChart: null,     // Chart.js instance for the VTSR-1v1 time-series (Commander tab)
     overviewRadarChart: null, // Chart.js instance for the Overview VTSR-T radar
     mapRegistry:   undefined, // parsed data/map-registry.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
@@ -2403,6 +2406,26 @@
     return _cmdrEloHistFetchPromise;
   }
 
+  // Lazy one-shot fetch of the separate 1v1 ladder (current + history).
+  // 404-safe: null caches and the Commander tab's 1v1 block self-omits.
+  let _v1EloFetchPromise = null;
+  function ensureV1EloLoaded() {
+    if (state.v1Elo !== undefined && state.v1EloHistory !== undefined) {
+      return Promise.resolve(state.v1Elo);
+    }
+    if (!_v1EloFetchPromise) {
+      _v1EloFetchPromise = Promise.all([
+        fetchJson(`${state.dataPrefix}data/processed/elo_1v1_current.json`).catch(() => null),
+        fetchJson(`${state.dataPrefix}data/processed/elo_1v1_history.json`).catch(() => null),
+      ]).then(([cur, hist]) => {
+        state.v1Elo = cur || null;
+        state.v1EloHistory = hist || null;
+        return state.v1Elo;
+      });
+    }
+    return _v1EloFetchPromise;
+  }
+
   let _mapRegistryFetchPromise = null;
   function ensureMapRegistryLoaded() {
     if (state.mapRegistry !== undefined) return Promise.resolve(state.mapRegistry);
@@ -3318,6 +3341,185 @@
     </div></div>`;
   }
 
+  // ---- VTSR-1v1 block (separate head-to-head ladder) --------------------
+
+  function v1RatingRowFor(sid) {
+    const rows = (state.v1Elo && state.v1Elo.ratings) || [];
+    return rows.find(r => String(r.steam64 || '') === sid) || null;
+  }
+
+  /** This player's rated 1v1s, oldest first, from elo_1v1_history.json. */
+  function buildV1Series(sid) {
+    const duels = (state.v1EloHistory && state.v1EloHistory.duels) || [];
+    const out = [];
+    for (const d of duels) {
+      for (const side of ['1', '2']) {
+        const me = (d.players || {})[side];
+        if (!me || String(me.steam64 || '') !== sid) continue;
+        const opp = d.players[side === '1' ? '2' : '1'] || {};
+        out.push({
+          match_id: d.match_id, date: d.date, map: d.map,
+          after: me.after, delta: me.delta, expected: me.expected, score: me.score,
+          opponent: opp.name, opponentSteam64: opp.steam64,
+        });
+      }
+    }
+    return out;
+  }
+
+  function render1v1BlockHtml(sid) {
+    const row = v1RatingRowFor(sid);
+    const series = buildV1Series(sid);
+    if (!row || !series.length) return '';
+    const ranked = ((state.v1Elo && state.v1Elo.ratings) || []).filter(r => r.leaderboard_eligible);
+    const rankIdx = ranked.findIndex(r => String(r.steam64 || '') === sid);
+    const minGames = (state.v1Elo && state.v1Elo.leaderboard_min_games) || 5;
+    const rankTxt = rankIdx >= 0
+      ? `#${rankIdx + 1} of ${ranked.length} ranked`
+      : `Unranked (${row.games} of ${minGames} rated 1v1s)`;
+    const prov = row.provisional
+      ? ' <span class="vt-cmdr-riv-tag" title="Fewer than 5 rated 1v1s: still settling in.">provisional</span>' : '';
+
+    const h2h = new Map();
+    for (const p of series) {
+      const k = p.opponentSteam64 || `name:${p.opponent}`;
+      const e = h2h.get(k) || { name: p.opponent, steam64: p.opponentSteam64, w: 0, l: 0, d: 0, last: '' };
+      if (p.score === 1) e.w++; else if (p.score === 0) e.l++; else e.d++;
+      if (String(p.date) > e.last) e.last = String(p.date);
+      h2h.set(k, e);
+    }
+    const h2hRows = [...h2h.values()]
+      .sort((a, b) => (b.w + b.l + b.d) - (a.w + a.l + a.d) || b.last.localeCompare(a.last))
+      .map(e => {
+        const opp = e.steam64
+          ? `<a href="${playerHref(e.steam64)}">${escapeHtml(e.name || 'unknown')}</a>`
+          : escapeHtml(e.name || 'unknown');
+        return `<tr>
+          <td>${opp}</td>
+          <td class="text-end vt-matchlog-num">${e.w}-${e.l}${e.d ? '-' + e.d : ''}</td>
+          <td class="text-end vt-matchlog-num">${cmdrDateLabel(e.last)}</td>
+        </tr>`;
+      }).join('');
+
+    const logRows = series.slice().reverse().map(p => {
+      const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+      const resCls = p.score === 1 ? 'vt-vtsr-delta-positive' : p.score === 0 ? 'vt-vtsr-delta-negative' : '';
+      const dStr = Number.isFinite(p.delta) ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
+      const dCls = Number.isFinite(p.delta) ? (p.delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative') : '';
+      const opp = p.opponentSteam64
+        ? `<a href="${playerHref(p.opponentSteam64)}">${escapeHtml(p.opponent || 'unknown')}</a>`
+        : escapeHtml(p.opponent || 'unknown');
+      const dash = p.match_id
+        ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+        : '';
+      return `<tr>
+        <td class="vt-matchlog-num">${cmdrDateLabel(p.date)}</td>
+        <td>${opp}${dash}</td>
+        <td class="${resCls}">${res}</td>
+        <td class="text-end vt-matchlog-num">${p.expected != null ? Math.round(p.expected * 100) + '%' : '\u2014'}</td>
+        <td class="text-end vt-matchlog-num ${dCls}">${dStr}</td>
+        <td>${escapeHtml(p.map || '\u2014')}</td>
+      </tr>`;
+    }).join('');
+
+    const chart = series.length >= 2
+      ? `<div style="position: relative; height: 200px;" class="mb-3"><canvas id="vt-v1-rating-chart"></canvas></div>`
+      : '';
+    return `<div class="card mb-3" id="vt-player-1v1"><div class="card-body">
+      <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+        <i class="bi bi-people me-1"></i>1v1 (VTSR-1v1)
+      </h2>
+      <p class="text-secondary small mb-3">A separate head-to-head ladder: recorded 1v1s only, plain Elo, no thug handicap. It does not affect VTSR-C or VTSR-T.
+        <a href="${state.dataPrefix}elo/?tab=1v1">Full 1v1 ladder</a>.</p>
+      <div class="d-flex flex-wrap gap-4 mb-3">
+        <div><div class="text-secondary small">Rating</div><div class="fs-4 fw-semibold vt-matchlog-num">${Math.round(row.rating)}${prov}</div></div>
+        <div><div class="text-secondary small">Record</div><div class="fs-4 fw-semibold vt-matchlog-num">${row.wins}-${row.losses}${row.draws ? '-' + row.draws : ''}</div></div>
+        <div><div class="text-secondary small">Peak</div><div class="fs-4 fw-semibold vt-matchlog-num">${Math.round(row.peak)}</div></div>
+        <div><div class="text-secondary small">Standing</div><div class="fw-semibold mt-2">${escapeHtml(rankTxt)}</div></div>
+      </div>
+      ${chart}
+      <div class="row g-3">
+        <div class="col-12 col-lg-5">
+          <h3 class="h6 text-secondary mb-2">Head-to-head</h3>
+          <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Opponent</th><th class="text-end">W-L</th><th class="text-end">Last</th></tr></thead>
+            <tbody>${h2hRows}</tbody>
+          </table></div>
+        </div>
+        <div class="col-12 col-lg-7">
+          <h3 class="h6 text-secondary mb-2">Rated 1v1s</h3>
+          <div class="table-responsive vt-cmdr-scroll"><table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Date</th><th>Opponent</th><th>Result</th><th class="text-end">Expected</th><th class="text-end">&Delta;</th><th>Map</th></tr></thead>
+            <tbody>${logRows}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </div></div>`;
+  }
+
+  function drawV1RatingChart(sid) {
+    if (state.v1RatingChart) {
+      try { state.v1RatingChart.destroy(); } catch (_) {}
+      state.v1RatingChart = null;
+    }
+    const canvas = document.getElementById('vt-v1-rating-chart');
+    if (!canvas || !window.Chart) return;
+    const points = buildV1Series(sid).filter(p => Number.isFinite(p.after));
+    if (points.length < 2) return;
+    const themePrimary = getCSSVar('--kb-primary') || '#36a2eb';
+    const themeMuted   = getCSSVar('--kb-text-muted') || '#888';
+    const themeText    = getCSSVar('--kb-text-primary') || '#e5e5e5';
+    const themeSuccess = getCSSVar('--kb-success') || '#2ecc71';
+    const themeDanger  = getCSSVar('--kb-danger')  || '#e74c3c';
+    const pointColors = points.map(p => (p.delta < 0 ? themeDanger : themeSuccess));
+    state.v1RatingChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: points.map(p => cmdrDateLabel(p.date)),
+        datasets: [{
+          label: 'VTSR-1v1',
+          data: points.map(p => p.after),
+          borderColor: themePrimary,
+          borderWidth: 2,
+          tension: 0.18,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          fill: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (item) => {
+                const p = points[item.dataIndex];
+                const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+                return [
+                  `VTSR-1v1: ${p.after.toFixed(0)} (${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)})`,
+                  `${res} vs ${p.opponent || 'unknown'}${p.map ? ' \u2014 ' + p.map : ''}`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: themeMuted, autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: {
+            beginAtZero: false,
+            ticks: { color: themeMuted, maxTicksLimit: 6 },
+            grid:  { color: 'rgba(255,255,255,0.05)' },
+            title: { display: true, text: 'VTSR-1v1', color: themeText },
+          },
+        },
+      },
+    });
+  }
+
   function renderCommanderTab(rating) {
     const pane = $('vt-player-tab-commander');
     if (!pane) return;
@@ -3328,20 +3530,28 @@
     const sid = String(rating.steam64 || '');
     const cmdrPending = state.cmdrElo === undefined || state.cmdrEloHistory === undefined;
     const mapPending = state.mapRegistry === undefined;
-    if (cmdrPending || mapPending) {
+    const v1Pending = state.v1Elo === undefined || state.v1EloHistory === undefined;
+    if (cmdrPending || mapPending || v1Pending) {
       const jobs = [];
       if (cmdrPending) jobs.push(Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]));
       if (mapPending) jobs.push(ensureMapRegistryLoaded());
+      if (v1Pending) jobs.push(ensureV1EloLoaded());
       Promise.all(jobs).then(() => scheduleCommanderRerender(rating));
     }
     const riv = buildCommanderRivalries(sid);
     const series = buildCmdrRatingSeries(sid);
     const ladder = cmdrLadderRowFor(sid);
+    const v1Html = render1v1BlockHtml(sid);
     if (cmdrPending && riv.commandedTotal < 1) {
       pane.innerHTML = phasePlaceholder('Commander', 'Loading commander rating.');
       return;
     }
     if (!cmdrPending && riv.commandedTotal < 1 && series.length < 1 && !ladder) {
+      if (v1Html) {
+        pane.innerHTML = v1Html;
+        drawV1RatingChart(sid);
+        return;
+      }
       pane.innerHTML = phasePlaceholder('Commander', 'No commander games recorded.');
       return;
     }
@@ -3355,8 +3565,10 @@
       ${renderCmdrMapsHtml(sid)}
       ${renderCmdrFactionsHtml(sid)}
       ${renderCmdrDuelLogHtml(series)}
-      ${econCard}`;
+      ${econCard}
+      ${v1Html}`;
     drawCmdrRatingChart(rating, sid);
+    drawV1RatingChart(sid);
   }
 
   // ---- Phase 6d: Loadout & ships tab -----------------------------------

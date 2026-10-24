@@ -3840,3 +3840,47 @@ Not telemetry. Not in the pipeline cache key. Built by standalone scripts, consu
 
 `data/models/cockpits/index.json` is the same map keyed by model geometry stem, which is what the range fetches. Models with no cockpit mesh omit the field.
 
+## 18. VTSR-1v1 Outputs (`elo_1v1_current.json` + `elo_1v1_history.json`)
+
+Pipeline-emitted by [scripts/elo_1v1.py](../scripts/elo_1v1.py) after VTSR-C on every `process_stats.py` run. A separate plain-Elo ladder over **recorded** true 1v1s (exactly one non-campod leaderboard row per side, ≥ 240 s, decided winner or draw). It reads nothing from `elo_history.json` or `data/external/`, and nothing in VTSR-T / VTSR-C / the aggregator / the Balonce Meter reads it. **Corpus-wide, picker-unaware**, not in the cache key. Algorithm: [DEVELOPER_GUIDE.md §13.15](../DEVELOPER_GUIDE.md). Memo: `critique/decisions/vtsr-1v1-ladder.md`.
+
+Both files share a header:
+
+| Field | Description |
+|---|---|
+| `schema_version` | `ELO_1V1_SCHEMA_VERSION` (1). |
+| `computed_at` | UTC stamp of the run. |
+| `source` | Always `"recorded"` (no external ledger). |
+| `anchor` / `k_base` / `k_floor` / `provisional_prior` / `provisional_threshold` / `logistic_scale` | Elo constants (1500 / 40 / 20 / 5 / 5 / 400). Each game uses one K: the mean of both players' scheduled values. |
+| `min_duration_sec` | Duration gate (240). |
+| `leaderboard_min_games` | Display-only: rated 1v1s needed for a ranked `#` (5). |
+| `inactivity_window_days` / `comeback_games_required` / `corpus_latest_date` | Shared global activity clock (90 / 3), recorded corpus only. |
+| `one_v_one_matches_seen` | Matches with exactly one non-campod player per side. |
+| `duels_rated` | Games rated. |
+| `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_undetermined` / `skipped_duplicate_recording` | Why the other 1v1s were not rated. They partition `one_v_one_matches_seen − duels_rated`. |
+
+`elo_1v1_current.json` adds `ratings[]`, sorted by `rating` descending:
+
+| Field | Description |
+|---|---|
+| `name` / `steam64` | Identity (Steam64-keyed; alias-pinned names). |
+| `rating` | Current 1v1 rating. |
+| `games` / `wins` / `losses` / `draws` / `win_pct` | Rated 1v1 record. |
+| `peak` / `peak_at` / `peak_date` | Highest rating, the match id where it was set, and its date. |
+| `last_match_id` / `last_1v1_date` / `last_delta` | Most recent rated 1v1 (date as `YYYY-MM-DD`) and its change. |
+| `win_history` | Last 10 rating changes (sparkline). |
+| `provisional` | Fewer than 5 rated 1v1s. |
+| `leaderboard_eligible` | Display-only: `games >= 5` and globally active. |
+| `inactive_status` / `days_since_last_match` / `last_seen_date` / `comeback_games_remaining` | Activity clock fields from `scripts/inactivity.py`. |
+
+`elo_1v1_history.json` adds `duels[]` in chronological order:
+
+| Field | Description |
+|---|---|
+| `match_id` / `date` | The recorded match. |
+| `map` / `map_file` | Registry-resolved title and raw `.bzn`. |
+| `duration_sec` | Match length. |
+| `factions` | `{"1": name, "2": name}` from `match.team_factions` (display only; no faction term). |
+| `decided_by` / `adjudicated` / `outcome` | Winner provenance; `outcome` is `team1`, `team2` or `draw`. |
+| `players` | `{"1": {...}, "2": {...}}`, each `{steam64, name, before, after, delta, expected, k, score}`. The two `expected` values sum to 1, both sides carry the same `k`, and the two `delta` values sum to 0. |
+

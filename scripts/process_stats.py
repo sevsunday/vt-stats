@@ -2549,6 +2549,7 @@ def load_cache_index():
     skip = {"matches.json", "match_contributions.json", "all_matches.json",
             "elo_current.json", "elo_history.json",
             "elo_commander_current.json", "elo_commander_history.json",
+            "elo_1v1_current.json", "elo_1v1_history.json",
             "elo_current_unlocked.json", "elo_history_unlocked.json",
             "elo_current_max.json", "elo_history_max.json",
             "elo_current_softmax.json", "elo_history_softmax.json",
@@ -11070,6 +11071,31 @@ def main():
               f"{cmdr_current.get('matches_skipped_missing_commander', 0)} skipped missing-commander)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-C ({e}); skipping.")
+
+    # ----- VTSR-1v1 (head-to-head ladder, separate from VTSR-T / VTSR-C) -----
+    # Plain Elo over recorded games with exactly one non-campod player per
+    # side. Reads only the in-memory corpus: never elo_history, never the
+    # F9 ledger (critique/decisions/vtsr-1v1-ladder.md). Soft-fails.
+    try:
+        import elo_1v1 as elo_1v1_module
+        v1_current, v1_history = elo_1v1_module.compute_1v1_elo(
+            all_match_data,
+            match_names={e["id"]: e["name"] for e in manifest},
+        )
+        v1_current_path = OUTPUT_DIR / "elo_1v1_current.json"
+        with open(v1_current_path, "w", encoding="utf-8") as f:
+            json.dump(v1_current, f, indent=2, ensure_ascii=False)
+        v1_history_path = OUTPUT_DIR / "elo_1v1_history.json"
+        with open(v1_history_path, "w", encoding="utf-8") as f:
+            json.dump(v1_history, f, indent=2, ensure_ascii=False)
+        print(f"VTSR-1v1: {v1_current_path.name} "
+              f"({len(v1_current.get('ratings', []))} players · "
+              f"{v1_current.get('duels_rated', 0)} rated 1v1s · "
+              f"{v1_current.get('skipped_undetermined', 0)} undetermined · "
+              f"{v1_current.get('skipped_short', 0)} short · "
+              f"{v1_current.get('skipped_cancelled', 0)} cancelled)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-1v1 ({e}); skipping.")
 
     # ----- VTSR-T (unlocked-priors alt mode, Phase 2B) -----
     # Re-runs the rating loop with `exclude_locked_priors=True`. The

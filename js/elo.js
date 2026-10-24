@@ -31,7 +31,10 @@
  * v2.7 thug-only alt pair and the wins-weighted preview are retired.
  * Published VTSR-T is always elo_current.json (alpha 0).
  *
- * URL routing: ?tab=vtsr-c|vtsr-t|how|axes|fairness|accuracy (replaceState
+ * The 1v1 pill (VTSR-1v1, elo_1v1_current.json + elo_1v1_history.json)
+ * is a third, separate ladder: plain Elo over recorded head-to-head games.
+ *
+ * URL routing: ?tab=vtsr-c|vtsr-t|1v1|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
  * VTSR-C pane is the default and writes no ?tab= at all. `vtsr-t` opens
  * the thug board; `leaderboard` is a permanent inbound alias rewritten to
@@ -153,6 +156,8 @@
     eloHistory: null,
     cmdrElo: null,        // elo_commander_current.json (null on 404 — VTSR-C card hides)
     cmdrHistory: null,    // elo_commander_history.json (null on 404 — detail panels degrade)
+    v1Elo: null,          // elo_1v1_current.json (null on 404 — 1v1 card hides)
+    v1History: null,      // elo_1v1_history.json (null on 404 — game logs degrade)
     slugMap: null,
     validation: null,
     careerStats: [],      // corpus-wide aggregate join source
@@ -1261,6 +1266,259 @@
   }
 
   // ----------------------------------------------------------------------
+  // 1v1 ladder (VTSR-1v1). Same Ranked / Unranked split and expandable
+  // rows as VTSR-C; no handicap, no telemetry chips, no F9 games.
+  // ----------------------------------------------------------------------
+
+  let v1SortState = { key: 'rating', asc: false };
+  const expandedV1Rows = new Set();
+  const V1_LADDER_MIN_GAMES_FALLBACK = 5;
+
+  function v1LadderMinGames(c) {
+    return (c && c.leaderboard_min_games != null) ? c.leaderboard_min_games : V1_LADDER_MIN_GAMES_FALLBACK;
+  }
+
+  function v1DuelsFor(r) {
+    const duels = (state.v1History && state.v1History.duels) || [];
+    const sid = String(r.steam64 || '');
+    const out = [];
+    for (const duel of duels) {
+      for (const sideKey of ['1', '2']) {
+        const side = (duel.players || {})[sideKey];
+        if (!side) continue;
+        const match = sid ? String(side.steam64 || '') === sid : (side.name || '') === (r.name || '');
+        if (match) out.push({ duel, side: Number(sideKey) });
+      }
+    }
+    out.reverse();
+    return out;
+  }
+
+  function renderV1Detail(r) {
+    const entries = v1DuelsFor(r);
+    if (!entries.length) {
+      return `<div class="text-muted small p-2">
+        Game-by-game detail unavailable (elo_1v1_history.json missing).
+      </div>`;
+    }
+    const rows = entries.map(({ duel, side }) => {
+      const me = duel.players[String(side)] || {};
+      const opp = duel.players[String(3 - side)] || {};
+      const res = me.score === 1 ? 'W' : me.score === 0 ? 'L' : 'D';
+      const resCls = me.score === 1 ? 'vt-vtsr-delta-positive'
+        : me.score === 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+      const d = me.delta || 0;
+      const dCls = d > 0 ? 'vt-vtsr-delta-positive' : d < 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+      const facs = duel.factions || {};
+      const myFac = facs[String(side)] || '?';
+      const oppFac = facs[String(3 - side)] || '?';
+      const matchLink = duel.match_id
+        ? `<a href="../index.html?match=${encodeURIComponent(duel.match_id)}" class="text-muted"
+              title="Open this match on the dashboard" aria-label="Open this match on the dashboard"><i class="bi bi-box-arrow-up-right"></i></a>`
+        : '';
+      return `<tr>
+        <td class="text-muted">${esc(String(duel.date || '').slice(0, 10))}</td>
+        <td>vs ${playerLinkHtml(opp.name || '?', opp.steam64)}</td>
+        <td>${esc(duel.map || '')}</td>
+        <td class="text-muted">${esc(myFac)} v ${esc(oppFac)}</td>
+        <td class="text-center ${resCls} fw-semibold">${res}</td>
+        <td class="text-end ${dCls}">${d > 0 ? '+' : ''}${d.toFixed(1)}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Pre-match win probability from the two ratings.">${((me.expected || 0) * 100).toFixed(0)}%</td>
+        <td class="text-end">${matchLink}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="vt-vtsr-detail-body">
+      <section class="vt-vtsr-detail-section">
+        <h6>1v1 record</h6>
+        <div class="vt-vtsr-detail-stats">
+          <div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>
+          <div><span class="vt-stat-label">Peak</span><span class="vt-stat-value">${Math.round(r.peak || r.rating)}</span></div>
+          <div><span class="vt-stat-label">Rated 1v1s</span><span class="vt-stat-value">${r.games}</span></div>
+        </div>
+      </section>
+      <section class="vt-vtsr-detail-section">
+        <h6>Game log</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" style="font-size: 0.8rem;">
+            <thead><tr>
+              <th>Date</th><th>Opponent</th><th>Map</th><th>Factions</th>
+              <th class="text-center">Result</th><th class="text-end">\u0394</th>
+              <th class="text-end">Expected</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </section>
+    </div>`;
+  }
+
+  function v1ProgressChipHtml(r, c) {
+    const status = r.inactive_status || 'active';
+    const need = comebackGamesRequired(c);
+    const win = inactivityWindowDays(c);
+    if (status === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      return statusChipHtml('vt-vtsr-inactive-chip', `Inactive \u00b7 ${d}d ago`,
+        `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`);
+    }
+    if (status === 'returning') {
+      return statusChipHtml('vt-vtsr-returning-chip', 'Returning',
+        `Play ${r.comeback_games_remaining || 0} more game${(r.comeback_games_remaining || 0) === 1 ? '' : 's'} of any kind to rejoin.`);
+    }
+    const min = v1LadderMinGames(c);
+    return statusChipHtml('vt-cmdr-progress-chip', `${r.games} / ${min} 1v1s`,
+      `${r.games} of ${min} rated 1v1s to join the ranked table.`);
+  }
+
+  function v1Sort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':   va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'record': va = (a.wins || 0) - (a.losses || 0); vb = (b.wins || 0) - (b.losses || 0); break;
+        case 'win_pct': va = a.win_pct || 0; vb = b.win_pct || 0; break;
+        case 'games':  va = a.games || 0; vb = b.games || 0; break;
+        case 'peak':   va = a.peak || 0; vb = b.peak || 0; break;
+        case 'last_1v1_date': va = a.last_1v1_date || ''; vb = b.last_1v1_date || ''; break;
+        case 'rating':
+        default:       va = a.rating || 0; vb = b.rating || 0; break;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      const na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    };
+  }
+
+  function renderV1Row(r, c, rank) {
+    const rowKey = cmdrRowKey(r);
+    const expanded = expandedV1Rows.has(rowKey);
+    const detailId = `vtsr-1v1-detail-${rowKey}`;
+    const prov = r.provisional
+      ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Provisional \u2014 fewer than ${c.provisional_threshold ?? 5} rated 1v1s.">?</span>`
+      : '';
+    const chip = rank == null ? v1ProgressChipHtml(r, c) : '';
+    const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
+    return `<tr>
+      <td class="vt-vtsr-expand-col">
+        <button type="button" class="vt-row-expand"
+                data-bs-toggle="collapse" data-bs-target="#${detailId}"
+                aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
+                aria-label="Toggle 1v1 game log">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </td>
+      <td class="text-muted">${rank == null ? '\u2014' : rank}</td>
+      <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${chip}</td>
+      <td class="text-end vt-vtsr-rating">${Math.round(r.rating)}</td>
+      <td class="text-end">${r.wins}-${r.losses}-${r.draws}</td>
+      <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
+      <td class="text-end">${r.games}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak || r.rating)}</td>
+      <td class="text-end text-muted">${esc(r.last_1v1_date || '\u2014')}</td>
+    </tr>
+    <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
+      <td colspan="9">${renderV1Detail(r)}</td>
+    </tr>`;
+  }
+
+  function renderV1TableHtml(tableId, rows, c, ranked) {
+    const th = (key, label, extra = '') =>
+      `<th data-sort="${key}" class="text-end${v1SortState.key === key ? ' sort-active' : ''}"${extra}>${label}</th>`;
+    const body = rows.map((r, i) => renderV1Row(r, c, ranked ? i + 1 : null)).join('');
+    return `<div class="table-responsive">
+      <table id="${tableId}" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+        <thead><tr>
+          <th class="vt-vtsr-expand-col"></th>
+          <th>#</th>
+          <th data-sort="name">Player</th>
+          ${th('rating', 'Rating', ` data-bs-toggle="tooltip" data-bs-placement="top" title="VTSR-1v1: plain win/loss Elo over recorded 1v1s (anchor 1500, scale 400, shared K 40 to 20)."`)}
+          ${th('record', 'W-L-D')}
+          ${th('win_pct', 'Win %')}
+          ${th('games', 'Games')}
+          ${th('peak', 'Peak')}
+          ${th('last_1v1_date', 'Last 1v1')}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function render1v1Ladder() {
+    const card = document.getElementById('section-vtsr-1v1');
+    const body = document.getElementById('vtsr-1v1-body');
+    const $empty = document.getElementById('elo-vtsr-1v1-empty');
+    if (!card || !body) return;
+    const c = state.v1Elo;
+    const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
+    if (!ratings.length) {
+      card.classList.add('d-none');
+      if ($empty) $empty.classList.remove('d-none');
+      return;
+    }
+    if ($empty) $empty.classList.add('d-none');
+    card.classList.remove('d-none');
+
+    const min = v1LadderMinGames(c);
+    const win = inactivityWindowDays(c);
+    const provN = c.provisional_threshold ?? 5;
+    const sorter = v1Sort(v1SortState.key, v1SortState.asc);
+    const ranked = ratings.filter(r => r.leaderboard_eligible).slice().sort(sorter);
+    const unranked = ratings.filter(r => !r.leaderboard_eligible).slice().sort(sorter);
+
+    const banner = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
+      Head-to-head games only: one player on each side, both commanding. Plain Elo, no thug handicap,
+      and separate from VTSR-C and VTSR-T. Ranked players have at least ${fmt(min)} rated 1v1s and a game
+      of any kind within ${fmt(win)} days of the newest match. Players with fewer than ${fmt(provN)} rated
+      1v1s are still settling in.
+    </div>`;
+    const rankedHtml = ranked.length
+      ? renderV1TableHtml('vtsr-1v1-table', ranked, c, true)
+      : `<p class="text-muted small">Nobody has ${fmt(min)} rated 1v1s yet.</p>`;
+    const unrankedHtml = unranked.length
+      ? `<div class="vt-vtsr-c-unranked">
+          <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
+          <p class="vt-vtsr-c-unranked-blurb">Need ${fmt(min)} rated 1v1s and a game within ${fmt(win)} days of the newest match. No rank is assigned here.</p>
+          ${renderV1TableHtml('vtsr-1v1-unranked-table', unranked, c, false)}
+        </div>`
+      : '';
+
+    body.innerHTML = `${banner}
+      ${rankedHtml}
+      ${unrankedHtml}`;
+
+    if (!body.dataset.vtCollapseListenersBound) {
+      body.dataset.vtCollapseListenersBound = '1';
+      const prefix = 'vtsr-1v1-detail-';
+      body.addEventListener('shown.bs.collapse', (e) => {
+        const id = (e.target && e.target.id) || '';
+        if (id.startsWith(prefix)) expandedV1Rows.add(id.slice(prefix.length));
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      });
+      body.addEventListener('hidden.bs.collapse', (e) => {
+        const id = (e.target && e.target.id) || '';
+        if (id.startsWith(prefix)) expandedV1Rows.delete(id.slice(prefix.length));
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    card.querySelectorAll('th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === v1SortState.key);
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        if (v1SortState.key === th.dataset.sort) v1SortState.asc = !v1SortState.asc;
+        else { v1SortState.key = th.dataset.sort; v1SortState.asc = false; }
+        render1v1Ladder();
+      };
+    });
+    ensureTooltips(card);
+  }
+
+  // ----------------------------------------------------------------------
   // Tab routing (?tab=) + lazy renderers.
   // ----------------------------------------------------------------------
 
@@ -1272,6 +1530,7 @@
   const TAB_SLUGS = {
     'vtsr-c': DEFAULT_TAB_TARGET,
     'vtsr-t': THUG_TAB_TARGET,
+    '1v1': '#elo-tab-1v1',
     how: '#elo-tab-how',
     axes: '#elo-tab-axes',
     fairness: '#elo-tab-fairness',
@@ -1281,6 +1540,7 @@
   const tabRendered = {};
   const tabRenderers = {
     '#elo-tab-vtsr-c': renderCommanderLadder,
+    '#elo-tab-1v1': render1v1Ladder,
     '#elo-tab-how': renderHowTab,
     '#elo-tab-axes': renderAxesTab,
     '#elo-tab-fairness': renderFairnessTab,
@@ -1404,6 +1664,12 @@
         <h6>The commander ladder (VTSR-C)</h6>
         ${E.commanderLadderHtml()}
         <p class="mb-0 mt-2 text-muted small">The ladder itself &mdash; every commander&rsquo;s rating, record and duel log &mdash; is on the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C Elo</a> pill.</p>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>The 1v1 ladder (VTSR-1v1)</h6>
+        ${E.oneVOneLadderHtml ? E.oneVOneLadderHtml() : ''}
+        <p class="mb-0 mt-2 text-muted small">Every player&rsquo;s 1v1 rating, record and game log is on the <a href="?tab=1v1" data-elo-tab-link="1v1">1v1</a> pill.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -1989,13 +2255,14 @@
 
     // "How It's Calculated" on the leaderboard card switches to the
     // How-it-works pill (no modal on this page — the tab IS the modal).
-    const howLink = document.getElementById('vtsr-how-link');
-    if (howLink) {
+    ['vtsr-how-link', 'vtsr-1v1-how-link'].forEach((id) => {
+      const howLink = document.getElementById(id);
+      if (!howLink) return;
       howLink.addEventListener('click', () => {
         const btn = document.querySelector('#elo-tabs [data-bs-target="#elo-tab-how"]');
         if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
       });
-    }
+    });
     // Tab change -> lazy render + URL sync.
     const tabsEl = document.getElementById('elo-tabs');
     if (tabsEl) {
@@ -2011,7 +2278,8 @@
     }
 
     // Core data, all in parallel + 404-safe.
-    const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory] = await Promise.all([
+    const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory,
+      v1Elo, v1History] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
       fetchJson(`${DATA}player_slugs.json`),
@@ -2019,6 +2287,8 @@
       fetchJson(`${DATA}match_contributions.json`),
       fetchJson(`${DATA}elo_commander_current.json`),
       fetchJson(`${DATA}elo_commander_history.json`),
+      fetchJson(`${DATA}elo_1v1_current.json`),
+      fetchJson(`${DATA}elo_1v1_history.json`),
     ]);
     if (window.VTSRDisplay) VTSRDisplay.setConfig(elo);
     state.elo = elo;
@@ -2027,6 +2297,8 @@
     state.validation = validation;
     state.cmdrElo = cmdrElo;
     state.cmdrHistory = cmdrHistory;
+    state.v1Elo = v1Elo;
+    state.v1History = v1History;
 
     // Corpus-wide career join source (Primary Ship / K/D / Acc columns +
     // detail panels). Threshold 0 so even fresh players get a join row —

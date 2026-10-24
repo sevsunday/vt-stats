@@ -2850,6 +2850,37 @@ The per-commander stakes block ("What was on the line") and the "Does it work?" 
 
 **What-if lobby.** The card header's **What-if** control opens Tools in a new tab with this match's rated lobby already placed. **As played** links to `tools/index.html?from=<match id>&ratings=then#vt-tools-balonce`; **Today** uses `ratings=now`. Tools (`js/tools/match-seed.js`) loads the match plus `elo_history.json` and `elo_commander_history.json`, sets roster mode to Manual, and seats each player on their real team in their real role (commander or thug). The roster is the rated set only: rows with a pre-match `before` on that match's `deltas` (or `shadow.deltas` when the match was cancelled). Camera-pod, partial, and idle rows are left out so As played opens on the same people as the card. As played freezes VTSR-T at that `before` and VTSR-C at the duel's commander `before` (otherwise the last prior duel `after`, else the anchor). Today uses the resolver's current ratings. The same two pills on the Team Balonce card flip the era without reloading and without clearing team swaps; the reset icon restores the match's teams and commanders. Refresh replays the URL. **Reset all** strips `from` and `ratings`. Display-only — nothing is written to localStorage, and neither basis feeds a rating.
 
+### 13.15 VTSR-1v1 — the separate head-to-head ladder
+
+**Module:** `scripts/elo_1v1.py` (pure, no I/O). `compute_1v1_elo(all_match_data, match_names=None) -> (current, history)`, wired into `scripts/process_stats.py` right after VTSR-C in its own soft-fail block; `match_names` is the manifest's registry-resolved map title per match id. **Outputs:** `data/processed/elo_1v1_current.json` + `elo_1v1_history.json` (`ELO_1V1_SCHEMA_VERSION = 1`, both in the `load_cache_index()` skip set). **Corpus-wide, picker-unaware, NOT in the pipeline cache key**; no `PIPELINE_VERSION` / `match.schema_version` / `ELO_SCHEMA_VERSION` / `CMDR_ELO_SCHEMA_VERSION` interaction. Memo: `critique/decisions/vtsr-1v1-ladder.md`.
+
+**Why separate.** A 1v1 is two commanders and nothing else. VTSR-T needs a six-player lobby and VTSR-C carries a thug handicap, and both already drop every 1v1 (`low_player_count`; VTSR-C only rates what VTSR-T kept). The module reads neither `elo_history.json` nor anything under `data/external/`, and `scripts/elo.py` / `scripts/elo_commander.py` / `js/all-matches-aggregator.js` / `js/balonce-meter.js` never read its files. Gate: `_investigation/check_1v1_separation.py` (purity — VTSR-T + VTSR-C recomputed around a 1v1 run are identical; forbidden consumers; no F9 source; every rated game a true 1v1; zero-sum; continuous before/after chains; current file agrees with the replay).
+
+**Recorded games only.** F9bomber's spreadsheet is excluded: every row before 2025 lists only the two commanders, so a 1v1 and a team game look the same, and none of the ~19 later roster-less rows can be confirmed (evidence in the memo).
+
+**Eligible game.** Not `void`; exactly one leaderboard row per side with `is_campod` false (`one_v_one_players()`, shared with the gate and validator); `duration_sec >= 240`; `winner.decided_by` in `adjudicated / attested / clean_win / contested` with `team` 1 or 2, or `draw` (0.5 each). Unclear, cancelled, short and same-id dual recordings are skipped and counted. A low-activity row does not void the game.
+
+$$E_A = \frac{1}{1 + 10^{-(R_A - R_B)/400}} \qquad \Delta R_A = \bar K\,(S_A - E_A) = -\Delta R_B$$
+
+$\bar K$ is the mean of both players' scheduled K (`40 → 20` linear over the first 5 rated 1v1s), so every game is exactly zero-sum. Anchor 1500, no floor, provisional below 5 games. Chronological by `match.date`. Steam64-keyed, with `identity_aliases` pinned names.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `ONE_V_ONE_ANCHOR` | 1500.0 | Debut rating |
+| `ONE_V_ONE_K_BASE` / `ONE_V_ONE_K_FLOOR` | 40.0 / 20.0 | K schedule endpoints (shared per game as the mean) |
+| `ONE_V_ONE_PROVISIONAL_PRIOR` | 5.0 | K decay horizon (games) |
+| `ONE_V_ONE_PROVISIONAL_THRESHOLD` | 5 | Provisional badge floor |
+| `ONE_V_ONE_LOGISTIC_SCALE` | 400.0 | Expected-score scale |
+| `ONE_V_ONE_MIN_DURATION_SEC` | 240 | Duration gate |
+| `ONE_V_ONE_LADDER_MIN_GAMES` | 5 | Display-only: rated 1v1s for a ranked `#` |
+| `INACTIVITY_WINDOW_DAYS` / `COMEBACK_GAMES_REQUIRED` | 90 / 3 | Display-only global activity clock (`scripts/inactivity.py`, recorded corpus only) |
+
+**Ranked (display only):** `leaderboard_eligible` = at least 5 rated 1v1s AND globally active. Everyone else is in the unnumbered Unranked table. Do not lower the bar to fill the table (on 2026-10-24 only one player clears it).
+
+**Validator:** §22 `metric_vtsr_1v1` in `scripts/validate_elo.py` (v1.11, report schema 11 → 12, additive) replays the games from `elo_1v1_history.json` and reports accuracy, Wilson CI, log-loss, coin-flip count and a replay-integrity diff. Forensic only — never in `validation_summary.json`, no UI card.
+
+**Consumers (all 404-safe):** ELO page **1v1** pill (`?tab=1v1`, `#elo-tab-1v1` / `render1v1Ladder()` in `js/elo.js` — Ranked + Unranked tables, expandable game logs with map, factions, Δ and expected); How-it-works section (`oneVOneLadderHtml()` in `js/vtsr-explainers.js`); player page Commander tab 1v1 block (`render1v1BlockHtml()` in `js/player.js` — rating, record, peak, standing, rating chart, head-to-head, game log; self-hides without a rated 1v1); per-match Elo tab card `#section-match-elo-1v1` (`paint1v1()` in `js/match-elo.js`, shown on rated 1v1s alongside the VTSR-T exclusion note).
+
 ## 14. Player Profile Pages (`player/`)
 
 The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:

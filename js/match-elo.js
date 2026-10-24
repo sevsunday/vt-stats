@@ -6,7 +6,9 @@
 // verdict + axis breakdown, and a P-vs-E scatter. When
 // elo_commander_history.json has a duel for this match, a compact
 // VTSR-C two-row strip is appended (hidden on the historical
-// undetermined corpus — no empty card).
+// undetermined corpus — no empty card). A rated 1v1 (a duel in
+// elo_1v1_history.json) gets its own VTSR-1v1 strip, shown even though
+// VTSR-T excludes the match.
 //
 // Contract notes:
 // - Match-global, ALWAYS unfiltered (highlights passthrough contract).
@@ -79,7 +81,7 @@
 
   function exclusionReasonText(reason) {
     if (reason === 'low_player_count') {
-      return 'This match had fewer than 6 players, so it was not rated.';
+      return 'This match had fewer than 6 players, so VTSR-T and VTSR-C did not rate it.';
     }
     if (reason === 'short_duration') {
       return 'This match was shorter than 4 minutes, so it was not rated.';
@@ -681,6 +683,96 @@
     card.classList.remove('d-none');
   }
 
+  // ---- VTSR-1v1 strip (separate head-to-head ladder) ------------------
+  // window.__vtElo1v1History: undefined = untried, null = unavailable.
+
+  let _v1HistPromise = null;
+  function ensure1v1HistoryLoaded() {
+    if (window.__vtElo1v1History !== undefined) {
+      return Promise.resolve(window.__vtElo1v1History);
+    }
+    if (!_v1HistPromise) {
+      _v1HistPromise = fetch('data/processed/elo_1v1_history.json', { cache: 'no-store' })
+        .then((res) => (res && res.ok) ? res.json() : null)
+        .catch(() => null)
+        .then((json) => { window.__vtElo1v1History = json; return json; });
+    }
+    return _v1HistPromise;
+  }
+
+  function find1v1Duel(matchId) {
+    const hist = window.__vtElo1v1History;
+    if (!hist || !Array.isArray(hist.duels) || !matchId) return null;
+    return hist.duels.find((d) => d.match_id === matchId) || null;
+  }
+
+  function hide1v1() {
+    const card = document.getElementById('section-match-elo-1v1');
+    if (card) card.classList.add('d-none');
+  }
+
+  function paint1v1(matchId) {
+    const card = document.getElementById('section-match-elo-1v1');
+    const body = document.getElementById('match-elo-1v1-body');
+    if (!card || !body) return;
+    const duel = find1v1Duel(matchId);
+    const p1 = duel && duel.players && duel.players['1'];
+    const p2 = duel && duel.players && duel.players['2'];
+    if (!p1 || !p2) {
+      hide1v1();
+      return;
+    }
+    let verdict;
+    if (duel.outcome === 'draw') {
+      verdict = 'The players drew.';
+    } else {
+      const winner = p1.score > p2.score ? p1 : p2;
+      const favorite = (p1.expected || 0) >= (p2.expected || 0) ? p1 : p2;
+      const pct = Math.round(Math.max(p1.expected || 0, p2.expected || 0) * 100);
+      verdict = pct < 55
+        ? `${winner.name} won a near-even game (${favorite.name} was ${pct}% to win).`
+        : winner === favorite
+          ? `${winner.name} held as the ${pct}% favorite.`
+          : `${winner.name} won as the underdog (${favorite.name} was the ${pct}% favorite).`;
+    }
+    const maxAbs = Math.max(1, Math.abs(p1.delta || 0), Math.abs(p2.delta || 0));
+    const rows = [[1, p1], [2, p2]].map(([side, p]) => {
+      const v = p.delta || 0;
+      const pct = Math.min(50, (Math.abs(v) / maxAbs) * 50);
+      const fillCls = v > 0 ? 'is-positive' : v < 0 ? 'is-negative' : '';
+      const fillStyle = v >= 0
+        ? `left:50%; width:${pct.toFixed(2)}%;`
+        : `right:50%; width:${pct.toFixed(2)}%;`;
+      const deltaCls = v > 0 ? 'vt-vtsr-delta-positive' : v < 0 ? 'vt-vtsr-delta-negative' : '';
+      const fBadge = side === 1 ? 'badge-f1' : 'badge-f2';
+      return `<div class="vt-match-elo-row vt-match-elo-vtsrc-row">
+        <span class="vt-match-elo-row-who">
+          <span class="badge ${fBadge}">${side}</span>
+          ${playerLinkHtml(p.name, p.steam64)}
+        </span>
+        <span class="vt-match-elo-track">
+          <span class="vt-match-elo-track-center"></span>
+          <span class="vt-match-elo-track-fill ${fillCls}" style="${fillStyle}"></span>
+        </span>
+        <span class="vt-match-elo-delta ${deltaCls}">${signedDelta(v)}</span>
+        <span class="vt-match-elo-vtsrc-range vt-mono" title="Pre-match win chance ${Math.round((p.expected || 0) * 100)}%">${Math.round(p.before)} \u2192 ${Math.round(p.after)}</span>
+      </div>`;
+    }).join('');
+    body.innerHTML = `<p class="vt-match-elo-vtsrc-verdict mb-2">${esc(verdict)}</p>${rows}`;
+    card.classList.remove('d-none');
+  }
+
+  function schedule1v1(matchId) {
+    if (window.__vtElo1v1History === undefined) {
+      hide1v1();
+      ensure1v1HistoryLoaded().then(() => {
+        if (lastMatchId === matchId) paint1v1(matchId);
+      });
+      return;
+    }
+    paint1v1(matchId);
+  }
+
   function scheduleVtsrc(joined, matchId) {
     bindVtsrcClicks();
     if (window.__vtCmdrEloHistory === undefined) {
@@ -756,6 +848,7 @@
     const joined = joinLobby(currentData);
     lastJoined = joined;
     bindLobbyClicks();
+    schedule1v1(matchId);
     if (!joined.available) {
       showEmpty('Rating data is not available for this match.');
       return;
@@ -793,6 +886,7 @@
     destroyScatter();
     lastJoined = null;
     hideVtsrc();
+    hide1v1();
   }
 
   window.VTMatchElo = { render, destroy };
