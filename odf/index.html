@@ -42,6 +42,12 @@
         <label class="form-check-label" for="vsrOnlyToggle">VSR only</label>
       </div>
 
+      <button class="vt-nav-icon-btn vt-nav-icon-btn--secondary vt-odf-nav-compare align-self-center" type="button"
+              id="navCompareBtn" title="Compare up to 5 ODFs of one category (C)" aria-label="Compare ODFs">
+        <i class="bi bi-layout-three-columns" aria-hidden="true"></i><span class="vt-odf-nav-compare-label ms-1">Compare</span>
+        <span class="badge vt-odf-nav-compare-count ms-1" id="navCompareCount" hidden>0</span>
+      </button>
+
       <!-- Always-visible primary controls (mobile burger only) -->
       <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
         <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
@@ -53,8 +59,8 @@
 
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a class="btn btn-primary btn-sm vt-odf-guide-btn" href="guide/">
-            <i class="bi bi-journal-text me-1" aria-hidden="true"></i>View ODF Guide
+          <a class="btn btn-primary btn-sm vt-odf-guide-btn" href="guide/" title="View ODF Guide">
+            <i class="bi bi-journal-text me-1" aria-hidden="true"></i><span class="vt-odf-guide-label">View ODF Guide</span>
           </a>
           <a href="../index.html" class="vt-nav-icon-btn"
              title="Open the dashboard" aria-label="Dashboard">
@@ -132,8 +138,8 @@
     </div>
   </main>
 
-  <!-- Keyboard shortcuts modal (the compareModal + odfContextMenu are
-       injected at runtime by js/odf-browser.js to preserve seed parity). -->
+  <!-- Keyboard shortcuts modal (the compare builder modal + odfContextMenu are
+       injected at runtime by js/odf-browser.js). -->
   <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
@@ -164,6 +170,10 @@
                 <td><kbd>Esc</kbd> <kbd>Esc</kbd></td>
                 <td>Reset view and clear search</td>
               </tr>
+              <tr>
+                <td><kbd>C</kbd></td>
+                <td>Open the compare builder</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -173,6 +183,7 @@
 
   <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="../js/theme.js"></script>
+  <script src="../js/odf-compare.js"></script>
   <script src="../js/odf-browser.js"></script>
 
   <script src="../js/cursor-settings.js"></script>

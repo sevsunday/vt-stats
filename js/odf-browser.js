@@ -7,18 +7,17 @@
  *   not in this browser. Faction roots are FACTION_ROOTS in that file.
  * - Path rewires: ../data/odf.min.json (fetch) and ../data/audio/<file>.wav
  *   (inline-onclick audio path emitted by formatValue).
- * - Bug 1 fix: filterODFData() filteredProperties is now `let` so it can be
- *   reassigned when the class name itself matches the search term.
  * - Bug 2 fix: every leftover console.log/warn from the seed stripped.
  *   console.error in loadData() preserved (legitimate failure-path signal).
  * - Bug 3 fix: O(1) odfIndex Map built once after loadData. findODFCategory(),
- *   the constructor's compare-URL handler, and handleCompareState() all use
- *   it instead of the seed's O(n) Object.entries(this.data) loops.
+ *   selectODFByName() and the compare URL resolver all use it instead of the
+ *   seed's O(n) Object.entries(this.data) loops.
  * - Bug 5 fix: HTML template emits a single <div class="vt-odf-property-cards">
  *   per tab pane (not 3 .col-4 divs); renderColumnContent() now appends every
  *   card into that one container and lets the CSS column-count rule balance
- *   them. equalizeCardHeights() / initializeComparisonHovers() calls in
- *   single-ODF mode are kept as safe no-ops.
+ *   them.
+ * - Compare is an up-to-5, same-category matrix (see the Compare section at
+ *   the end of the class); alignment, pins and presets are js/odf-compare.js.
  * - Bug 6 fix: the inline <style> injection in the seed constructor is gone;
  *   #odfContextMenu rules live in css/odf-browser.css.
  * - Popovers initialized with `customClass: 'vt-odf-popover'` so they render
@@ -29,7 +28,7 @@
  *   plan section 3e.
  *
  * `window.browser` is preserved at the bottom of the file so the dynamically-
- * emitted inline onclick handlers (audio play buttons, exit-comparison, etc.)
+ * emitted inline onclick handlers (audio play buttons, ODF cross-links, etc.)
  * keep working without a refactor pass.
  * ========================================================================== */
 
@@ -165,6 +164,43 @@ function buildVsrPlayset(data) {
 const SHOT_ANGLES = ['hero', 'front', 'back', 'left', 'right', 'top', 'bottom'];
 const MODELS_SHOTS_BASE = '../data/models/shots/';
 const MODELS_VIEWER_BASE = '../models/index.html';
+const MODELS_THUMBS_BASE = '../data/models/thumbnails/';
+const GUIDE_URL = '../data/odf-guide.json';
+
+// Compare: per-category unit + pin tray for this browser tab.
+const COMPARE_TRAY_KEY = 'vt.odf.compare.v1';
+const COMPARE_URL_KEYS = ['odf', 'compare', 'cat', 'props', 'view', 'missing'];
+const COMPARE_PLURALS = {
+    Vehicle: 'Vehicles', Weapon: 'Weapons', Pilot: 'Pilots', Building: 'Buildings',
+    Ordnance: 'Ordnance ODFs', Powerup: 'Powerups', Explosion: 'Explosions', Mine: 'Mines',
+    Spawn: 'Spawn ODFs', Misc: 'Misc ODFs', Config: 'Config ODFs', Effect: 'Effects',
+};
+const CATEGORY_ICONS = {
+    Vehicle: 'bi-truck', Weapon: 'bi-crosshair', Pilot: 'bi-person', Building: 'bi-building',
+    Ordnance: 'bi-rocket', Powerup: 'bi-box-seam', Explosion: 'bi-fire', Mine: 'bi-asterisk',
+    Spawn: 'bi-geo-alt', Misc: 'bi-three-dots', Config: 'bi-sliders', Effect: 'bi-stars',
+};
+const DROP_REASONS = {
+    unknown: () => 'not found',
+    category: (d, cat) => `${d.category}, not ${cat}`,
+    limit: () => `over the limit of ${VTOdfCompare.MAX_UNITS}`,
+};
+
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Query string with the compare list separators left readable
+// (?compare=a,b&props=damageValue(*)); browsers accept these unescaped.
+function readableQuery(searchParams) {
+    return searchParams.toString()
+        .replace(/%2C/gi, ',').replace(/%28/g, '(').replace(/%29/g, ')');
+}
 
 // Geometry stems are model filenames (e.g. "evrecy00", "ispilo_rifle_skel"); keep
 // only the safe filename charset so the value is safe in a path / URL / markup.
@@ -196,37 +232,17 @@ class ODFBrowser {
             });
         }
 
-        // Compare modal — injected at runtime to preserve seed parity. The
-        // body is rebuilt every displayODFData() call so the heading reflects
-        // the current ODF.
-        document.body.insertAdjacentHTML('beforeend', `
-            <div class="modal fade" id="compareModal" tabindex="-1" aria-labelledby="compareModalLabel" aria-hidden="true">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="compareModalLabel">Compare ODF</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="text-secondary mb-2">Choose an ODF to compare with:</p>
-                            <div class="mt-4 mb-2">
-                                <input type="text" class="form-control vt-odf-subhdr" id="compareSearch"
-                                       placeholder="Search for ODF to compare..."
-                                       autocomplete="off">
-                                <div class="dropdown-menu w-100" id="compareSearchResults"></div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" id="confirmCompare" disabled>Compare</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `);
+        // Compare state. The tray is the per-category unit + pin list the
+        // builder edits; while comparing, this.compare mirrors the active
+        // category's tray entry.
+        this.compare = null;
+        this.tray = this.loadTray();
+        this.builder = { step: 1, category: null, search: '', propSearch: '' };
+        this.guideIndex = null;
+        this.injectCompareBuilder();
 
         // Render lightbox modal — opened when a Renders-tab thumbnail is clicked.
-        // Dedicated (not coupled to compareModal) so the two stay independent.
+        // Dedicated (not coupled to the compare builder) so the two stay independent.
         document.body.insertAdjacentHTML('beforeend', `
             <div class="modal fade" id="renderLightboxModal" tabindex="-1" aria-labelledby="renderLightboxLabel" aria-hidden="true">
                 <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -252,6 +268,10 @@ class ODFBrowser {
                     </svg>
                     Open in new tab
                 </a>
+                <a class="dropdown-item d-flex align-items-center gap-2" href="#" id="contextAddCompare">
+                    <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
+                    <span>Add to compare</span>
+                </a>
             </div>
         `);
 
@@ -263,38 +283,11 @@ class ODFBrowser {
             const odfToLoad = urlParams.get('odf');
             const catParam = urlParams.get('cat');
 
+            this.loadGuideIndexWhenIdle();
+
             if (compareParam) {
-                const [odf1, odf2] = compareParam.split(',').map(odf => odf.trim());
-                if (odf1 && odf2) {
-                    // O(1) lookups via the prebuilt odfIndex (Bug 3 fix).
-                    const odf1Hit = this.odfIndex.get(`${odf1.toLowerCase()}.odf`);
-                    const odf2Hit = this.odfIndex.get(`${odf2.toLowerCase()}.odf`);
-
-                    const odf1Match = odf1Hit ? { category: odf1Hit.category, filename: `${odf1.toLowerCase()}.odf` } : null;
-                    const odf2Match = odf2Hit ? { category: odf2Hit.category, filename: `${odf2.toLowerCase()}.odf` } : null;
-
-                    if (!odf1Match || !odf2Match) {
-                        this.showError(`Could not find exact matches for ODFs to compare:
-                            ${odf1}${!odf1Match ? ' (not found)' : ''},
-                            ${odf2}${!odf2Match ? ' (not found)' : ''}`);
-                        return;
-                    }
-
-                    this.compareODFs(odf1Match, odf2Match);
-
-                    const odfItem = document.querySelector(`.odf-item[data-filename="${odf1Match.filename}"]`);
-                    if (odfItem) {
-                        const categoryTab = document.querySelector(`#sidebar-tab-${odf1Match.category}`);
-                        if (categoryTab) {
-                            this._suppressCatUrl = true;
-                            categoryTab.click();
-                            this._suppressCatUrl = false;
-                        }
-                        odfItem.classList.add('active');
-                        odfItem.scrollIntoView({ block: 'nearest' });
-                    }
-                    return;
-                }
+                this.openCompareFromUrl(urlParams);
+                return;
             }
 
             if (odfToLoad) {
@@ -324,6 +317,20 @@ class ODFBrowser {
         this.lastEscapePress = 0;
 
         document.addEventListener('keydown', (e) => {
+            // Open modals own the keyboard (the builder's search boxes use the arrows).
+            if (document.querySelector('.modal.show')) return;
+
+            if (this.compare) {
+                this.handleCompareKey(e);
+                return;
+            }
+
+            if (this.isCompareShortcut(e)) {
+                e.preventDefault();
+                this.openBuilder(1);
+                return;
+            }
+
             if (e.key === 'Escape') {
                 const propertySearch = document.getElementById('odfPropertySearch');
                 if (document.activeElement === propertySearch) {
@@ -406,6 +413,7 @@ class ODFBrowser {
             const odf = params.get('odf');
             const cat = params.get('cat');
             this._suppressCatUrl = true;
+            this._restoringHistory = true;
             const wantVsr = params.get('vsr') === '1';
             if (wantVsr && !this.vsrOnly) {
                 this.setVsrOnly(true);
@@ -414,17 +422,22 @@ class ODFBrowser {
             }
             try {
                 if (compare) {
-                    const [odf1, odf2] = compare.split(',');
-                    this.handleCompareState(odf1, odf2);
+                    this.openCompareFromUrl(params);
                 } else if (odf) {
                     this.handleODFState(odf);
                 } else {
                     const name = (cat && this.data && this.data[cat]) ? cat : this.defaultCategory();
+                    if (this.compare) {
+                        const first = this.compare.stems[0];
+                        this.leaveCompareMode();
+                        this.selectODFByName(first);
+                    }
                     const tab = document.querySelector(`#sidebar-tab-${name}`);
                     if (tab) tab.click();
                 }
             } finally {
                 this._suppressCatUrl = false;
+                this._restoringHistory = false;
             }
         });
 
@@ -491,6 +504,7 @@ class ODFBrowser {
             if (vsrToggle) vsrToggle.checked = this.vsrOnly;
             this.renderNavTotal();
             this.initializeSidebar();
+            this.syncCompareUi();
             return true;
         } catch (error) {
             // Legitimate user-visible failure signal — kept on purpose.
@@ -622,8 +636,7 @@ class ODFBrowser {
     writeCategoryUrl(category) {
         if (this._suppressCatUrl) return;
         const url = new URL(window.location.href);
-        url.searchParams.delete('odf');
-        url.searchParams.delete('compare');
+        COMPARE_URL_KEYS.filter((key) => key !== 'cat').forEach((key) => url.searchParams.delete(key));
         if (!category || category === this.defaultCategory()) url.searchParams.delete('cat');
         else url.searchParams.set('cat', category);
         const next = url.pathname + url.search + url.hash;
@@ -704,13 +717,18 @@ class ODFBrowser {
         const search = document.getElementById('odfSearch');
         this.handleSearch(search ? search.value : '');
         this.syncPlaysetNote();
+        const builderToggle = document.getElementById('odfCmpVsrToggle');
+        if (builderToggle) builderToggle.checked = this.vsrOnly;
+        if (this.isBuilderOpen()) this.renderBuilder();
+        if (this.compare) this.renderCompare();
     }
 
     writeVsrUrl() {
         const url = new URL(window.location.href);
         if (this.vsrOnly) url.searchParams.set('vsr', '1');
         else url.searchParams.delete('vsr');
-        const next = url.pathname + url.search + url.hash;
+        const qs = readableQuery(url.searchParams);
+        const next = url.pathname + (qs ? `?${qs}` : '') + url.hash;
         const cur = window.location.pathname + window.location.search + window.location.hash;
         if (next === cur) return;
         history.replaceState(history.state, '', next);
@@ -938,6 +956,16 @@ class ODFBrowser {
     }
 
     displayODFData(category, filename) {
+        filename = String(filename).toLowerCase();
+        if (!this.data[category] || !this.data[category][filename]) {
+            const hit = this.odfIndex?.get(filename);
+            if (!hit) {
+                this.showError(`Could not find ODF: ${escapeHtml(filename.replace('.odf', ''))}`);
+                return;
+            }
+            category = hit.category;
+        }
+        this.leaveCompareMode();
         this.selectedODF = {
             category: category,
             filename: filename,
@@ -1010,30 +1038,33 @@ class ODFBrowser {
         this.content.innerHTML = `
             <div class="card">
                 <div class="card-header vt-odf-subhdr">
-                    <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <div>
                             <h3 class="mb-0">${displayName}</h3>
                             <small class="text-secondary">${filename}</small>
                             ${inheritanceHtml}
                             ${playsetHtml}
                         </div>
-                        <div class="d-flex gap-2">
-                            <div class="position-relative" style="width: 200px;">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <div class="position-relative vt-odf-prop-filter">
                                 <div class="input-group input-group-sm">
                                     <input type="text" class="form-control"
                                            id="odfPropertySearch" placeholder="Filter properties..."
                                            aria-label="Filter properties">
-                                    <button class="btn btn-outline-secondary" type="button" id="clearPropertySearch">
+                                    <button class="btn btn-outline-secondary" type="button" id="clearPropertySearch"
+                                            aria-label="Clear the property filter" title="Clear the property filter">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                                             <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
                                         </svg>
                                     </button>
                                 </div>
                             </div>
-                            <div>
-                            <button class="btn btn-sm btn-primary" id="compareButton" type="button">
-                                Compare
-                            </button>
+                            <div class="d-flex gap-2 vt-odf-detail-compare">
+                                <button class="btn btn-sm btn-outline-primary" id="addToCompareBtn" type="button"
+                                        data-stem="${odfName}" data-category="${category}" aria-pressed="false">
+                                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add to compare
+                                </button>
+                                ${this.parentCompareButtonHtml(category, odfData)}
                             </div>
                         </div>
                     </div>
@@ -1139,26 +1170,18 @@ class ODFBrowser {
             });
         }
 
-        // Rebuild the compare-modal body so the heading reflects the current
-        // ODF. The seed wired this in displayODFData; we keep that behaviour.
-        const compareModal = document.getElementById('compareModal');
-        if (compareModal) {
-            const modalBody = compareModal.querySelector('.modal-body');
-            modalBody.innerHTML = `
-                <p class="text-secondary mb-2">Choose an ODF to compare <strong class="vt-odf-text-strong fw-bold">${filename}</strong> with:</p>
-                <div class="mt-4 mb-2">
-                    <input type="text" class="form-control vt-odf-subhdr" id="compareSearch"
-                           placeholder="Search for ODF to compare..."
-                           autocomplete="off">
-                    <div class="dropdown-menu w-100" id="compareSearchResults"></div>
-                </div>
-            `;
+        const addBtn = document.getElementById('addToCompareBtn');
+        if (addBtn) addBtn.addEventListener('click', () => this.toggleTray(category, odfName));
+        const parentBtn = document.getElementById('compareParentBtn');
+        if (parentBtn) {
+            parentBtn.addEventListener('click', () => {
+                this.startCompare(category, [odfName, parentBtn.dataset.parent], {
+                    pins: [], view: 'diff', includeMissing: true, history: 'push',
+                });
+            });
         }
-
-        this.initializeCompareModal(category, filename);
-
-        this.initializeComparisonHovers();
-        this.equalizeCardHeights();
+        this.syncCompareUi();
+        this.decorateDocs(this.content);
 
         // Popovers initialized with our scoped customClass so they pick up
         // the project theme instead of Bootstrap's white-on-white default.
@@ -1204,7 +1227,7 @@ class ODFBrowser {
                             </tr>
                         </thead>
                         <tbody>
-                                    ${this.formatClassProperties(classData)}
+                                    ${this.formatClassProperties(classData, className)}
                         </tbody>
                     </table>
                         </div>
@@ -1214,21 +1237,21 @@ class ODFBrowser {
         }).join('');
     }
 
-    formatClassProperties(classData) {
+    formatClassProperties(classData, className = '') {
         const category = this.selectedODF?.category;
 
         return Object.entries(classData)
             .map(([key, value]) => {
                 return `
                     <tr>
-                        <td><code>${key}</code></td>
+                        <td><code data-doc-prop="${escapeAttr(key)}" data-doc-class="${escapeAttr(className)}">${escapeHtml(key)}</code></td>
                         <td>${this.formatValue(value, key, category, this.selectedODF?.data)}</td>
                     </tr>
                 `;
             }).join('');
     }
 
-    formatValue(value, propertyName = '', category = '', odfData = null) {
+    formatValue(value, propertyName = '', category = '', odfData = null, currentFilename = this.selectedODF?.filename) {
         if (typeof value === 'object' && value !== null) {
             return `<pre class="mb-0"><code>${JSON.stringify(value, null, 2)}</code></pre>`;
         }
@@ -1254,7 +1277,8 @@ class ODFBrowser {
             return `
                 <div class="d-flex align-items-center gap-2">
                     <span>${value}</span>
-                    <button class="btn btn-sm btn-link p-0 text-muted"
+                    <button class="btn btn-sm btn-link p-0 text-muted" type="button"
+                            aria-label="What subAttackClass means"
                             data-bs-toggle="popover"
                             data-bs-html="true"
                             data-bs-placement="right"
@@ -1269,7 +1293,7 @@ class ODFBrowser {
         }
 
         // Vehicle engageRange — context-aware popover keyed off subAttackClass.
-        if (propertyName === 'engageRange' && category === 'Vehicle') {
+        if (propertyName === 'engageRange' && category === 'Vehicle' && odfData) {
             const craftClass = Object.entries(odfData).find(([className]) =>
                 className === 'CraftClass')?.[1];
 
@@ -1288,7 +1312,8 @@ class ODFBrowser {
                     return `
                         <div class="d-flex align-items-center gap-2">
                             <code class="vt-odf-num">${value}</code>
-                            <button class="btn btn-sm btn-link p-0 text-muted"
+                            <button class="btn btn-sm btn-link p-0 text-muted" type="button"
+                                    aria-label="Which range this unit uses"
                                     data-bs-toggle="popover"
                                     data-bs-html="true"
                                     data-bs-placement="right"
@@ -1320,6 +1345,7 @@ class ODFBrowser {
                     <div class="d-flex align-items-center gap-2">
                         <code class="vt-odf-audio-name">${value}</code>
                         <button class="btn btn-sm btn-outline-secondary d-flex align-items-center p-1 rounded-circle"
+                                type="button" aria-label="Play ${escapeAttr(value)}" title="Play"
                                 onclick="browser.playAudio('../data/audio/${value}', this)">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-play-fill" viewBox="0 0 16 16">
                                 <path d="m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393z"/>
@@ -1331,15 +1357,15 @@ class ODFBrowser {
 
             // Some property values are references to other ODFs. Render those
             // as in-detail-view cross-links (handled by initializeEventListeners).
-            if (this.shouldLinkToODF(propertyName, category, value)) {
+            if (this.shouldLinkToODF(propertyName, category, value, currentFilename)) {
                 const targetCategory = this.findODFCategory(value);
                 if (targetCategory) {
-                    const odfName = value.replace('.odf', '');
+                    const odfName = value.replace('.odf', '').toLowerCase();
                     const href = `${window.location.pathname}?odf=${odfName}`;
 
                     return `<a href="${href}" class="vt-odf-prop-link"
                               data-category="${targetCategory}"
-                              data-filename="${value}.odf"
+                              data-filename="${odfName}.odf"
                               onclick="event.preventDefault();
                                       const {category, filename} = this.dataset;
                                       window.browser.displayODFData(category, filename);">
@@ -1361,11 +1387,10 @@ class ODFBrowser {
         return value;
     }
 
-    shouldLinkToODF(propertyName, category, value) {
+    shouldLinkToODF(propertyName, category, value, currentFilename) {
         if (!value) return false;
 
-        const currentFilename = this.selectedODF?.filename;
-        if (currentFilename && value + '.odf' === currentFilename) {
+        if (currentFilename && `${value}.odf`.toLowerCase() === currentFilename) {
             return false;
         }
 
@@ -1677,6 +1702,7 @@ class ODFBrowser {
                 entry instanceof Element ? entry.outerHTML : this.formatODFDataColumn([entry])
             )
             .join('');
+        this.decorateDocs(target);
     }
 
     // ----- Renders tab -------------------------------------------------------
@@ -1877,451 +1903,11 @@ class ODFBrowser {
         }
     }
 
-    initializeCompareModal(originalCategory, originalFilename) {
-        const modal = new bootstrap.Modal(document.getElementById('compareModal'));
-        const compareButton = document.getElementById('compareButton');
-        const searchInput = document.getElementById('compareSearch');
-        const resultsContainer = document.getElementById('compareSearchResults');
-        const confirmButton = document.getElementById('confirmCompare');
-
-        let selectedODF = null;
-
-        compareButton.addEventListener('click', () => {
-            searchInput.value = '';
-            confirmButton.disabled = true;
-            selectedODF = null;
-            resultsContainer.innerHTML = '';
-            modal.show();
-        });
-
-        searchInput.addEventListener('input', debounce((e) => {
-            const term = e.target.value.toLowerCase();
-            if (!term) {
-                resultsContainer.innerHTML = '';
-                return;
-            }
-
-            const matches = [];
-            for (const [category, odfs] of Object.entries(this.data)) {
-                for (const [filename, data] of Object.entries(odfs)) {
-                    const displayName = data.GameObjectClass?.unitName || data.WeaponClass?.wpnName;
-                    const searchableText = [
-                        filename.toLowerCase(),
-                        filename.toLowerCase().replace('.odf', ''),
-                        (displayName || '').toLowerCase()
-                    ].join(' ');
-
-                    if (!this.itemInPlayset(filename)) continue;
-                    if (searchableText.includes(term)) {
-                        matches.push({ category, filename, displayName });
-                    }
-                }
-            }
-
-            matches.sort((a, b) => {
-                const aName = a.displayName || a.filename;
-                const bName = b.displayName || b.filename;
-                return aName.localeCompare(bName);
-            });
-
-            resultsContainer.innerHTML = matches.map(match => `
-                <button class="dropdown-item d-flex justify-content-between align-items-center"
-                        data-category="${match.category}"
-                        data-filename="${match.filename}">
-                    <span>
-                        ${match.displayName ?
-                            `<strong>${match.displayName}</strong> <small class="text-secondary">${match.filename}</small>` :
-                            match.filename}
-                    </span>
-                    <small class="text-secondary">${match.category}</small>
-                </button>
-            `).join('');
-
-            resultsContainer.classList.add('show');
-        }, 300));
-
-        resultsContainer.addEventListener('click', (e) => {
-            const item = e.target.closest('.dropdown-item');
-            if (!item) return;
-
-            selectedODF = {
-                category: item.dataset.category,
-                filename: item.dataset.filename
-            };
-
-            searchInput.value = item.dataset.filename.replace('.odf', '');
-            resultsContainer.classList.remove('show');
-            confirmButton.disabled = false;
-        });
-
-        confirmButton.addEventListener('click', () => {
-            if (!selectedODF) return;
-
-            this.compareODFs(
-                { category: originalCategory, filename: originalFilename },
-                selectedODF
-            );
-
-            modal.hide();
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
-                resultsContainer.classList.remove('show');
-            }
-        });
-    }
-
-    compareODFs(odf1, odf2) {
-        this.selectedODF = null;
-        const odf1Name = odf1.filename.replace('.odf', '');
-        const odf2Name = odf2.filename.replace('.odf', '');
-        this.updateURL({ compare: `${odf1Name},${odf2Name}` });
-
-        const data1 = this.data[odf1.category][odf1.filename];
-        const data2 = this.data[odf2.category][odf2.filename];
-
-        const displayName1 = data1.GameObjectClass?.unitName || data1.WeaponClass?.wpnName || odf1.filename;
-        const displayName2 = data2.GameObjectClass?.unitName || data2.WeaponClass?.wpnName || odf2.filename;
-
-        this.content.innerHTML = `
-            <div class="card">
-                <div class="card-header vt-odf-subhdr">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h3 class="mb-0">Comparing ODFs</h3>
-                            <div class="text-secondary">
-                                ${displayName1} (${odf1.filename}) vs ${displayName2} (${odf2.filename})
-                            </div>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <div class="position-relative" style="width: 200px;">
-                                <div class="input-group input-group-sm">
-                                    <input type="text" class="form-control"
-                                           id="odfPropertySearch" placeholder="Filter properties..."
-                                           aria-label="Filter properties">
-                                    <button class="btn btn-outline-secondary" type="button" id="clearPropertySearch">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="
-                                window.browser.updateURL({ odf: '${odf1.filename.replace('.odf', '')}' });
-                                window.browser.displayODFData('${odf1.category}', '${odf1.filename}')
-                            ">
-                                Exit Comparison
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body p-0" id="comparisonContent">
-                    <div class="row g-0">
-                        <div class="col-6" id="odf1-column">
-                            <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                                <span class="vt-odf-text-strong">${odf1.filename}</span>
-                                <small class="d-block text-secondary">${displayName1}</small>
-                            </div>
-                            <div class="p-3">
-                                ${this.formatComparisonColumn(data1, data2, displayName1, 'odf1')}
-                            </div>
-                        </div>
-                        <div class="col-6" id="odf2-column">
-                            <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                                <span class="vt-odf-text-strong">${odf2.filename}</span>
-                                <small class="d-block text-secondary">${displayName2}</small>
-                            </div>
-                            <div class="p-3">
-                                ${this.formatComparisonColumn(data2, data1, displayName2, 'odf2')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.comparisonData = { odf1, odf2, data1, data2, displayName1, displayName2 };
-
-        const searchInput = document.getElementById('odfPropertySearch');
-        const clearButton = document.getElementById('clearPropertySearch');
-
-        searchInput.addEventListener('input', (e) => {
-            this.filterComparisonProperties(e.target.value);
-        });
-
-        clearButton.addEventListener('click', () => {
-            searchInput.value = '';
-            this.filterComparisonProperties('');
-        });
-
-        this.initializeComparisonHovers();
-
-        this.equalizeCardHeights();
-        this.syncCategoryTabs();
-    }
-
-    filterComparisonProperties(term) {
-        const { odf1, odf2, data1, data2, displayName1, displayName2 } = this.comparisonData;
-        const comparisonContent = document.getElementById('comparisonContent');
-
-        if (!comparisonContent) return;
-
-        // Strip the prior "no matches" alert without touching the sticky
-        // column headers (which carry .position-sticky).
-        const existingAlert = comparisonContent.querySelector('.vt-odf-alert-primary:not(.position-sticky)');
-        if (existingAlert) {
-            existingAlert.remove();
-        }
-
-        const updateContent = (content) => {
-            comparisonContent.innerHTML = content;
-            this.initializeComparisonHovers();
-
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    this.equalizeCardHeights();
-                });
-            });
-        };
-
-        if (!term) {
-            updateContent(`
-                <div class="row g-0">
-                    <div class="col-6" id="odf1-column">
-                        <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                            <span class="vt-odf-text-strong">${odf1.filename}</span>
-                            <small class="d-block text-secondary">${displayName1}</small>
-                        </div>
-                        <div class="p-3">
-                            ${this.formatComparisonColumn(data1, data2, displayName1, 'odf1')}
-                        </div>
-                    </div>
-                    <div class="col-6" id="odf2-column">
-                        <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                            <span class="vt-odf-text-strong">${odf2.filename}</span>
-                            <small class="d-block text-secondary">${displayName2}</small>
-                        </div>
-                        <div class="p-3">
-                            ${this.formatComparisonColumn(data2, data1, displayName2, 'odf2')}
-                        </div>
-                    </div>
-                </div>
-            `);
-            return;
-        }
-
-        term = term.toLowerCase();
-
-        const filteredData1 = this.filterODFData(data1, term);
-        const filteredData2 = this.filterODFData(data2, term);
-
-        let content = '';
-
-        if (Object.keys(filteredData1).length === 0 && Object.keys(filteredData2).length === 0) {
-            content = `
-                <div class="alert vt-odf-alert-primary m-3" role="alert">
-                    No matches for "${term}" found in either ODF
-                </div>
-            `;
-        }
-
-        content += `
-            <div class="row g-0">
-                <div class="col-6" id="odf1-column">
-                    <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                        <span class="vt-odf-text-strong">${odf1.filename}</span>
-                        <small class="d-block text-secondary">${displayName1}</small>
-                    </div>
-                    <div class="p-3">
-                        ${this.formatComparisonColumn(filteredData1, filteredData2, displayName1, 'odf1')}
-                    </div>
-                </div>
-                <div class="col-6" id="odf2-column">
-                    <div class="alert vt-odf-alert-primary py-2 rounded-0 position-sticky top-0 mb-0 z-1">
-                        <span class="vt-odf-text-strong">${odf2.filename}</span>
-                        <small class="d-block text-secondary">${displayName2}</small>
-                    </div>
-                    <div class="p-3">
-                        ${this.formatComparisonColumn(filteredData2, filteredData1, displayName2, 'odf2')}
-                    </div>
-                </div>
-            </div>
-        `;
-
-        updateContent(content);
-    }
-
-    filterODFData(data, term) {
-        const filtered = {};
-
-        for (const [className, classData] of Object.entries(data)) {
-            if (className === 'inheritanceChain') continue;
-
-            // Bug 1 fix: needs to be `let` so the className-match branch can
-            // reassign it to a fresh shallow copy of all classData properties.
-            let filteredProperties = {};
-            let hasMatch = false;
-
-            if (className.toLowerCase().includes(term)) {
-                filteredProperties = { ...classData };
-                hasMatch = true;
-            } else {
-                for (const [key, value] of Object.entries(classData)) {
-                    if (key.toLowerCase().includes(term) ||
-                        String(value).toLowerCase().includes(term)) {
-                        filteredProperties[key] = value;
-                        hasMatch = true;
-                    }
-                }
-            }
-
-            if (hasMatch) {
-                filtered[className] = filteredProperties;
-            }
-        }
-
-        return filtered;
-    }
-
-    formatComparisonColumn(data, otherData, displayName, columnId) {
-        const classTypes = new Set([
-            ...Object.keys(data),
-            ...Object.keys(otherData)
-        ].filter(key => key !== 'inheritanceChain'));
-
-        const html = [];
-
-        for (const classType of classTypes) {
-            const classData = data[classType] || {};
-            const otherClassData = otherData[classType] || {};
-
-            if (!Object.keys(classData).length && !Object.keys(otherClassData).length) continue;
-
-            const allProperties = new Set([
-                ...Object.keys(classData),
-                ...Object.keys(otherClassData)
-            ]);
-
-            const propertyGroups = {
-                different: [],
-                same: [],
-                unique: []
-            };
-
-            for (const prop of allProperties) {
-                const value = classData[prop];
-                const otherValue = otherClassData[prop];
-
-                if (value === undefined) continue;
-
-                if (otherValue === undefined) {
-                    propertyGroups.unique.push({
-                        prop,
-                        value,
-                        type: 'unique'
-                    });
-                } else {
-                    const normalizedValue = String(value).toLowerCase().trim();
-                    const normalizedOtherValue = String(otherValue).toLowerCase().trim();
-
-                    if (normalizedValue !== normalizedOtherValue) {
-                        propertyGroups.different.push({
-                            prop,
-                            value,
-                            type: 'different'
-                        });
-                    } else {
-                        propertyGroups.same.push({
-                            prop,
-                            value,
-                            type: 'same'
-                        });
-                    }
-                }
-            }
-
-            for (const group of Object.values(propertyGroups)) {
-                group.sort((a, b) => a.prop.localeCompare(b.prop));
-            }
-
-            const rows = [];
-
-            const createRow = (prop, value, type) => {
-                const classes = {
-                    different: 'vt-odf-diff-different',
-                    unique: 'vt-odf-diff-unique',
-                    same: ''
-                };
-
-                return `
-                    <tr data-property="${prop}" data-class="${classType}" data-column="${columnId}">
-                        <td class="property-name ${classes[type]}">${prop}</td>
-                        <td class="${classes[type]}">${this.formatValue(value, prop)}</td>
-                    </tr>
-                `;
-            };
-
-            propertyGroups.different.forEach(item => rows.push(createRow(item.prop, item.value, item.type)));
-            propertyGroups.same.forEach(item => rows.push(createRow(item.prop, item.value, item.type)));
-            propertyGroups.unique.forEach(item => rows.push(createRow(item.prop, item.value, item.type)));
-
-            if (rows.length) {
-                html.push(`
-                    <div class="card mb-3" data-class-type="${classType}">
-                        <div class="card-header py-2 vt-odf-subhdr">
-                            <h5 class="card-title mb-0">${classType}</h5>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0">
-                                <tbody>
-                                    ${rows.join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `);
-            }
-        }
-
-        return html.join('') || '<div class="alert vt-odf-alert-info">No data to display</div>';
-    }
-
-    initializeComparisonHovers() {
-        const rows = document.querySelectorAll('tr[data-property]');
-
-        rows.forEach(row => {
-            row.addEventListener('mouseenter', () => {
-                const property = row.dataset.property;
-                const classType = row.dataset.class;
-                const columnId = row.dataset.column;
-                const otherColumnId = columnId === 'odf1' ? 'odf2' : 'odf1';
-
-                row.classList.add('table-active');
-
-                const matchingRow = document.querySelector(
-                    `tr[data-property="${property}"][data-class="${classType}"][data-column="${otherColumnId}"]`
-                );
-                if (matchingRow) {
-                    matchingRow.classList.add('table-active');
-                }
-            });
-
-            row.addEventListener('mouseleave', () => {
-                document.querySelectorAll('tr.table-active').forEach(highlightedRow => {
-                    highlightedRow.classList.remove('table-active');
-                });
-            });
-        });
-    }
-
     updateURL(params) {
         this._pendingCat = null;
         const url = new URL(window.location);
 
-        url.searchParams.delete('odf');
-        url.searchParams.delete('compare');
-        url.searchParams.delete('cat');
+        COMPARE_URL_KEYS.forEach((key) => url.searchParams.delete(key));
 
         Object.entries(params).forEach(([key, value]) => {
             url.searchParams.set(key, value);
@@ -2329,50 +1915,14 @@ class ODFBrowser {
 
         let urlString = url.toString().replaceAll('%2C', ',');
 
-        window.history.pushState(params, '', urlString);
-    }
-
-    handleCompareState(odf1, odf2) {
-        // Bug 3 fix: O(1) lookups via the prebuilt odfIndex.
-        const odf1Hit = this.odfIndex?.get(`${odf1.toLowerCase()}.odf`);
-        const odf2Hit = this.odfIndex?.get(`${odf2.toLowerCase()}.odf`);
-
-        const odf1Match = odf1Hit ? { category: odf1Hit.category, filename: `${odf1.toLowerCase()}.odf` } : null;
-        const odf2Match = odf2Hit ? { category: odf2Hit.category, filename: `${odf2.toLowerCase()}.odf` } : null;
-
-        if (odf1Match && odf2Match) {
-            this.compareODFs(odf1Match, odf2Match);
-        }
+        // A popstate restore re-renders through here; pushing would wipe the
+        // forward history.
+        if (this._restoringHistory) window.history.replaceState(params, '', urlString);
+        else window.history.pushState(params, '', urlString);
     }
 
     handleODFState(odfName) {
         this.selectODFByName(odfName);
-    }
-
-    // No-op in single-ODF mode (no #odf1-column / #odf2-column exist).
-    // Kept callable so compare-mode can equalize card heights across columns.
-    equalizeCardHeights() {
-        const classTypes = new Set([
-            ...Array.from(document.querySelectorAll('#odf1-column .card')).map(card => card.dataset.classType),
-            ...Array.from(document.querySelectorAll('#odf2-column .card')).map(card => card.dataset.classType)
-        ]);
-
-        classTypes.forEach(classType => {
-            const card1 = document.querySelector(`#odf1-column .card[data-class-type="${classType}"]`);
-            const card2 = document.querySelector(`#odf2-column .card[data-class-type="${classType}"]`);
-
-            if (card1 && card2) {
-                card1.style.height = '';
-                card2.style.height = '';
-
-                const height1 = card1.offsetHeight;
-                const height2 = card2.offsetHeight;
-
-                const maxHeight = Math.max(height1, height2);
-                card1.style.height = `${maxHeight}px`;
-                card2.style.height = `${maxHeight}px`;
-            }
-        });
     }
 
     resetView() {
@@ -2406,6 +1956,7 @@ class ODFBrowser {
                 e.preventDefault();
 
                 currentTarget = odfItem;
+                this.syncContextCompareItem(odfItem);
 
                 contextMenu.style.display = 'block';
 
@@ -2429,6 +1980,15 @@ class ODFBrowser {
             contextMenu.style.display = 'none';
         });
 
+        document.getElementById('contextAddCompare').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (currentTarget && !e.currentTarget.classList.contains('disabled')) {
+                const { filename, category } = currentTarget.dataset;
+                this.toggleTray(category, filename.replace('.odf', ''));
+            }
+            contextMenu.style.display = 'none';
+        });
+
         document.addEventListener('click', () => {
             contextMenu.style.display = 'none';
         });
@@ -2441,6 +2001,1276 @@ class ODFBrowser {
             if (e.key === 'Escape') {
                 contextMenu.style.display = 'none';
             }
+        });
+    }
+
+    /* ======================================================================
+     * Compare: tray, builder modal, compare view.
+     * Row alignment, pins and presets live in js/odf-compare.js.
+     * ====================================================================== */
+
+    loadTray() {
+        try {
+            const raw = sessionStorage.getItem(COMPARE_TRAY_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (!parsed || typeof parsed !== 'object') return {};
+            const out = {};
+            Object.entries(parsed).forEach(([cat, entry]) => {
+                if (!entry || !Array.isArray(entry.units)) return;
+                out[cat] = {
+                    units: entry.units.map(String).slice(0, VTOdfCompare.MAX_UNITS),
+                    pins: Array.isArray(entry.pins) ? entry.pins.map(String) : [],
+                };
+            });
+            return out;
+        } catch (e) {
+            return {};
+        }
+    }
+
+    saveTray() {
+        const kept = {};
+        Object.entries(this.tray).forEach(([cat, entry]) => {
+            if (entry.units.length || entry.pins.length) kept[cat] = entry;
+        });
+        try {
+            sessionStorage.setItem(COMPARE_TRAY_KEY, JSON.stringify(kept));
+        } catch (e) {
+            // Private mode can reject the write; the tray still works for this page.
+        }
+    }
+
+    trayFor(category) {
+        if (!this.tray[category]) this.tray[category] = { units: [], pins: [] };
+        return this.tray[category];
+    }
+
+    contextCategory() {
+        return this.compare?.category || this.selectedODF?.category || this.currentCategory || this.defaultCategory();
+    }
+
+    toggleTray(category, stem) {
+        const entry = this.trayFor(category);
+        const i = entry.units.indexOf(stem);
+        if (i >= 0) entry.units.splice(i, 1);
+        else if (entry.units.length < VTOdfCompare.MAX_UNITS) entry.units.push(stem);
+        this.saveTray();
+        this.syncCompareUi();
+    }
+
+    unitInfo(category, stem) {
+        const filename = `${stem}.odf`;
+        const data = this.data?.[category]?.[filename] || null;
+        const name = data?.GameObjectClass?.unitName || data?.WeaponClass?.wpnName || '';
+        return { stem, filename, category, data, name: VTOdfCompare.stripQuotes(name || ''), label: name ? VTOdfCompare.stripQuotes(name) : stem };
+    }
+
+    thumbHtml(info, cls = 'vt-odf-cmp-thumb') {
+        const modelStem = info.data ? this.resolveModelStem(info.data) : null;
+        const icon = `<i class="bi ${CATEGORY_ICONS[info.category] || 'bi-box'}" aria-hidden="true"></i>`;
+        if (!modelStem) return `<span class="${cls}">${icon}</span>`;
+        return `<span class="${cls}">${icon}<img src="${MODELS_THUMBS_BASE}${modelStem}.png" alt="" loading="lazy" decoding="async"
+                     onload="this.classList.add('is-loaded')" onerror="this.remove()"></span>`;
+    }
+
+    // Topnav badge, detail-header toggle and context menu follow the tray of
+    // the category being viewed.
+    syncCompareUi() {
+        const category = this.contextCategory();
+        const entry = this.trayFor(category);
+        const count = entry.units.length;
+        const badge = document.getElementById('navCompareCount');
+        if (badge) {
+            badge.textContent = String(count);
+            badge.hidden = count === 0;
+        }
+        const navBtn = document.getElementById('navCompareBtn');
+        if (navBtn) {
+            navBtn.title = count
+                ? `Compare ${count} of ${VTOdfCompare.MAX_UNITS} ${category} ODFs (C)`
+                : `Compare up to ${VTOdfCompare.MAX_UNITS} ODFs of one category (C)`;
+        }
+
+        const addBtn = document.getElementById('addToCompareBtn');
+        if (addBtn) {
+            const cat = addBtn.dataset.category;
+            const own = this.trayFor(cat);
+            const inTray = own.units.includes(addBtn.dataset.stem);
+            const full = !inTray && own.units.length >= VTOdfCompare.MAX_UNITS;
+            addBtn.setAttribute('aria-pressed', inTray ? 'true' : 'false');
+            addBtn.classList.toggle('active', inTray);
+            addBtn.disabled = full;
+            addBtn.title = full
+                ? `The ${cat} comparison already holds ${VTOdfCompare.MAX_UNITS} units`
+                : (inTray ? 'Remove from the comparison' : `Add to the ${cat} comparison`);
+            addBtn.innerHTML = inTray
+                ? `<i class="bi bi-check2 me-1" aria-hidden="true"></i>In compare (${own.units.length}/${VTOdfCompare.MAX_UNITS})`
+                : `<i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add to compare${own.units.length ? ` (${own.units.length}/${VTOdfCompare.MAX_UNITS})` : ''}`;
+        }
+    }
+
+    syncContextCompareItem(odfItem) {
+        const item = document.getElementById('contextAddCompare');
+        if (!item || !odfItem) return;
+        const { filename, category } = odfItem.dataset;
+        const entry = this.trayFor(category);
+        const inTray = entry.units.includes(filename.replace('.odf', ''));
+        const full = !inTray && entry.units.length >= VTOdfCompare.MAX_UNITS;
+        item.classList.toggle('disabled', full);
+        item.querySelector('span').textContent = inTray
+            ? 'Remove from compare'
+            : (full ? `Compare is full (${VTOdfCompare.MAX_UNITS})` : 'Add to compare');
+    }
+
+    parentCompareButtonHtml(category, odfData) {
+        const parent = odfData?.inheritanceChain?.[0];
+        if (!parent) return '';
+        const parentStem = String(parent).toLowerCase().replace(/\.odf$/, '');
+        const hit = this.odfIndex?.get(`${parentStem}.odf`);
+        if (!hit || hit.category !== category) return '';
+        return `
+            <button class="btn btn-sm btn-outline-secondary" id="compareParentBtn" type="button"
+                    data-parent="${escapeAttr(parentStem)}"
+                    title="Compare with ${escapeAttr(parentStem)}, the ODF this one inherits from">
+                <i class="bi bi-diagram-2 me-1" aria-hidden="true"></i>vs parent
+            </button>`;
+    }
+
+    isCompareShortcut(e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return false;
+        if (e.key !== 'c' && e.key !== 'C') return false;
+        const tag = e.target?.tagName;
+        return !(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable);
+    }
+
+    handleCompareKey(e) {
+        const filter = document.getElementById('odfCmpFilter');
+        if (e.key === 'Escape' && filter && document.activeElement === filter && filter.value) {
+            e.preventDefault();
+            filter.value = '';
+            this.compare.filter = '';
+            this.renderCompareBody();
+            return;
+        }
+        if (this.isCompareShortcut(e)) {
+            e.preventDefault();
+            this.openBuilder(1);
+        }
+    }
+
+    /* ----- Builder modal ---------------------------------------------------- */
+
+    injectCompareBuilder() {
+        document.body.insertAdjacentHTML('beforeend', `
+            <div class="modal fade vt-odf-cmp-builder" id="odfCompareModal" tabindex="-1"
+                 aria-labelledby="odfCompareModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-md-down">
+                    <div class="modal-content">
+                        <div class="modal-header flex-wrap gap-2">
+                            <h5 class="modal-title me-2" id="odfCompareModalLabel">Compare ODFs</h5>
+                            <ul class="nav nav-pills vt-odf-cmp-steps" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" type="button" role="tab" data-cmp-step="1"
+                                            aria-selected="true">1 &middot; Units</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" type="button" role="tab" data-cmp-step="2"
+                                            aria-selected="false">2 &middot; Properties</button>
+                                </li>
+                            </ul>
+                            <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div data-cmp-pane="1">
+                                <div class="vt-odf-cmp-cats mb-2" id="odfCmpCats" role="group" aria-label="Category"></div>
+                                <div class="vt-odf-cmp-slots mb-3" id="odfCmpSlots"></div>
+                                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    <input type="search" class="form-control form-control-sm flex-grow-1 vt-odf-cmp-search"
+                                           id="odfCmpUnitSearch" placeholder="Search by name or file name"
+                                           aria-label="Search units" autocomplete="off">
+                                    <div class="form-check form-switch vt-odf-vsr-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="odfCmpVsrToggle">
+                                        <label class="form-check-label" for="odfCmpVsrToggle">VSR only</label>
+                                    </div>
+                                </div>
+                                <div class="list-group vt-odf-cmp-unit-list" id="odfCmpUnitList"></div>
+                            </div>
+                            <div data-cmp-pane="2" hidden>
+                                <p class="small text-secondary mb-2">
+                                    Pinned properties open in the Pinned view. Leave this empty to see the
+                                    properties where they differ. You can also pin rows straight from the table.
+                                </p>
+                                <div class="vt-odf-cmp-presets mb-3" id="odfCmpPresets"></div>
+                                <div class="vt-odf-cmp-selected mb-3" id="odfCmpSelected"></div>
+                                <input type="search" class="form-control form-control-sm mb-2 vt-odf-cmp-search"
+                                       id="odfCmpPropSearch" placeholder="Search properties or values"
+                                       aria-label="Search properties" autocomplete="off">
+                                <div class="vt-odf-cmp-prop-list" id="odfCmpPropList"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <span class="me-auto small text-secondary" id="odfCmpCount" aria-live="polite"></span>
+                            <button type="button" class="btn btn-sm btn-link" id="odfCmpClear">Clear</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="odfCmpBack" hidden>Back</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="odfCmpNext">Next: properties</button>
+                            <button type="button" class="btn btn-sm btn-primary" id="odfCmpGo" disabled>Compare</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        const modalEl = document.getElementById('odfCompareModal');
+        this.builderModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modalEl.addEventListener('shown.bs.modal', () => {
+            const id = this.builder.step === 2 ? 'odfCmpPropSearch' : 'odfCmpUnitSearch';
+            document.getElementById(id)?.focus();
+        });
+
+        modalEl.querySelectorAll('[data-cmp-step]').forEach((btn) => {
+            btn.addEventListener('click', () => this.setBuilderStep(Number(btn.dataset.cmpStep)));
+        });
+
+        document.getElementById('odfCmpCats').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-cmp-cat]');
+            if (!btn) return;
+            this.builder.category = btn.dataset.cmpCat;
+            this.renderBuilder();
+        });
+
+        document.getElementById('odfCmpUnitSearch').addEventListener('input', debounce((e) => {
+            this.builder.search = e.target.value;
+            this.renderBuilderUnits();
+        }, 120));
+
+        document.getElementById('odfCmpVsrToggle').addEventListener('change', (e) => {
+            this.setVsrOnly(e.target.checked);
+        });
+
+        document.getElementById('odfCmpUnitList').addEventListener('change', (e) => {
+            const input = e.target.closest('input[data-cmp-unit]');
+            if (!input) return;
+            this.toggleTray(this.builder.category, input.dataset.cmpUnit);
+            this.renderBuilderSlots();
+            this.syncBuilderUnitStates();
+            this.syncBuilderFooter();
+        });
+
+        document.getElementById('odfCmpSlots').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-cmp-remove]');
+            if (!btn) return;
+            this.toggleTray(this.builder.category, btn.dataset.cmpRemove);
+            this.renderBuilderSlots();
+            this.syncBuilderUnitStates();
+            this.syncBuilderFooter();
+        });
+
+        document.getElementById('odfCmpPresets').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-cmp-preset]');
+            if (!btn) return;
+            const model = this.builderModel();
+            const preset = VTOdfCompare.presetsFor(this.builder.category).find((p) => p.id === btn.dataset.cmpPreset);
+            if (!model || !preset) return;
+            const entry = this.trayFor(this.builder.category);
+            entry.pins = VTOdfCompare.togglePreset(entry.pins, preset, model.rows);
+            this.saveTray();
+            this.renderBuilderProps();
+        });
+
+        document.getElementById('odfCmpSelected').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-cmp-pin-action]');
+            if (!btn) return;
+            const entry = this.trayFor(this.builder.category);
+            const i = Number(btn.dataset.index);
+            if (btn.dataset.cmpPinAction === 'up') entry.pins = VTOdfCompare.movePin(entry.pins, i, -1);
+            else if (btn.dataset.cmpPinAction === 'down') entry.pins = VTOdfCompare.movePin(entry.pins, i, 1);
+            else entry.pins = entry.pins.filter((_, j) => j !== i);
+            this.saveTray();
+            this.renderBuilderProps();
+        });
+
+        document.getElementById('odfCmpPropSearch').addEventListener('input', debounce((e) => {
+            this.builder.propSearch = e.target.value;
+            this.renderBuilderPropList();
+        }, 150));
+
+        const propList = document.getElementById('odfCmpPropList');
+        propList.addEventListener('change', (e) => {
+            const input = e.target.closest('input[data-cmp-prop]');
+            if (!input) return;
+            const model = this.builderModel();
+            const row = model?.rows.find((r) => r.id === input.dataset.cmpProp);
+            if (!row) return;
+            const entry = this.trayFor(this.builder.category);
+            entry.pins = input.checked
+                ? VTOdfCompare.pinRow(entry.pins, row)
+                : VTOdfCompare.unpinRow(entry.pins, row, model.rows);
+            this.saveTray();
+            this.renderBuilderPresets();
+            this.renderBuilderSelected();
+            this.syncBuilderFooter();
+        });
+        propList.addEventListener('toggle', (e) => {
+            const details = e.target.closest('details[data-cmp-group]');
+            if (details && details.open && !details.dataset.rendered) this.fillBuilderGroup(details);
+        }, true);
+
+        document.getElementById('odfCmpClear').addEventListener('click', () => {
+            const entry = this.trayFor(this.builder.category);
+            if (this.builder.step === 2) entry.pins = [];
+            else entry.units = [];
+            this.saveTray();
+            this.syncCompareUi();
+            this.renderBuilder();
+        });
+        document.getElementById('odfCmpBack').addEventListener('click', () => this.setBuilderStep(1));
+        document.getElementById('odfCmpNext').addEventListener('click', () => this.setBuilderStep(2));
+        document.getElementById('odfCmpGo').addEventListener('click', () => this.builderGo());
+
+        const navBtn = document.getElementById('navCompareBtn');
+        if (navBtn) navBtn.addEventListener('click', () => this.openBuilder(1));
+    }
+
+    isBuilderOpen() {
+        return !!document.getElementById('odfCompareModal')?.classList.contains('show');
+    }
+
+    openBuilder(step = 1, category = this.contextCategory()) {
+        if (!this.data) return;
+        this.builder.category = this.data[category] ? category : this.defaultCategory();
+        const entry = this.trayFor(this.builder.category);
+        const current = this.selectedODF;
+        if (!this.compare && !entry.units.length && current && current.category === this.builder.category) {
+            entry.units.push(current.filename.replace('.odf', ''));
+            this.saveTray();
+            this.syncCompareUi();
+        }
+        this.builder.search = '';
+        this.builder.propSearch = '';
+        document.getElementById('odfCmpUnitSearch').value = '';
+        document.getElementById('odfCmpPropSearch').value = '';
+        document.getElementById('odfCmpVsrToggle').checked = this.vsrOnly;
+        this.builder.step = step === 2 ? 2 : 1;
+        this.renderBuilder();
+        this.builderModal.show();
+    }
+
+    setBuilderStep(step) {
+        this.builder.step = step === 2 ? 2 : 1;
+        this.renderBuilder();
+        const id = this.builder.step === 2 ? 'odfCmpPropSearch' : 'odfCmpUnitSearch';
+        document.getElementById(id)?.focus();
+    }
+
+    renderBuilder() {
+        const step = this.builder.step;
+        const modalEl = document.getElementById('odfCompareModal');
+        modalEl.querySelectorAll('[data-cmp-step]').forEach((btn) => {
+            const on = Number(btn.dataset.cmpStep) === step;
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        modalEl.querySelectorAll('[data-cmp-pane]').forEach((pane) => {
+            pane.hidden = Number(pane.dataset.cmpPane) !== step;
+        });
+        document.getElementById('odfCmpBack').hidden = step !== 2;
+        document.getElementById('odfCmpNext').hidden = step === 2;
+        this.renderBuilderCategories();
+        this.renderBuilderSlots();
+        if (step === 1) this.renderBuilderUnits();
+        else this.renderBuilderProps();
+        this.syncBuilderFooter();
+    }
+
+    renderBuilderCategories() {
+        const host = document.getElementById('odfCmpCats');
+        host.innerHTML = Object.keys(this.data).map((cat) => {
+            const total = this.vsrOnly
+                ? Object.keys(this.data[cat]).filter((f) => this.playset.has(f)).length
+                : Object.keys(this.data[cat]).length;
+            if (!total && cat !== this.builder.category) return '';
+            const queued = this.trayFor(cat).units.length;
+            const active = cat === this.builder.category;
+            return `<button type="button" class="btn btn-sm vt-odf-cmp-cat${active ? ' active' : ''}"
+                            data-cmp-cat="${escapeAttr(cat)}" aria-pressed="${active}">
+                        ${escapeHtml(cat)}${queued ? ` <span class="badge">${queued}</span>` : ''}
+                    </button>`;
+        }).join('');
+    }
+
+    renderBuilderSlots() {
+        const host = document.getElementById('odfCmpSlots');
+        const cat = this.builder.category;
+        const units = this.trayFor(cat).units;
+        const slots = [];
+        for (let i = 0; i < VTOdfCompare.MAX_UNITS; i += 1) {
+            const stem = units[i];
+            if (!stem) {
+                slots.push(`<div class="vt-odf-cmp-slot is-empty"><span>Empty slot</span></div>`);
+                continue;
+            }
+            const info = this.unitInfo(cat, stem);
+            slots.push(`
+                <div class="vt-odf-cmp-slot">
+                    ${this.thumbHtml(info, 'vt-odf-cmp-thumb vt-odf-cmp-thumb--sm')}
+                    <span class="vt-odf-cmp-slot-text">
+                        <span class="vt-odf-cmp-slot-name">${escapeHtml(info.label)}</span>
+                        <span class="vt-odf-cmp-slot-stem">${escapeHtml(stem)}</span>
+                    </span>
+                    <button type="button" class="vt-odf-icon-btn" data-cmp-remove="${escapeAttr(stem)}"
+                            aria-label="Remove ${escapeAttr(info.label)}" title="Remove">
+                        <i class="bi bi-x-lg" aria-hidden="true"></i>
+                    </button>
+                </div>`);
+        }
+        host.innerHTML = slots.join('');
+    }
+
+    builderUnitEntries() {
+        const cat = this.builder.category;
+        const odfs = this.data[cat] || {};
+        const term = this.builder.search.trim().toLowerCase();
+        const entries = Object.entries(odfs).filter(([filename]) => this.itemInPlayset(filename) || this.trayFor(cat).units.includes(filename.replace('.odf', '')));
+        const named = [];
+        const unnamed = [];
+        const scored = [];
+        entries.forEach(([filename, data]) => {
+            const name = VTOdfCompare.stripQuotes(data.GameObjectClass?.unitName || data.WeaponClass?.wpnName || '');
+            if (term) {
+                const stem = filename.replace('.odf', '');
+                const names = [stem, name.toLowerCase()].filter(Boolean);
+                let score = 4;
+                if (names.some((n) => n === term)) score = 0;
+                else if (names.some((n) => n.startsWith(term))) score = 1;
+                else if (names.some((n) => n.includes(term))) score = 2;
+                else if (names.some((n) => fuzzySearch(term, n))) score = 3;
+                if (score === 4) return;
+                scored.push({ filename, data, name, score, vsr: this.playset.has(filename) ? 0 : 1 });
+                return;
+            }
+            (name ? named : unnamed).push({ filename, data, name });
+        });
+        if (term) {
+            return scored.sort((a, b) => a.score - b.score || a.vsr - b.vsr
+                || (a.name || a.filename).localeCompare(b.name || b.filename));
+        }
+        named.sort((a, b) => a.name.localeCompare(b.name));
+        unnamed.sort((a, b) => a.filename.localeCompare(b.filename));
+        return named.concat(unnamed);
+    }
+
+    renderBuilderUnits() {
+        const host = document.getElementById('odfCmpUnitList');
+        const cat = this.builder.category;
+        const units = this.trayFor(cat).units;
+        const entries = this.builderUnitEntries();
+        if (!entries.length) {
+            host.innerHTML = `<div class="alert vt-odf-alert-secondary mb-0">No ${escapeHtml(cat)} ODFs match.</div>`;
+            return;
+        }
+        host.innerHTML = entries.map(({ filename, name }) => {
+            const stem = filename.replace('.odf', '');
+            const info = this.unitInfo(cat, stem);
+            const checked = units.includes(stem);
+            const outside = this.vsrOnly && !this.playset.has(filename);
+            return `
+                <label class="list-group-item vt-odf-cmp-pick">
+                    <input class="form-check-input flex-shrink-0" type="checkbox" data-cmp-unit="${escapeAttr(stem)}"${checked ? ' checked' : ''}>
+                    ${this.thumbHtml(info, 'vt-odf-cmp-thumb vt-odf-cmp-thumb--sm')}
+                    <span class="vt-odf-cmp-pick-text">
+                        ${name ? `<span class="vt-odf-cmp-pick-label">${escapeHtml(name)}</span>` : ''}
+                        <span class="vt-odf-cmp-pick-stem">${escapeHtml(stem)}</span>
+                    </span>
+                    ${outside ? '<span class="vt-odf-cmp-chip">Outside VSR</span>' : ''}
+                </label>`;
+        }).join('');
+        this.syncBuilderUnitStates();
+    }
+
+    syncBuilderUnitStates() {
+        const units = this.trayFor(this.builder.category).units;
+        const full = units.length >= VTOdfCompare.MAX_UNITS;
+        document.querySelectorAll('#odfCmpUnitList input[data-cmp-unit]').forEach((input) => {
+            const on = units.includes(input.dataset.cmpUnit);
+            input.checked = on;
+            input.disabled = full && !on;
+            input.closest('.vt-odf-cmp-pick')?.classList.toggle('is-disabled', full && !on);
+        });
+    }
+
+    syncBuilderFooter() {
+        const entry = this.trayFor(this.builder.category);
+        const count = document.getElementById('odfCmpCount');
+        const units = entry.units.length;
+        const pinText = entry.pins.length ? ` · ${entry.pins.length} pinned` : '';
+        count.textContent = `${units} / ${VTOdfCompare.MAX_UNITS} ${this.builder.category} selected${pinText}`;
+        document.getElementById('odfCmpGo').disabled = units < 2;
+        document.getElementById('odfCmpGo').title = units < 2 ? 'Pick at least two units' : '';
+        document.getElementById('odfCmpClear').textContent = this.builder.step === 2 ? 'Clear pins' : 'Clear units';
+    }
+
+    builderModel() {
+        const cat = this.builder.category;
+        const units = this.trayFor(cat).units;
+        if (!units.length) return null;
+        const key = `${cat}|${units.join(',')}`;
+        if (this._builderModelKey !== key) {
+            this._builderModelKey = key;
+            this._builderModel = VTOdfCompare.buildModel(units.map((s) => this.unitInfo(cat, s)).filter((u) => u.data));
+        }
+        return this._builderModel;
+    }
+
+    renderBuilderProps() {
+        this.renderBuilderPresets();
+        this.renderBuilderSelected();
+        this.renderBuilderPropList();
+        this.syncBuilderFooter();
+    }
+
+    renderBuilderPresets() {
+        const host = document.getElementById('odfCmpPresets');
+        const model = this.builderModel();
+        const presets = VTOdfCompare.presetsFor(this.builder.category);
+        if (!model || !presets.length) {
+            host.innerHTML = '';
+            return;
+        }
+        const pins = this.trayFor(this.builder.category).pins;
+        const chips = presets.map((p) => {
+            const rows = VTOdfCompare.presetRows(p, model.rows);
+            if (!rows.length) return '';
+            const on = rows.every((r) => VTOdfCompare.pinIndex(pins, r) >= 0);
+            return `<button type="button" class="btn btn-sm vt-odf-cmp-preset${on ? ' active' : ''}"
+                            data-cmp-preset="${escapeAttr(p.id)}" aria-pressed="${on}">
+                        ${on ? '<i class="bi bi-check2 me-1" aria-hidden="true"></i>' : ''}${escapeHtml(p.label)}
+                        <span class="vt-odf-cmp-preset-count">${rows.length}</span>
+                    </button>`;
+        }).join('');
+        host.innerHTML = chips ? `<div class="vt-odf-cmp-label">Presets</div><div class="d-flex flex-wrap gap-1">${chips}</div>` : '';
+    }
+
+    renderBuilderSelected() {
+        const host = document.getElementById('odfCmpSelected');
+        const pins = this.trayFor(this.builder.category).pins;
+        const model = this.builderModel();
+        if (!pins.length) {
+            host.innerHTML = '';
+            return;
+        }
+        const items = pins.map((pin, i) => {
+            const rows = model ? model.rows.filter((r) => VTOdfCompare.matchPattern(pin, r)) : [];
+            const label = rows.length === 1 ? rows[0].prop : pin;
+            const sub = rows.length === 1
+                ? rows[0].sections.join(' / ')
+                : (rows.length ? `${rows.length} rows` : 'not in these units');
+            return `
+                <li class="vt-odf-cmp-selected-item${rows.length ? '' : ' is-orphan'}">
+                    <span class="vt-odf-cmp-selected-name">${escapeHtml(label)}</span>
+                    <span class="vt-odf-cmp-selected-sec">${escapeHtml(sub)}</span>
+                    <span class="ms-auto d-inline-flex">
+                        <button type="button" class="vt-odf-icon-btn" data-cmp-pin-action="up" data-index="${i}"
+                                aria-label="Move ${escapeAttr(label)} up"${i === 0 ? ' disabled' : ''}><i class="bi bi-arrow-up" aria-hidden="true"></i></button>
+                        <button type="button" class="vt-odf-icon-btn" data-cmp-pin-action="down" data-index="${i}"
+                                aria-label="Move ${escapeAttr(label)} down"${i === pins.length - 1 ? ' disabled' : ''}><i class="bi bi-arrow-down" aria-hidden="true"></i></button>
+                        <button type="button" class="vt-odf-icon-btn" data-cmp-pin-action="remove" data-index="${i}"
+                                aria-label="Unpin ${escapeAttr(label)}"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                    </span>
+                </li>`;
+        }).join('');
+        host.innerHTML = `<div class="vt-odf-cmp-label">Pinned, in table order</div><ol class="vt-odf-cmp-selected-list">${items}</ol>`;
+    }
+
+    renderBuilderPropList() {
+        const host = document.getElementById('odfCmpPropList');
+        const model = this.builderModel();
+        if (!model) {
+            host.innerHTML = '<div class="alert vt-odf-alert-secondary mb-0">Pick units in step 1 to see their properties.</div>';
+            return;
+        }
+        const term = this.builder.propSearch.trim().toLowerCase();
+        const allComponent = model.groups.every((g) => g.component);
+        const html = model.groups.map((g) => {
+            const rows = term ? g.rows.filter((r) => VTOdfCompare.rowMatchesFilter(r, term)) : g.rows;
+            if (!rows.length) return '';
+            const open = term || !g.component || allComponent;
+            const merged = g.mergedFrom.length ? ` <span class="vt-odf-cmp-merged">+ ${escapeHtml(g.mergedFrom.join(', '))}</span>` : '';
+            return `
+                <details class="vt-odf-cmp-prop-group" data-cmp-group="${escapeAttr(g.key)}"${open ? ' open' : ''}>
+                    <summary><span class="vt-odf-cmp-sec">${escapeHtml(g.label)}</span>${merged}
+                        <span class="vt-odf-cmp-group-count">${rows.length}</span></summary>
+                    <div class="vt-odf-cmp-prop-rows">${open ? this.builderGroupRowsHtml(rows) : ''}</div>
+                </details>`;
+        }).join('');
+        host.innerHTML = html || `<div class="alert vt-odf-alert-secondary mb-0">No properties match.</div>`;
+        host.querySelectorAll('details[open]').forEach((d) => { d.dataset.rendered = '1'; });
+    }
+
+    fillBuilderGroup(details) {
+        const model = this.builderModel();
+        const g = model?.groups.find((x) => x.key === details.dataset.cmpGroup);
+        if (!g) return;
+        const term = this.builder.propSearch.trim().toLowerCase();
+        const rows = term ? g.rows.filter((r) => VTOdfCompare.rowMatchesFilter(r, term)) : g.rows;
+        details.querySelector('.vt-odf-cmp-prop-rows').innerHTML = this.builderGroupRowsHtml(rows);
+        details.dataset.rendered = '1';
+    }
+
+    builderGroupRowsHtml(rows) {
+        const model = this.builderModel();
+        const pins = this.trayFor(this.builder.category).pins;
+        return rows.map((r) => {
+            const pinned = VTOdfCompare.pinIndex(pins, r) >= 0;
+            const tags = [];
+            if (r.differs) tags.push('<span class="vt-odf-cmp-tag is-diff">differs</span>');
+            if (r.missing) tags.push(`<span class="vt-odf-cmp-tag is-missing">${r.present}/${model.n}</span>`);
+            return `
+                <label class="vt-odf-cmp-prop-row">
+                    <input class="form-check-input" type="checkbox" data-cmp-prop="${escapeAttr(r.id)}"${pinned ? ' checked' : ''}>
+                    <span class="vt-odf-cmp-prop-row-name">${escapeHtml(r.prop)}</span>
+                    ${r.sections.length > 1 ? `<span class="vt-odf-cmp-merged">${escapeHtml(r.sections.join(' / '))}</span>` : ''}
+                    ${tags.join('')}
+                </label>`;
+        }).join('');
+    }
+
+    builderGo() {
+        const cat = this.builder.category;
+        const entry = this.trayFor(cat);
+        if (entry.units.length < 2) return;
+        const view = entry.pins.length ? 'pinned' : 'diff';
+        const same = this.compare && this.compare.category === cat
+            && this.compare.stems.join(',') === entry.units.join(',');
+        this.builderModal.hide();
+        this.startCompare(cat, entry.units.slice(), { pins: entry.pins.slice(), view, history: same ? 'replace' : 'push' });
+    }
+
+    /* ----- Compare view ----------------------------------------------------- */
+
+    openCompareFromUrl(params) {
+        const stems = String(params.get('compare') || '').split(',');
+        const lookup = (stem) => this.odfIndex?.get(`${stem}.odf`)?.category || null;
+        const resolved = VTOdfCompare.resolveCompareStems(stems, lookup);
+        if (resolved.units.length < 2) {
+            this.leaveCompareMode();
+            const names = stems.map((s) => s.trim()).filter(Boolean).map(escapeHtml).join(', ');
+            this.showError(`A comparison needs two ODFs from one category. Could not compare: ${names || 'nothing given'}.`);
+            return false;
+        }
+        const pins = VTOdfCompare.parseProps(params.get('props'));
+        const view = VTOdfCompare.normalizeView(params.get('view'), pins.length > 0);
+        this.startCompare(resolved.category, resolved.units, {
+            pins, view, includeMissing: params.get('missing') === '1',
+            history: 'replace', dropped: resolved.dropped,
+        });
+        return true;
+    }
+
+    // history: 'push' when the unit set changes, 'replace' for restores and
+    // in-place edits.
+    startCompare(category, stems, opts = {}) {
+        const units = stems.slice(0, VTOdfCompare.MAX_UNITS);
+        if (units.length < 2) return;
+        const prev = this.compare && this.compare.category === category ? this.compare : null;
+        this.selectedODF = null;
+        this.compare = {
+            category,
+            stems: units,
+            pins: opts.pins ? opts.pins.slice() : (prev ? prev.pins : []),
+            view: opts.view || (prev ? prev.view : 'diff'),
+            includeMissing: opts.includeMissing !== undefined ? !!opts.includeMissing : (prev ? prev.includeMissing : false),
+            filter: '',
+            collapsed: prev ? prev.collapsed : new Map(),
+            dropped: opts.dropped || [],
+            model: null,
+        };
+        const entry = this.trayFor(category);
+        entry.units = units.slice();
+        entry.pins = this.compare.pins.slice();
+        this.saveTray();
+
+        document.body.classList.add('vt-odf-comparing');
+        this.activateSidebarCategory(category);
+        this.writeCompareUrl(opts.history || 'push');
+        this.renderCompare();
+        this.syncCompareUi();
+        this.syncCategoryTabs();
+    }
+
+    leaveCompareMode() {
+        if (!this.compare) return;
+        this.compare = null;
+        document.body.classList.remove('vt-odf-comparing');
+    }
+
+    exitCompare() {
+        if (!this.compare) return;
+        const first = this.compare.stems[0];
+        this.leaveCompareMode();
+        this.selectODFByName(first);
+    }
+
+    activateSidebarCategory(category) {
+        const tab = document.querySelector(`#sidebar-tab-${category}`);
+        if (tab && !tab.classList.contains('active')) {
+            this._suppressCatUrl = true;
+            tab.click();
+            this._suppressCatUrl = false;
+        }
+        this.currentCategory = category;
+    }
+
+    compareUrl() {
+        const c = this.compare;
+        const url = new URL(window.location.href);
+        COMPARE_URL_KEYS.forEach((key) => url.searchParams.delete(key));
+        url.searchParams.set('compare', c.stems.join(','));
+        if (c.pins.length) url.searchParams.set('props', VTOdfCompare.serializePins(c.pins));
+        const defaultView = c.pins.length ? 'pinned' : 'diff';
+        if (c.view !== defaultView) url.searchParams.set('view', c.view);
+        if (c.includeMissing) url.searchParams.set('missing', '1');
+        return `${url.pathname}?${readableQuery(url.searchParams)}${url.hash}`;
+    }
+
+    writeCompareUrl(mode = 'replace') {
+        if (!this.compare) return;
+        this._pendingCat = null;
+        const next = this.compareUrl();
+        const cur = window.location.pathname + window.location.search + window.location.hash;
+        if (next === cur) return;
+        const state = { compare: this.compare.stems.join(',') };
+        if (mode === 'push' && !this._restoringHistory) history.pushState(state, '', next);
+        else history.replaceState(state, '', next);
+    }
+
+    compareModel() {
+        const c = this.compare;
+        if (!c.model) {
+            c.model = VTOdfCompare.buildModel(c.stems.map((s) => this.unitInfo(c.category, s)));
+        }
+        return c.model;
+    }
+
+    renderCompare() {
+        const c = this.compare;
+        if (!c) return;
+        const model = this.compareModel();
+        const units = model.units;
+        const n = units.length;
+        const plural = COMPARE_PLURALS[c.category] || `${c.category} ODFs`;
+
+        const droppedHtml = c.dropped.length ? `
+            <div class="alert vt-odf-alert-secondary small py-1 px-2 mt-2 mb-0" role="status">
+                Left out: ${c.dropped.map((d) => `${escapeHtml(d.stem)} (${DROP_REASONS[d.reason] ? DROP_REASONS[d.reason](d, c.category) : d.reason})`).join(', ')}.
+            </div>` : '';
+
+        const headCells = units.map((u, i) => {
+            const outside = this.vsrOnly && !this.playset.has(u.filename);
+            const chips = [];
+            if (i === 0) chips.push('<span class="vt-odf-cmp-chip is-baseline" title="Deltas in the tooltips are measured against this column">Baseline</span>');
+            if (outside) chips.push('<span class="vt-odf-cmp-chip" title="A VSR match does not build or mount this">Outside VSR</span>');
+            return `
+                <th scope="col" class="vt-odf-cmp-unit" data-col="${i}">
+                    <div class="vt-odf-cmp-unit-card">
+                        ${this.thumbHtml(u)}
+                        <div class="vt-odf-cmp-unit-text">
+                            <a class="vt-odf-cmp-unit-name" href="?odf=${encodeURIComponent(u.stem)}" data-cmp-open="${escapeAttr(u.stem)}"
+                               title="Open ${escapeAttr(u.label)}">${escapeHtml(u.label)}</a>
+                            <span class="vt-odf-cmp-unit-stem">${escapeHtml(u.stem)}</span>
+                            ${chips.length ? `<span class="vt-odf-cmp-unit-chips">${chips.join('')}</span>` : ''}
+                        </div>
+                        <div class="dropdown vt-odf-cmp-unit-menu">
+                            <button type="button" class="vt-odf-icon-btn" data-bs-toggle="dropdown" aria-expanded="false"
+                                    data-bs-display="static" aria-label="Actions for ${escapeAttr(u.label)}">
+                                <i class="bi bi-three-dots-vertical" aria-hidden="true"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                ${i > 0 ? `<li><button type="button" class="dropdown-item" data-cmp-action="baseline" data-col="${i}"><i class="bi bi-flag me-2" aria-hidden="true"></i>Set as baseline</button></li>` : ''}
+                                ${i > 0 ? `<li><button type="button" class="dropdown-item" data-cmp-action="left" data-col="${i}"><i class="bi bi-arrow-left me-2" aria-hidden="true"></i>Move left</button></li>` : ''}
+                                ${i < n - 1 ? `<li><button type="button" class="dropdown-item" data-cmp-action="right" data-col="${i}"><i class="bi bi-arrow-right me-2" aria-hidden="true"></i>Move right</button></li>` : ''}
+                                <li><a class="dropdown-item" href="?odf=${encodeURIComponent(u.stem)}" data-cmp-open="${escapeAttr(u.stem)}"><i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>Open this ODF</a></li>
+                                <li><button type="button" class="dropdown-item" data-cmp-action="remove" data-col="${i}"${n <= 2 ? ' disabled title="A comparison needs two units"' : ''}><i class="bi bi-x-lg me-2" aria-hidden="true"></i>Remove</button></li>
+                            </ul>
+                        </div>
+                    </div>
+                </th>`;
+        }).join('');
+        const addCell = n < VTOdfCompare.MAX_UNITS ? `
+            <th scope="col" class="vt-odf-cmp-addcol">
+                <button type="button" class="vt-odf-cmp-add" data-cmp-action="add" title="Add a unit">
+                    <i class="bi bi-plus-lg" aria-hidden="true"></i><span>Add</span>
+                </button>
+            </th>` : '';
+
+        this.content.innerHTML = `
+            <div class="card vt-odf-cmp" style="--vt-cmp-cols: ${n};">
+                <div class="card-header vt-odf-subhdr vt-odf-cmp-head">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <div class="me-auto vt-odf-cmp-titlewrap">
+                            <h3 class="mb-0 vt-odf-cmp-title">Comparing ${n} ${escapeHtml(plural)}</h3>
+                            ${droppedHtml}
+                        </div>
+                        <div class="d-flex flex-wrap gap-1 vt-odf-cmp-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="units">
+                                <i class="bi bi-ui-checks-grid me-1" aria-hidden="true"></i>Units
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="props">
+                                <i class="bi bi-pin-angle me-1" aria-hidden="true"></i>Properties
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="copy-link" title="Copy a link to this comparison">
+                                <i class="bi bi-link-45deg me-1" aria-hidden="true"></i><span>Copy link</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="copy-text" title="Copy the visible rows as a text table (for Discord)">
+                                <i class="bi bi-clipboard me-1" aria-hidden="true"></i><span>Copy as text</span>
+                            </button>
+                        </div>
+                        <div class="vt-odf-cmp-actions vt-odf-cmp-exit">
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-cmp-action="exit" title="Exit the comparison">
+                                <i class="bi bi-x-lg me-1" aria-hidden="true"></i><span>Exit</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2 vt-odf-cmp-toolbar">
+                        <div class="btn-group btn-group-sm vt-odf-cmp-views" role="group" aria-label="Rows to show" id="odfCmpViews"></div>
+                        <div class="form-check form-switch mb-0 vt-odf-cmp-missing-toggle"
+                             title="In Diff, also show rows where some units do not set the property">
+                            <input class="form-check-input" type="checkbox" role="switch" id="odfCmpIncludeMissing"${c.includeMissing ? ' checked' : ''}>
+                            <label class="form-check-label" for="odfCmpIncludeMissing">Include missing</label>
+                        </div>
+                        <input type="search" class="form-control form-control-sm vt-odf-cmp-filter" id="odfCmpFilter"
+                               placeholder="Filter properties or values" aria-label="Filter properties or values"
+                               autocomplete="off" value="${escapeAttr(c.filter)}">
+                    </div>
+                </div>
+                <div class="card-body p-0 vt-odf-cmp-body">
+                    <div class="vt-odf-cmp-scroll" id="odfCmpScroll" tabindex="0" aria-label="Comparison table">
+                        <table class="vt-odf-cmp-table">
+                            <caption class="visually-hidden">Property comparison of ${n} ${escapeHtml(plural)}</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="vt-odf-cmp-corner">Property</th>
+                                    ${headCells}
+                                    ${addCell}
+                                </tr>
+                            </thead>
+                            <tbody id="odfCmpBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+
+        this.wireCompareView();
+        this.renderCompareBody();
+    }
+
+    wireCompareView() {
+        const root = this.content.querySelector('.vt-odf-cmp');
+        root.addEventListener('click', (e) => this.handleCompareClick(e));
+        root.querySelector('#odfCmpIncludeMissing').addEventListener('change', (e) => {
+            this.compare.includeMissing = e.target.checked;
+            this.writeCompareUrl('replace');
+            this.renderCompareBody();
+        });
+        root.querySelector('#odfCmpFilter').addEventListener('input', debounce((e) => {
+            if (!this.compare) return;
+            this.compare.filter = e.target.value;
+            this.renderCompareBody();
+        }, 150));
+        root.querySelector('#odfCmpViews').addEventListener('change', (e) => {
+            const input = e.target.closest('input[name="odfCmpView"]');
+            if (!input) return;
+            this.compare.view = input.value;
+            this.writeCompareUrl('replace');
+            this.renderCompareBody();
+        });
+    }
+
+    handleCompareClick(e) {
+        const c = this.compare;
+        if (!c) return;
+        const open = e.target.closest('[data-cmp-open]');
+        if (open) {
+            if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+            e.preventDefault();
+            this.leaveCompareMode();
+            this.selectODFByName(open.dataset.cmpOpen);
+            return;
+        }
+        const pin = e.target.closest('[data-cmp-pin]');
+        if (pin) {
+            this.togglePinById(pin.dataset.cmpPin);
+            return;
+        }
+        const toggle = e.target.closest('[data-cmp-group-toggle]');
+        if (toggle) {
+            const key = toggle.dataset.cmpGroupToggle;
+            const group = this.compareModel().groups.find((g) => g.key === key);
+            c.collapsed.set(key, !this.isGroupCollapsed(group));
+            this.renderCompareBody();
+            return;
+        }
+        const action = e.target.closest('[data-cmp-action]');
+        if (!action || action.disabled) return;
+        const col = Number(action.dataset.col);
+        switch (action.dataset.cmpAction) {
+            case 'units':
+            case 'add':
+                this.openBuilder(1, c.category);
+                break;
+            case 'props':
+                this.openBuilder(2, c.category);
+                break;
+            case 'exit':
+                this.exitCompare();
+                break;
+            case 'show-all':
+                c.view = 'all';
+                this.writeCompareUrl('replace');
+                this.renderCompareBody();
+                break;
+            case 'show-diff':
+                c.view = 'diff';
+                this.writeCompareUrl('replace');
+                this.renderCompareBody();
+                break;
+            case 'include-missing': {
+                c.includeMissing = true;
+                const toggle = document.getElementById('odfCmpIncludeMissing');
+                if (toggle) toggle.checked = true;
+                this.writeCompareUrl('replace');
+                this.renderCompareBody();
+                break;
+            }
+            case 'clear-filter':
+                c.filter = '';
+                document.getElementById('odfCmpFilter').value = '';
+                this.renderCompareBody();
+                break;
+            case 'baseline':
+                this.reorderCompare(col, 0);
+                break;
+            case 'left':
+                this.reorderCompare(col, col - 1);
+                break;
+            case 'right':
+                this.reorderCompare(col, col + 1);
+                break;
+            case 'remove':
+                if (c.stems.length > 2) {
+                    this.startCompare(c.category, c.stems.filter((_, i) => i !== col), { history: 'push' });
+                }
+                break;
+            case 'copy-link':
+                this.copyToClipboard(window.location.href, action, 'Link copied');
+                break;
+            case 'copy-text':
+                this.copyToClipboard(this.compareAsText(), action, 'Table copied');
+                break;
+            default:
+                break;
+        }
+    }
+
+    reorderCompare(from, to) {
+        const stems = this.compare.stems.slice();
+        if (to < 0 || to >= stems.length || from === to) return;
+        const [stem] = stems.splice(from, 1);
+        stems.splice(to, 0, stem);
+        this.startCompare(this.compare.category, stems, { history: 'push' });
+    }
+
+    togglePinById(id) {
+        const c = this.compare;
+        const model = this.compareModel();
+        const row = model.rows.find((r) => r.id === id);
+        if (!row) return;
+        c.pins = VTOdfCompare.pinIndex(c.pins, row) >= 0
+            ? VTOdfCompare.unpinRow(c.pins, row, model.rows)
+            : VTOdfCompare.pinRow(c.pins, row);
+        const entry = this.trayFor(c.category);
+        entry.pins = c.pins.slice();
+        this.saveTray();
+        this.writeCompareUrl('replace');
+        this.renderCompareBody();
+    }
+
+    isGroupCollapsed(group) {
+        const c = this.compare;
+        if (c.collapsed.has(group.key)) return c.collapsed.get(group.key);
+        if (!group.component) return false;
+        return !this.compareModel().groups.every((g) => g.component);
+    }
+
+    renderCompareViews(counts) {
+        const c = this.compare;
+        const host = document.getElementById('odfCmpViews');
+        if (!host) return;
+        const views = [
+            ['pinned', 'Pinned', counts.pinned, 'Only the properties you pinned, in pin order'],
+            ['diff', 'Diff', counts.diff, 'Rows where the units hold different values'],
+            ['all', 'All', counts.all, 'Every property any unit has'],
+        ];
+        host.innerHTML = views.map(([value, label, count, tip]) => `
+            <input type="radio" class="btn-check" name="odfCmpView" id="odfCmpView-${value}" value="${value}"
+                   autocomplete="off"${c.view === value ? ' checked' : ''}>
+            <label class="btn btn-outline-secondary" for="odfCmpView-${value}" title="${tip}">
+                ${label} <span class="vt-odf-cmp-view-count">${count}</span>
+            </label>`).join('');
+    }
+
+    renderCompareBody() {
+        const c = this.compare;
+        const body = document.getElementById('odfCmpBody');
+        if (!c || !body) return;
+        const model = this.compareModel();
+        const n = model.n;
+        const counts = VTOdfCompare.counts(model, { pins: c.pins, includeMissing: c.includeMissing });
+        this._compareCounts = counts;
+        this.renderCompareViews(counts);
+        const missingToggle = document.querySelector('.vt-odf-cmp-missing-toggle');
+        if (missingToggle) {
+            missingToggle.classList.toggle('is-inactive', c.view !== 'diff');
+            const input = missingToggle.querySelector('input');
+            if (input) input.disabled = c.view !== 'diff';
+        }
+
+        const result = VTOdfCompare.applyView(model, {
+            view: c.view, includeMissing: c.includeMissing, pins: c.pins, filter: c.filter,
+        });
+        const span = n + 1 + (n < VTOdfCompare.MAX_UNITS ? 1 : 0);
+        const addPad = n < VTOdfCompare.MAX_UNITS ? '<td class="vt-odf-cmp-addcol" aria-hidden="true"></td>' : '';
+        this._compareVisibleRows = [];
+
+        if (!result.total) {
+            body.innerHTML = `<tr class="vt-odf-cmp-empty"><td colspan="${span}">${this.compareEmptyHtml()}</td></tr>`;
+            return;
+        }
+
+        const parts = [];
+        if (result.flat) {
+            result.rows.forEach((row) => {
+                parts.push(this.compareRowHtml(row, model, addPad, true));
+                this._compareVisibleRows.push(row);
+            });
+        } else {
+            const filtering = !!c.filter.trim();
+            result.groups.forEach(({ group, rows, differing }) => {
+                const collapsed = !filtering && this.isGroupCollapsed(group);
+                const merged = group.mergedFrom.length
+                    ? `<span class="vt-odf-cmp-merged">+ ${escapeHtml(group.mergedFrom.join(', '))}</span>` : '';
+                parts.push(`
+                    <tr class="vt-odf-cmp-group${collapsed ? ' is-collapsed' : ''}">
+                        <th colspan="${span}" scope="rowgroup">
+                            <button type="button" class="vt-odf-cmp-group-toggle" data-cmp-group-toggle="${escapeAttr(group.key)}"
+                                    aria-expanded="${collapsed ? 'false' : 'true'}">
+                                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                                <span class="vt-odf-cmp-sec">${escapeHtml(group.label)}</span>
+                                ${merged}
+                                <span class="vt-odf-cmp-group-count">${rows.length} ${rows.length === 1 ? 'row' : 'rows'}${differing && c.view !== 'diff' ? ` &middot; ${differing} differ` : ''}</span>
+                            </button>
+                        </th>
+                    </tr>`);
+                if (collapsed) return;
+                rows.forEach((row) => {
+                    parts.push(this.compareRowHtml(row, model, addPad, false));
+                    this._compareVisibleRows.push(row);
+                });
+            });
+        }
+        body.innerHTML = parts.join('');
+        this.decorateDocs(body);
+        body.querySelectorAll('[data-bs-toggle="popover"]').forEach((el) => {
+            new bootstrap.Popover(el, { customClass: 'vt-odf-popover' });
+        });
+    }
+
+    compareEmptyHtml() {
+        const c = this.compare;
+        if (c.filter.trim()) {
+            return `<div class="vt-odf-cmp-empty-msg">No properties match &ldquo;${escapeHtml(c.filter.trim())}&rdquo;.
+                <button type="button" class="btn btn-sm btn-link" data-cmp-action="clear-filter">Clear the filter</button></div>`;
+        }
+        if (c.view === 'pinned') {
+            return `<div class="vt-odf-cmp-empty-msg">Nothing pinned yet. Pin rows with the
+                <i class="bi bi-pin-angle" aria-hidden="true"></i> icon, or pick them under Properties.
+                <span class="d-inline-flex gap-1 ms-1">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="props">Properties</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="show-diff">Show diff</button>
+                </span></div>`;
+        }
+        const counts = this._compareCounts || { diff: 0, diffMissing: 0 };
+        const missingBtn = !c.includeMissing && counts.diffMissing > counts.diff
+            ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="include-missing">Include missing</button>` : '';
+        return `<div class="vt-odf-cmp-empty-msg">These units have the same value for every property they share.
+            <span class="d-inline-flex gap-1 ms-1">${missingBtn}
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-cmp-action="show-all">Show all</button>
+            </span></div>`;
+    }
+
+    compareRowHtml(row, model, addPad, flat) {
+        const pins = this.compare.pins;
+        const pinned = VTOdfCompare.pinIndex(pins, row) >= 0;
+        const base = row.cells[0];
+        const units = model.units;
+        const cls = ['vt-odf-cmp-row'];
+        if (row.differs) cls.push('is-diff');
+        else if (row.missing) cls.push('is-partial');
+        if (pinned) cls.push('is-pinned');
+        const secCaption = flat || row.sections.length > 1
+            ? `<span class="vt-odf-cmp-prop-sec">${escapeHtml(row.sections.join(' / ') || 'Inheritance')}</span>` : '';
+        const keyTitle = row.keys.join(', ');
+        const docClass = row.section ? row.section.split('.').pop() : '';
+
+        const cells = row.cells.map((cell, i) => {
+            const unitLabel = escapeAttr(units[i].label);
+            if (!cell) {
+                return `<td class="vt-odf-cmp-cell is-missing" data-unit="${unitLabel}"><span class="vt-odf-cmp-none" title="Not set on ${unitLabel}">&mdash;</span></td>`;
+            }
+            const showSection = row.sections.length > 1 || (cell.section && cell.section !== row.section);
+            const title = showSection ? ` title="${escapeAttr(cell.section)}"` : '';
+            const same = row.differs && cell.sameAsBase;
+            const delta = i > 0 && row.differs && !cell.sameAsBase ? VTOdfCompare.deltaText(cell, base) : '';
+            let deltaHtml = '';
+            if (delta) {
+                const tone = VTOdfCompare.deltaTone(cell, base, row.prop);
+                const pol = VTOdfCompare.polarityFor(row.prop);
+                const direction = pol > 0 ? ' · higher is better' : (pol < 0 ? ' · lower is better' : '');
+                const word = tone === 'better' || tone === 'worse' ? `<span class="visually-hidden"> (${tone})</span>` : '';
+                deltaHtml = `<span class="vt-odf-cmp-delta${tone ? ` is-${tone}` : ''}"
+                    title="vs ${escapeAttr(units[0].label)} (baseline)${direction}">${escapeHtml(delta)}${word}</span>`;
+            }
+            const valueHtml = row.groupKey === VTOdfCompare.IDENTITY_GROUP
+                ? `<span class="vt-odf-cmp-chain">${escapeHtml(cell.value)}</span>`
+                : this.formatValue(cell.value, row.prop, units[i].category, units[i].data, units[i].filename);
+            const cellCls = ['vt-odf-cmp-cell'];
+            if (i === 0) cellCls.push('is-baseline');
+            if (same) cellCls.push('is-same-as-base');
+            return `<td class="${cellCls.join(' ')}" data-unit="${unitLabel}"${title}>
+                        <div class="vt-odf-cmp-val">${valueHtml}</div>${deltaHtml}
+                    </td>`;
+        }).join('');
+
+        return `
+            <tr class="${cls.join(' ')}" data-cmp-row="${escapeAttr(row.id)}">
+                <th scope="row" class="vt-odf-cmp-prop">
+                    <div class="vt-odf-cmp-prop-inner">
+                        <button type="button" class="vt-odf-cmp-pin" data-cmp-pin="${escapeAttr(row.id)}"
+                                aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${escapeAttr(row.prop)}"
+                                title="${pinned ? 'Unpin' : 'Pin'}">
+                            <i class="bi ${pinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'}" aria-hidden="true"></i>
+                        </button>
+                        <span class="vt-odf-cmp-prop-text">
+                            <span class="vt-odf-cmp-prop-name" title="${escapeAttr(keyTitle)}"
+                                  data-doc-prop="${escapeAttr(row.prop)}" data-doc-class="${escapeAttr(docClass)}">${escapeHtml(row.prop)}</span>
+                            ${secCaption}
+                        </span>
+                    </div>
+                </th>
+                ${cells}
+                ${addPad}
+            </tr>`;
+    }
+
+    // Plain-text table of the rows on screen, wrapped in a code block so
+    // Discord keeps the columns aligned.
+    compareAsText() {
+        const c = this.compare;
+        const model = this.compareModel();
+        const rows = this._compareVisibleRows || [];
+        const clip = (s, w) => (s.length > w ? `${s.slice(0, w - 1)}\u2026` : s);
+        const labels = model.units.map((u) => u.label);
+        const header = ['Property'].concat(model.units.map((u, i) => (
+            labels.indexOf(labels[i]) !== labels.lastIndexOf(labels[i]) ? u.stem : u.label
+        )));
+        const withDelta = (r, cell, i) => {
+            const text = VTOdfCompare.stripQuotes(String(cell.value));
+            const base = r.cells[0];
+            if (i === 0 || !r.differs || cell.sameAsBase || !base || cell.num === null || base.num === null) return text;
+            const d = Number((cell.num - base.num).toFixed(3));
+            return d ? `${text} (${d > 0 ? '+' : ''}${d})` : text;
+        };
+        const lines = rows.map((r) => [r.prop].concat(r.cells.map((cell, i) => (
+            cell ? withDelta(r, cell, i) : '-'
+        ))));
+        const table = [header].concat(lines).map((cols) => cols.map((v) => clip(v, 24)));
+        const widths = header.map((_, i) => Math.max(...table.map((cols) => cols[i].length)));
+        const fmt = (cols) => cols.map((v, i) => v.padEnd(widths[i])).join('  ').trimEnd();
+        const out = [fmt(table[0]), widths.map((w) => '-'.repeat(w)).join('  ')]
+            .concat(table.slice(1).map(fmt));
+        const title = `${COMPARE_PLURALS[c.category] || c.category}: ${model.units.map((u) => u.stem).join(' vs ')}`;
+        return `${title}\n\`\`\`\n${out.join('\n')}\n\`\`\``;
+    }
+
+    copyToClipboard(text, button, doneLabel) {
+        const label = button.querySelector('span');
+        const restore = label ? label.textContent : null;
+        const done = (ok) => {
+            if (!label) return;
+            label.textContent = ok ? doneLabel : 'Copy failed';
+            setTimeout(() => { label.textContent = restore; }, 1500);
+        };
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+        } else {
+            done(false);
+        }
+    }
+
+    /* ----- ODF Guide property docs ----------------------------------------- */
+
+    loadGuideIndexWhenIdle() {
+        const run = () => this.ensureGuideIndex().then(() => this.decorateDocs(this.content));
+        if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 4000 });
+        else setTimeout(run, 1500);
+    }
+
+    ensureGuideIndex() {
+        if (this.guideIndex) return Promise.resolve(this.guideIndex);
+        if (!this._guidePromise) {
+            this._guidePromise = fetch(GUIDE_URL)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((guide) => {
+                    const index = new Map();
+                    (guide?.entries || []).forEach((entry) => {
+                        if (entry.kind !== 'property') return;
+                        (entry.names || []).forEach((name) => {
+                            const k = String(name).toLowerCase();
+                            if (!index.has(k)) index.set(k, []);
+                            index.get(k).push(entry);
+                        });
+                    });
+                    this.guideIndex = index;
+                    return index;
+                })
+                .catch(() => {
+                    this.guideIndex = new Map();
+                    return this.guideIndex;
+                });
+        }
+        return this._guidePromise;
+    }
+
+    guideEntryFor(prop, className) {
+        const list = this.guideIndex?.get(String(prop).toLowerCase());
+        if (!list || !list.length) return null;
+        const cls = String(className || '').toLowerCase();
+        return (cls && list.find((e) => String(e.section || '').startsWith(cls))) || list[0];
+    }
+
+    // Adds an ODF Guide link (description + documented default in its
+    // tooltip) after every [data-doc-prop] name the guide documents.
+    decorateDocs(root) {
+        if (!root || !this.guideIndex) return;
+        root.querySelectorAll('[data-doc-prop]:not([data-doc-done])').forEach((el) => {
+            el.dataset.docDone = '1';
+            const entry = this.guideEntryFor(el.dataset.docProp, el.dataset.docClass);
+            if (!entry) return;
+            const text = String(entry.text || '').replace(/\s+/g, ' ').trim();
+            const short = text.length > 280 ? `${text.slice(0, 279)}\u2026` : text;
+            const tip = `${short}${entry.default ? ` Default: ${entry.default}.` : ''} Opens the ODF Guide.`;
+            const href = `guide/?section=${encodeURIComponent(entry.section)}${entry.anchor ? `#${encodeURIComponent(entry.anchor)}` : ''}`;
+            el.insertAdjacentHTML('afterend', `<a class="vt-odf-doc-link" href="${href}" target="_blank" rel="noopener"
+                title="${escapeAttr(tip)}" aria-label="ODF Guide: ${escapeAttr(el.dataset.docProp)}"><i class="bi bi-book" aria-hidden="true"></i></a>`);
         });
     }
 }
@@ -2458,6 +3288,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 item.classList.remove('active');
             });
             target.classList.add('active');
+
+            // Below lg the list sits above the detail; bring the detail up.
+            if (window.matchMedia('(max-width: 991.98px)').matches && !document.documentElement.classList.contains('vt-odf-embed')) {
+                document.getElementById('odfContent')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         }
     });
 });
