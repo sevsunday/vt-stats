@@ -62,6 +62,10 @@ function getOrCreateGlassTooltip() {
   return glassTooltipEl;
 }
 
+function escTooltipText(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function glassTooltipHandler(context) {
   const tooltip = getOrCreateGlassTooltip();
   const { chart, tooltip: tooltipModel } = context;
@@ -75,6 +79,11 @@ function glassTooltipHandler(context) {
   const borderColor = getCSSVar('--kb-border-default') || '#2a2a36';
   const textColor = getCSSVar('--kb-text-primary') || '#f0f0f5';
   const mutedColor = getCSSVar('--kb-text-muted') || '#606070';
+  const tipOpts = (chart.options && chart.options.plugins && chart.options.plugins.tooltip) || {};
+  // Shared bubble. Charts that pass vtMaxWidth (the Other breakdown)
+  // widen it; every other chart resets to the default.
+  const maxWidth = Number(tipOpts.vtMaxWidth) > 0 ? Number(tipOpts.vtMaxWidth) : 280;
+  tooltip.style.maxWidth = maxWidth + 'px';
 
   tooltip.style.background = `color-mix(in oklab, ${bgCard} 88%, transparent)`;
   tooltip.style.border = `1px solid ${borderColor}`;
@@ -84,6 +93,7 @@ function glassTooltipHandler(context) {
   if (tooltipModel.body) {
     const titleLines = tooltipModel.title || [];
     const bodyLines = tooltipModel.body.map(b => b.lines);
+    const afterLines = tooltipModel.afterBody || [];
 
     let html = '';
     if (titleLines.length) {
@@ -96,11 +106,17 @@ function glassTooltipHandler(context) {
         html += `<div style="color:${mutedColor}">${dot}${line}</div>`;
       });
     });
+    if (afterLines.length) {
+      html += `<div style="margin-top:0.35rem;padding-left:14px;color:${mutedColor}">`;
+      afterLines.forEach(line => {
+        html += `<div>${escTooltipText(line)}</div>`;
+      });
+      html += `</div>`;
+    }
     tooltip.innerHTML = html;
   }
 
   const pos = chart.canvas.getBoundingClientRect();
-  const tipOpts = (chart.options && chart.options.plugins && chart.options.plugins.tooltip) || {};
   const alignAbove = tipOpts.vtAlign === 'above';
   tooltip.style.opacity = '1';
   tooltip.style.left = pos.left + window.scrollX + tooltipModel.caretX + 'px';
@@ -697,15 +713,31 @@ function renderPlayerWeapons(canvasId, leaderboard, weaponMeta) {
     borderWidth: 1,
   }));
 
-  const otherData = playerNames.map(name => {
-    const p = leaderboard.find(p => p.name === name);
-    if (!p) return 0;
-    let other = 0;
+  // Weapons folded into the gray segment, one list per bar, same
+  // top-8 cut and the same dealt sum the bar uses. Hover reads the
+  // list by bar index.
+  const OTHER_TIP_CAP = 12;
+  // Damage is stored to 0.1. Print that, and drop a trailing .0, so the
+  // lines add up to the Other total. Whole-number Math.round does not.
+  const fmtTipDmg = (n) => {
+    const v = Math.round((Number(n) || 0) * 10) / 10;
+    const digits = Math.abs(v - Math.round(v)) < 1e-6 ? 0 : 1;
+    return v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: 1 });
+  };
+  const otherParts = playerNames.map(name => {
+    const p = leaderboard.find(pl => pl.name === name);
+    const parts = [];
+    if (!p || !p.weapon_breakdown) return parts;
     for (const [w, d] of Object.entries(p.weapon_breakdown)) {
-      if (!topWeapons.includes(w)) other += d.dealt;
+      if (topWeapons.includes(w)) continue;
+      const dealt = d && d.dealt ? d.dealt : 0;
+      if (dealt <= 0) continue;
+      parts.push({ weapon: w, dealt });
     }
-    return other;
+    parts.sort((a, b) => b.dealt - a.dealt || a.weapon.localeCompare(b.weapon));
+    return parts;
   });
+  const otherData = otherParts.map(parts => parts.reduce((s, p) => s + p.dealt, 0));
 
   if (otherData.some(v => v > 0)) {
     datasets.push({
@@ -723,11 +755,30 @@ function renderPlayerWeapons(canvasId, leaderboard, weaponMeta) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: true },
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
         tooltip: {
           ...glassTooltipConfig,
-          callbacks: { label: (item) => `${item.dataset.label}: ${Math.round(item.raw).toLocaleString()}` },
+          vtMaxWidth: 340,
+          callbacks: {
+            label: (item) => {
+              const n = item.dataset.label === 'Other' ? fmtTipDmg(item.raw) : Math.round(item.raw).toLocaleString();
+              return `${item.dataset.label}: ${n}`;
+            },
+            afterBody: (items) => {
+              const item = items && items[0];
+              if (!item || items.length !== 1 || item.dataset.label !== 'Other') return [];
+              const parts = otherParts[item.dataIndex] || [];
+              const shown = parts.slice(0, OTHER_TIP_CAP);
+              const lines = shown.map(p => `${p.weapon}: ${fmtTipDmg(p.dealt)}`);
+              if (parts.length > shown.length) {
+                const rest = parts.slice(shown.length).reduce((s, p) => s + p.dealt, 0);
+                lines.push(`+ ${parts.length - shown.length} more: ${fmtTipDmg(rest)}`);
+              }
+              return lines;
+            },
+          },
         },
       },
       scales: {
