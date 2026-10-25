@@ -208,6 +208,7 @@
             <a href="#sec-changed" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">4 What changed since v3</a>
             <a href="#sec-complaint" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">5 The complaint, quantified</a>
             <a href="#sec-steelman" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">6 The steelman</a>
+            <a href="#sec-why-no-wins" class="block pl-7 pr-3 py-1 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white">Why win/loss is not in VTSR-T</a>
             <a href="#sec-faction" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">7 Faction-based ratings</a>
             <a href="#sec-role" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">8 Role-based ratings</a>
             <a href="#sec-ship" class="block px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white">9 By-ship ratings</a>
@@ -265,8 +266,8 @@
                                 <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
                                 Why isn&rsquo;t win/loss part of VTSR-T?
                             </summary>
-                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">It is already computed &mdash; a win/loss ladder runs beside the performance rating on every rated match &mdash; but its weight in the published number is zero. Twice it has been tested as a blend and twice held, because it did not predict matches any better and a team result is a weak signal about one player in a ten-player game. It will be re-tested now that there are 225 determined matches instead of 39. The commander rating, VTSR-C, is pure win/loss already.</div>
-                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-complaint-1">&sect;5.1 Performance vs wins</a> <a class="faq-link" href="#roadmap-2">&sect;13 Roadmap, item 2</a> <a class="faq-link ext" href="../?tab=how">ELO &middot; How it works</a></div>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">It is computed: a win/loss ladder runs beside the performance rating and updates on every decided match (237 so far). Its weight in the published number is zero. A team result gives every player on a side the same credit, so in a 5v5 it says little about one thug. Results also barely repeat for the same thug: half-vs-half reliability is 0.30 for win rate against 0.95 for the performance score, on the same 1,473 games. Mixing it in has been tested three times (2026-09-04, 2026-10-13, 2026-10-25) against a rule written in advance. It never called more winners. On the latest 236 matches, a 10% or 25% blend changes no call, and a 50% blend changes one and gets it wrong. The commander rating, VTSR-C, is pure win/loss.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-why-no-wins">&sect;6 Why win/loss is not in VTSR-T</a> <a class="faq-link" href="#sec-complaint-1">&sect;5.1 Performance vs wins</a> <a class="faq-link" href="#roadmap-2">&sect;13 Roadmap, item 2</a> <a class="faq-link ext" href="../?tab=how">ELO &middot; How it works</a></div>
                         </details>
 
                         <details class="py-3">
@@ -337,8 +338,8 @@
                                 <svg class="faq-chev w-4 h-4 mt-0.5 shrink-0 text-warning" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
                                 Is this real statistics, or just what an AI said?
                             </summary>
-                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Every mechanism in VTSR is in use somewhere that pays people to get it right &mdash; chess Elo, Glicko, Microsoft&rsquo;s TrueSkill 2, HLTV, baseball WAR, Bradley&ndash;Terry &mdash; and &sect;2 names the source for each one, row by row. The AI drafted documents and proposals; those proposals went through the same written-in-advance test as anyone else&rsquo;s, and most of the ones it drafted lost. Nothing changes a published rating without passing a rule written before the data existed.</div>
-                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-provenance">&sect;2 Where every mechanism comes from</a> <a class="faq-link" href="#sec-gate">&sect;3 How a number becomes a rule</a></div>
+                            <div class="pl-6 mt-2 text-sm text-slate-300 leading-relaxed">Don&rsquo;t take either on trust; check it. Every number on this page comes out of a committed script you can run: <code class="text-xs text-sky-300">scripts/validate_elo.py</code>, <code class="text-xs text-sky-300">scripts/study_wins_signal.py</code>, <code class="text-xs text-sky-300">scripts/vtsr_t_variants.py</code> and <code class="text-xs text-sky-300">scripts/study_pve_denial.py</code>, on the processed data in the repository. Each rule carries a date before its results: the wins-blend rule was written 2026-09-04, before the first sweep, and its one amendment on 2026-10-25, before that sweep was read. Both are in <code class="text-xs">critique/decisions/phase-5-wins-blend.md</code>. Each mechanism has a published source, row by row in &sect;2. AI tools drafted some proposals. Several of them are on &sect;3&rsquo;s held and refuted lists, rejected by the same gate as everyone else&rsquo;s. For one worked case with the algebra, the data and the commands, see <a class="faq-link" href="#sec-why-no-wins">why win/loss is not in VTSR-T</a>.</div>
+                            <div class="pl-6 mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">Details: <a class="faq-link" href="#sec-why-no-wins">&sect;6 Why win/loss is not in VTSR-T</a> <a class="faq-link" href="#sec-provenance">&sect;2 Where every mechanism comes from</a> <a class="faq-link" href="#sec-gate">&sect;3 How a number becomes a rule</a></div>
                         </details>
 
                         <details class="py-3">
@@ -430,7 +431,7 @@
                         <div class="bg-slate-900 rounded-xl p-5 border-l-4 border-l-warning border border-slate-700">
                             <div class="text-xs font-mono uppercase text-warning mb-2">Held</div>
                             <ul class="text-xs text-slate-300 space-y-1 list-disc list-inside">
-                                <li>ALPHA wins blend &mdash; twice</li>
+                                <li>ALPHA wins blend &mdash; three times</li>
                                 <li>Rank-based lobby scoring &mdash; three times <span class="text-slate-500">(June review)</span></li>
                                 <li>VTSR-C &alpha;<sub>c</sub> economy scoring</li>
                                 <li>Commander VTSR-T in the handicap</li>
@@ -478,7 +479,7 @@
                         <div>
                             <div class="text-xs font-mono uppercase text-warning mb-2">Tested, not shipped</div>
                             <ul class="text-slate-300 space-y-1.5 list-disc list-inside">
-                                <li>ALPHA &isin; {0.10, 0.25, 0.50}: HOLD twice &mdash; accuracy and log-loss flat on 39 wins-rated matches; &rho; and self-consistency improve monotonically</li>
+                                <li>ALPHA &isin; {0.10, 0.25, 0.50}: HOLD three times (2026-09-04, 2026-10-13, 2026-10-25). On the latest 236 matches, no blend calls more winners (56.4% at best, same as &alpha; = 0); &rho; and log-loss improve slightly as &alpha; rises</li>
                                 <li>Rank scoring: HOLD three times &mdash; self-consistency up, bootstrap &sigma; worse</li>
                                 <li>Converged re-rating: STOP &mdash; reverted</li>
                                 <li>VTSR-C &alpha;<sub>c</sub> &lt; 1: HOLD &mdash; no axis clears the 0.55 lower bound on 81 confirmation duels</li>
@@ -501,7 +502,7 @@
                         <div class="chart-tall bg-slate-900 rounded-xl p-4 border border-slate-700 h-[420px]"><canvas id="perfWinsChart"></canvas></div>
                         <div>
                             <p class="text-slate-300 text-sm leading-relaxed mb-3">Across the 25 players with &ge; 20 matches, the published composite (<code>thug_elo</code>) and the inert win/loss ladder (<code>wins_elo</code>) correlate at <span class="stat text-white">Spearman 0.518</span> (Pearson 0.483). The chart puts both on the same band scale and plots, per player, how many bands higher the performance rating sits than the wins ladder: Cloaket five bands (a 29&ndash;58 record), then Snake, VTrider, Domakus, Muffin, blue and Nomad three each. Only Lithium sits a band lower on performance than on wins; HappyOtter, Monkey and Certified Bad Guy land in the same band on both.</p>
-                            <p class="text-slate-300 text-sm leading-relaxed">The mean gap is about 1.7 bands (132 points on average), and 24 of these 25 players rate higher on performance than on wins (21 of them by at least a band), after efficiency and accuracy left the composite (5.4). Commander share correlates 0.27 with the gap. This is basketball's box-score-vs-plus-minus argument <a class="cite" href="#src-18">[18]</a><a class="cite" href="#src-16">[16]</a><a class="cite" href="#src-17">[17]</a>.</p>
+                            <p class="text-slate-300 text-sm leading-relaxed">The mean gap is about 1.7 bands (132 points on average), and 24 of these 25 players rate higher on performance than on wins (21 of them by at least a band), after efficiency and accuracy left the composite (5.4). Commander share correlates 0.27 with the gap. This is basketball's box-score-vs-plus-minus argument <a class="cite" href="#src-18">[18]</a><a class="cite" href="#src-16">[16]</a><a class="cite" href="#src-17">[17]</a>. Most of the gap is a level offset: the two ladders sit at different levels by construction, and centred on their own means only about 10 of 25 players are higher on performance (<a class="text-sky-300" href="#sec-why-no-wins">why win/loss is not in VTSR-T</a>).</p>
                         </div>
                     </div>
 
@@ -564,6 +565,95 @@
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The axes that disagreed with winning left</div><p class="text-slate-400">Efficiency agreed with the winner 38.8% of the time and accuracy 39.5%. Both left the composite (v2.12 and v2.13), with snipes and T-key (v2.11). The four axes that remain all agree with the winner.</p></div>
                         <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The process says no to its authors</div><p class="text-slate-400">The refuted list is longer than the shipped list. A system that mostly says no behaves like a measurement system should.</p></div>
                             </div>
+
+                    <h4 id="sec-why-no-wins" class="text-white text-lg font-semibold mt-10 mb-2 anchor">Why win/loss is not in VTSR-T</h4>
+                    <p class="text-slate-400 text-xs mb-4">Every number in this block comes from one pipeline run: 2026-10-25, 260 rated matches, 237 with a decided result, VTSR-T on its single enemy-damage axis. Other sections were measured on earlier snapshots, so a few of their figures differ.</p>
+
+                    <p class="text-slate-300 text-sm leading-relaxed mb-3"><strong class="text-white">The short answer.</strong> Win/loss is computed on every decided match: a second ladder, R<sup>W</sup>, runs beside VTSR-T and updates from team results. Its weight in the published number is zero for two reasons. With five players a side, a team result cannot be pinned on one thug. And three tests, each written down before its data was read, found that mixing it in does not call more games correctly. Win/loss does count elsewhere. VTSR-C, the commander rating, is 100% win/loss, and the Balonce Meter&rsquo;s win probability is built on it.</p>
+
+                    <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm mb-4">
+                        <div class="text-white font-medium mb-2">The math: one game is one equation for ten unknowns</div>
+                        <p class="text-slate-300 leading-relaxed mb-2">Give each player a hidden &ldquo;contribution to winning&rdquo; &theta;<sub>i</sub>. The standard team model, the one behind TrueSkill <a class="cite" href="#src-8">[8]</a>, says a team wins on the sum of its members:</p>
+                        <p class="text-white font-mono text-center my-3">P(A wins) = &sigma;(x<sub>1</sub>&theta;<sub>1</sub> + &hellip; + x<sub>10</sub>&theta;<sub>10</sub>)</p>
+                        <p class="text-slate-300 leading-relaxed mb-2">Here x<sub>i</sub> is +1 if player i is on team A, &minus;1 on team B, and 0 if absent, and &sigma; is the logistic curve. Four facts follow:</p>
+                        <ul class="text-slate-300 space-y-1.5 list-disc list-inside leading-relaxed">
+                            <li><strong class="text-white">Every teammate gets the same lesson.</strong> The learning signal from one game for player i is (y &minus; p)&middot;x<sub>i</sub>, where y is the result (1 or 0) and p the predicted chance. It is identical for all five players on a side. The best and worst player on the winning team receive exactly the same credit.</li>
+                            <li><strong class="text-white">One game pins down one number.</strong> Its information matrix is p(1 &minus; p)&middot;x&nbsp;x<sup>T</sup>, which has rank 1. A game tells you about the difference between the two team sums and nothing about how either sum splits between players.</li>
+                            <li><strong class="text-white">Players separate only through rotation.</strong> Over many games the information is X<sup>T</sup>WX, and one player is distinguishable from another only through the games where their teammates differed. Two players who always play on the same side have identical columns and can never be told apart.</li>
+                            <li><strong class="text-white">One thug is a small slice.</strong> With ten similar contributions, one player is about 1/10 of the variance of the result. In a 1v1 they are 1/2. A win says five times less about one thug than a 1v1 win says about its player.</li>
+                        </ul>
+                        <p class="text-slate-300 leading-relaxed mt-2">VTSR-T avoids this by scoring a per-player statistic, each thug&rsquo;s share of the lobby&rsquo;s damage to enemies. One game then gives ten separate measurements instead of one shared one.</p>
+                    </div>
+
+                    <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm mb-4">
+                        <div class="text-white font-medium mb-2">The wins ladder doing exactly that</div>
+                        <p class="text-slate-300 leading-relaxed mb-3">The most recent decided match with at least three rated players a side: <code class="text-xs">2026-10-25T02-56-16</code>, 5v5, Team 2 won. Each row is R<sup>W</sup>&rsquo;s update, &Delta; = K&middot;(s &minus; e), where s is the result and e the expected score from the two teams&rsquo; mean R<sup>W</sup>.</p>
+                        <div class="overflow-x-auto">
+                            <table class="vt w-full text-xs text-slate-300">
+                                <thead><tr><th>Row</th><th class="normal-case">s</th><th class="normal-case">e</th><th><span class="normal-case">&Delta;</span> R<sup>W</sup></th><th>Implied K</th></tr></thead>
+                                <tbody>
+                                    <tr><td>Team 1 commander</td><td>0</td><td>0.4306</td><td>&minus;5.17</td><td>12.0</td></tr>
+                                    <tr><td>Team 1 thugs A, B, C, D</td><td>0</td><td>0.4306</td><td>&minus;5.17 each</td><td>12.0</td></tr>
+                                    <tr><td>Team 2 commander</td><td>1</td><td>0.5694</td><td>+5.17</td><td>12.0</td></tr>
+                                    <tr><td>Team 2 thugs A, B, C, D</td><td>1</td><td>0.5694</td><td>+5.17 each</td><td>12.0</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-slate-400 leading-relaxed mt-3">All ten players moved by the same amount. s and e are shared by a whole side. K is the only per-player term, and it differs only while someone is new (24 falling to 12 over their first 10 decided games). Nothing in the update can tell who played well. Source: <code class="text-xs">python scripts/study_wins_signal.py</code>, B3.</p>
+                    </div>
+
+                    <div class="text-white font-medium text-sm mb-2">The data</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">A thug&rsquo;s results barely repeat; their performance does</div><p class="text-slate-400">Same 1,473 thug rows, 23 players with at least 16 each, split into odd and even games. A player&rsquo;s win rate in one half predicts the other half at <span class="stat text-white">0.30</span> (Spearman&ndash;Brown; r 0.18). Their performance score: <span class="stat text-white">0.95</span> (r 0.91). Most of what a thug&rsquo;s win rate shows is not a property of the thug. Source: <code class="text-xs">study_wins_signal.py</code> B1.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Who commanded explains a fifth of a record</div><p class="text-slate-400">On those 1,473 games, the expected result from the two commanders&rsquo; VTSR-C alone (no thug rating used) correlates <span class="stat text-white">r 0.47</span> with each thug&rsquo;s actual win rate (r&sup2; 0.22, 23 players). Actual and commander-expected differ by 6.6 wins per 100 games on average. This is descriptive, not causal: the commander ratings were partly built from these same games. Source: B2.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">Thug ratings do feed a win/loss prediction, at team level</div><p class="text-slate-400">The VTSR-C duel model uses the gap in mean thug VTSR-T as a handicap. With it (&lambda; = 1): <span class="stat text-white">63.7%</span> of 742 duels, log-loss 0.632. Without it (&lambda; = 0): 63.0%, 0.635. &lambda; = 0.5 gives 63.8% (0.630) and &lambda; = 1.5 gives 63.0% (0.639). This is where the thug side enters win/loss: as team strength. Source: <code class="text-xs">validate_elo.py</code> &sect;10.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">No thug rating calls winners well, wins ladder included</div><p class="text-slate-400">From the thugs&rsquo; pre-match team means, every VTSR-T candidate tested on 2026-10-24 separated winners from losers at AUC 0.51&ndash;0.54 on 186 decided matches. The wins ladder alone scored <span class="stat text-white">0.508</span>; 0.5 is a coin flip. Source: <a class="text-sky-300" href="../../critique/decisions/vtsr-t-enemy-damage.md">vtsr-t-enemy-damage.md</a>.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">The performance score already moves with winning</div><p class="text-slate-400">Win/loss explains <span class="stat text-white">&eta;&sup2; 0.23</span> of a thug&rsquo;s per-match score on 1,561 thug rows (&sect;5.2 shows 0.33 from the earlier four-axis rating). Winning thugs average a match score of +0.29 and losing thugs &minus;0.17. The rating already credits winning play, player by player. Source: <code class="text-xs">validate_elo.py</code> &sect;16.</p></div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700"><div class="text-white font-medium mb-1">What &sect;5.1&rsquo;s &ldquo;higher on performance&rdquo; is and isn&rsquo;t</div><p class="text-slate-400">The two ladders sit at different levels by construction. VTSR-T drifts up: losses count at 0.85 of gains, and there is a 1000 floor. R<sup>W</sup> is zero-sum around 1500 and compressed by the shared update above. For the 25 players with at least 20 matches, the means are 1697.5 and 1500.9 and the SDs 182.4 and 54.5. Raw, 23 of 25 rate higher on performance (mean gap 197). Centre each ladder on its own mean and it is <span class="stat text-white">10 of 25</span>, mean distance 128 points (1.3 half-bands). The ladders disagree about order, not consistently in one direction. Source: B4.</p></div>
+                    </div>
+
+                    <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 text-sm mb-4">
+                        <div class="text-white font-medium mb-2">The tests: mixing R<sup>W</sup> into VTSR-T, three times</div>
+                        <p class="text-slate-300 leading-relaxed mb-3">Each sweep publishes vtsr = &alpha;&middot;R<sup>W</sup> + (1 &minus; &alpha;)&middot;thug rating for &alpha; = 0.10, 0.25 and 0.50, and scores it on the same matches as the current rating (&alpha; = 0). The winner call is the team with the higher mean pre-match rating.</p>
+                        <div class="overflow-x-auto">
+                            <table class="vt w-full text-xs text-slate-300">
+                                <thead><tr><th>Date</th><th>VTSR-T then</th><th>Matches scored</th><th><span class="normal-case">&alpha;</span> = 0</th><th>Best <span class="normal-case">&alpha;</span></th><th>Log-loss, <span class="normal-case">&alpha;</span> 0 &rarr; 0.50</th><th><span class="normal-case">&rho;</span>, <span class="normal-case">&alpha;</span> 0 &rarr; 0.50</th><th>Verdict</th></tr></thead>
+                                <tbody>
+                                    <tr><td>2026-09-04</td><td>Multi-axis composite</td><td>38</td><td>39.5%</td><td>39.5% (all)</td><td>0.7040 &rarr; 0.7044</td><td>0.447 &rarr; 0.459</td><td class="text-warning">HOLD</td></tr>
+                                    <tr><td>2026-10-13</td><td>Four-axis composite</td><td>199</td><td>57.3%</td><td>56.8% (all)</td><td>0.6816 &rarr; 0.6813</td><td>0.277 &rarr; 0.280</td><td class="text-warning">HOLD</td></tr>
+                                    <tr><td>2026-10-25</td><td>One axis, enemy damage</td><td>236</td><td>56.4%</td><td>56.4% (0.10, 0.25)</td><td>0.67798 &rarr; 0.67732</td><td>0.416 &rarr; 0.427</td><td class="text-warning">HOLD</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-slate-300 leading-relaxed mt-3"><strong class="text-white">What favours the blend:</strong> &rho; (how well the pre-match rating ranks players&rsquo; next performance) rises with &alpha; in all three sweeps. Log-loss improved in the last two; it worsened slightly on 2026-09-04. Self-consistency rose in the first and last (0.850 &rarr; 0.865 on 2026-10-25) and was flat on 2026-10-13. The log-loss gain at &alpha; = 0.50 on 2026-10-25 is 0.0007 per match. <strong class="text-white">What it doesn&rsquo;t do:</strong> call more winners. On 2026-10-25, &alpha; = 0.10 and 0.25 change no call on any of the 236 matches. &alpha; = 0.50 changes one call (<code class="text-xs">2026-06-01T02-09-58</code>), and that one goes wrong. A 2026-09-23 run that was never written up showed at most +1.4 points (two matches of 142); it is now recorded in the memo.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                            <div class="text-white font-medium mb-2">What would change the answer</div>
+                            <p class="text-slate-400 mb-2">Written 2026-09-04, before the first sweep. &alpha; moves only if some &alpha; in {0.10, 0.25, 0.50} meets all five:</p>
+                            <ol class="text-slate-300 space-y-1 list-decimal list-inside">
+                                <li>Winner-call accuracy improves by at least 5 points over &alpha; = 0.</li>
+                                <li>Log-loss is strictly lower on the same matches.</li>
+                                <li>Spearman &rho; drops by no more than 0.01.</li>
+                                <li>Calibration error (MAE) rises by no more than 0.005.</li>
+                                <li>The mean published rating does not rise above the &alpha; = 0 mean on the same snapshot.</li>
+                            </ol>
+                            <p class="text-slate-400 mt-2">Any &alpha; dropping &rho; by more than 0.03 is discarded. Condition 5 originally read &ldquo;less than 50 above 1500&rdquo;. It was amended on 2026-10-25, before this sweep was read, because the &alpha; = 0 pool already sat at 1615.9 for reasons unrelated to the blend. Next test: after the next VTSR-T re-rate. On 236 matches, condition 1 means about 12 more correct calls.</p>
+                        </div>
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                            <div class="text-white font-medium mb-2">Check it yourself</div>
+                            <p class="text-slate-400 mb-2">From a clone of the repository (the processed data is committed):</p>
+                            <pre class="text-xs text-sky-300 font-mono whitespace-pre-wrap bg-slate-950/60 rounded-lg p-3 mb-2">python scripts/validate_elo.py
+python scripts/validate_elo.py --elo-mode alpha10 --output-dir _validation/a10
+python scripts/validate_elo.py --elo-mode alpha25 --output-dir _validation/a25
+python scripts/validate_elo.py --elo-mode alpha50 --output-dir _validation/a50
+python scripts/study_wins_signal.py</pre>
+                            <p class="text-slate-400">Each report&rsquo;s <code class="text-xs">clean_win_accuracy.aggregations.mean</code> is the winner call; <code class="text-xs">_validation/wins_signal.md</code> holds B1&ndash;B4. Rules and every result: <a class="text-sky-300" href="../../critique/decisions/phase-5-wins-blend.md">phase-5-wins-blend.md</a>.</p>
+                        </div>
+                    </div>
+
+                    <p class="text-slate-300 text-sm leading-relaxed"><strong class="text-warning">Limits, stated plainly.</strong> The current rating&rsquo;s 56.4% winner call has a 95% interval of 50.0&ndash;62.5% on 236 matches. That is barely clear of a coin flip, and neither rating predicts winners well from the thugs alone. The reliability and commander numbers rest on 23 players. The commander comparison cannot separate a commander&rsquo;s skill from the thugs they were given. Blends above &alpha; = 0.50 were not tested; &alpha; = 1 would be the wins ladder alone, which scores 0.508 AUC. None of this says winning doesn&rsquo;t matter. It says a team result is the wrong instrument for measuring one thug, and the commander ladder is where it is measured.</p>
                         </div>
             </section>
 
@@ -704,7 +794,7 @@
                     <p class="text-slate-300 text-sm mb-4">Ranked by evidence available &times; leverage &divide; effort. Nothing below changes a published rating without a pre-registered rule passing.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                         <div id="roadmap-1" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">1. Phase 6 &mdash; faction-advantage term in VTSR-C</div><p class="text-xs text-slate-400 mt-1">Memo written; validator &sect;19 scores it every run. Trigger: &ge; 60 confirmation non-mirror duels after 2026-10-04. Authorizes the Balonce Meter's faction inputs if promoted.</p></div>
-                        <div id="roadmap-2" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep</div><p class="text-xs text-slate-400 mt-1">The memo asked for roughly double the 39 wins-rated matches of the first sweep; there are 225 determined matches now. Same rule.</p></div>
+                        <div id="roadmap-2" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">2. ALPHA wins-blend re-sweep &mdash; done, HOLD</div><p class="text-xs text-slate-400 mt-1">Run 2026-10-13 (199 matches) and again on 2026-10-25 on the single-axis rating (236 matches). Every blend failed the +5-point accuracy condition. Next trigger: the next VTSR-T re-rate. <a class="text-sky-300" href="#sec-why-no-wins">Why win/loss is not in VTSR-T</a>.</p></div>
                         <div id="roadmap-3" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">3. Phase 7(a) &mdash; commander adjustment vs own thug baseline</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; judge by &sect;18's cohort gap closing without &sect;1&ndash;&sect;4 degrading.</p></div>
                         <div id="roadmap-4" class="glass-panel rounded-xl p-4 border-l-4 border-l-success anchor"><div class="text-white font-medium">4. Done &mdash; snipes, T-key, accuracy, and efficiency left the composite</div><p class="text-xs text-slate-400 mt-1">v2.11&ndash;v2.13. On the same-corpus reprocess, winner prediction stayed flat and Spearman &rho; and self-consistency fell (<code>critique/decisions/thug-efficiency-retirement.md</code>). Reconstructed accuracy remains HOLD.</p></div>
                         <div id="roadmap-5" class="glass-panel rounded-xl p-4 border-l-4 border-l-warning anchor"><div class="text-white font-medium">5. Phase 7(c) &mdash; ship-denied time adjustment for all tiers</div><p class="text-xs text-slate-400 mt-1">Forensic alt mode; &sect;17's per-outcome split as the diagnostic.</p></div>

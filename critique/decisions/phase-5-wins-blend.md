@@ -15,6 +15,10 @@ Rules registered: 2026-09-04. Sweep results appended below after the
 first full-pipeline emit of the alpha pairs (same session, but the rules
 section was committed first and is append-only from here).
 
+Status (2026-10-25): **HOLD three times** -- 2026-09-04 (39 wins-rated
+matches), 2026-10-13 (199-row prediction set), 2026-10-25 (single-axis
+VTSR-T, 236-row prediction set). See "Rescore (2026-10-25)" below.
+
 ## The machinery (shipped inert)
 
 - **R^W ladder** (`scripts/elo.py` `_rating_pass`): updates on rated
@@ -272,6 +276,102 @@ changes the wrong way. It does survive as "mixing wins in does not clear
 the accuracy bar." Rho, log-loss, and calibration still improve slightly
 as alpha rises. That is not a promote.
 
+## Amendment (2026-10-25) — condition 5, written before the single-axis sweep was read
+
+The "next re-rate" trigger above fired: VTSR-T moved to the single
+`enemy_damage_share` axis on 2026-10-24 (`ELO_SCHEMA_VERSION` 18,
+`critique/decisions/vtsr-t-enemy-damage.md`), and that memo kept ALPHA at
+0 without re-scoring it. This section was committed before any
+`elo_current_alpha*.json` accuracy, log-loss or mean was opened.
+
+**Condition 5 is replaced.** Old wording: "mean published rating drifts
+< 50 ELO above the 1500 anchor". New wording: **the blend's mean
+published rating must not exceed the ALPHA = 0 mean on the same
+snapshot.** Methodology argument only: the condition exists so "the
+blend must not inflate the pool". The ALPHA = 0 pool on this snapshot
+already sits at 1615.7, 115.7 above the anchor, from corpus growth, loss
+aversion and the wider single-axis spread. None of that is caused by the
+blend. Under the old wording a blend that pulls the mean down would
+still fail at low alpha. The new wording tests what the condition is
+for. Nothing else changes: conditions 1-4, the discard rule, the
+prediction set (`clean_win_accuracy.aggregations.mean`: clean_win /
+attested / adjudicated, contested excluded) and seed 12345.
+
+Snapshot fingerprint (all five files from one pipeline run):
+
+- `elo_current.json` `computed_at` 2026-10-25T03:35:55Z; alpha files
+  2026-10-25T03:35:57Z
+- `match_count` 259, `wins_matches_rated` 236,
+  `wins_matches_skipped_undetermined` 23
+- `weights` = `{enemy_damage_share: 1.0}` in every file
+- Baseline (`_validation/report.json`, same run): 133/235 = 56.6%,
+  log-loss 0.6778; mean VTSR-T 1615.7 over 48 rated players
+
+## Rescore (2026-10-25) — single-axis VTSR-T
+
+**Verdict: HOLD (third time).** No alpha passes condition 1. Accuracy
+does not move at α = 0.10 or 0.25 and drops by one match at α = 0.50.
+No alpha triggers the discard rule.
+
+**Snapshot drift, stated plainly.** One new session landed (commit
+`4176480b`, pipeline run 2026-10-25T05:05:53Z) between the fingerprint
+above and the sweep. The sweep and its baseline both read that newer
+run: `match_count` 260, `wins_matches_rated` 237, weights still
+`{enemy_damage_share: 1.0}`, canonical `_validation/report.json`
+regenerated in the same run (05:06:01Z). Condition 5 is applied against
+that run's ALPHA = 0 mean, 1615.9 (the amendment's rule, not its
+illustrative number). The one extra match changes no verdict.
+
+Run: `python scripts/validate_elo.py --elo-mode alpha{10,25,50}
+--output-dir _validation/wins-blend-2026-10-25/<mode>` (validator v11,
+seed 12345); table from `_investigation/sweep_table_2026_10_25.py`.
+Prediction set: `clean_win_accuracy.aggregations.mean`, 236 matches.
+
+| Mode | Spearman ρ | Self-cons. | Winner acc. | Log-loss | Calib. MAE | Bootstrap σ | Mean VTSR-T |
+|------|-----------|-----------|-------------|----------|-----------|-------------|-------------|
+| ALPHA = 0 (canonical) | 0.4158 | 0.850 | 56.4% (133/236) | 0.677980 | 0.02454 | 70.5 | 1615.9 |
+| alpha10 | 0.4177 | 0.850 | 56.4% (133/236) | 0.677897 | 0.02404 | 70.5 | 1603.8 |
+| alpha25 | 0.4208 | 0.853 | 56.4% (133/236) | 0.677760 | 0.02416 | 70.5 | 1586.1 |
+| alpha50 | 0.4273 | 0.865 | 55.9% (132/236) | 0.677318 | 0.02413 | 70.5 | 1556.8 |
+
+| Condition | alpha10 | alpha25 | alpha50 |
+|-----------|---------|---------|---------|
+| 1. Accuracy ≥ +5pp | **fail** (+0.0pp) | **fail** (+0.0pp) | **fail** (−0.4pp) |
+| 2. Log-loss strictly lower | pass (−0.000083) | pass (−0.000220) | pass (−0.000662) |
+| 3. ρ within −0.01 | pass (+0.0019) | pass (+0.0050) | pass (+0.0115) |
+| 4. MAE within +0.005 | pass (−0.0005) | pass (−0.0004) | pass (−0.0004) |
+| 5. Mean ≤ ALPHA = 0 mean (amended) | pass (1603.8) | pass (1586.1) | pass (1556.8) |
+| Discard (ρ drop > 0.03) | no | no | no |
+
+**Winner calls.** Same 236 matches, team-mean call per match. alpha10
+and alpha25 flip no calls. alpha50 flips one, `2026-06-01T02-09-58`
+(team means 1530.0 vs 1520.3 at ALPHA = 0, 1518.9 vs 1521.2 at 0.50),
+and the flip is wrong: team 1 won.
+
+**What favors the blend, reported anyway.** ρ, self-consistency (0.850 →
+0.865) and log-loss all improve monotonically with alpha, the same
+direction as both earlier sweeps. The log-loss gain at α = 0.50 is
+0.00066 nats per match, about a tenth of a percent. Probabilities get a
+little better and the winner calls stay the same.
+
+**Reading across the three sweeps.** VTSR-T went from four axes to one,
+and the rated corpus grew from 113 to 260 matches. The wins ladder still
+changes no call at low alpha, and at α = 0.50 it flips one call in the
+wrong direction. The rule held up with the target moving underneath it.
+
+**Next trigger.** Unchanged: re-run this sweep after the next VTSR-T
+re-rate (`ELO_SCHEMA_VERSION` bump). Same rule, amended condition 5.
+
+### Bookkeeping: the 2026-09-23 run
+
+A sweep was run on 2026-09-23 (validator v7, `ELO_SCHEMA_VERSION` 13,
+166 rated matches, 142 in the prediction set) into
+`_validation/wins-blend/` and never written into this memo. Mean-R
+accuracy: canonical 55.6% (79/142), alpha10 55.6% (79), alpha25 56.3%
+(80), alpha50 57.0% (81). The largest lift was +1.4pp (two matches) at
+α = 0.50, under the +5pp bar, so it
+would have held. Recorded here so the record has no gap.
+
 ## Source files
 
 - `scripts/elo.py` (wins ladder + alpha_override)
@@ -280,4 +380,6 @@ as alpha rises. That is not a promote.
 - `_investigation/golden_wins_elo.py` (Gates A + B, regenerable)
 - `_investigation/smoke_alpha_override.py` (blend smoke, regenerable)
 - `_investigation/sweep_table2.py` (corrected-sweep table, regenerable)
+- `_investigation/sweep_table_2026_10_25.py` (single-axis rescore table + flips, regenerable)
+- `scripts/study_wins_signal.py` (why win/loss carries little individual signal; `_validation/wins_signal.{md,json}`)
 - This memo
