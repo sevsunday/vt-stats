@@ -111,7 +111,6 @@ import {
   buildStructuresLayer,
   updateStructuresLayer,
   applyStructureModelMode,
-  livingUpgradeAnchors,
   applyPoolUpgradeTint,
   collectArmoryDrops,
   triggerArmoryDrop,
@@ -121,7 +120,7 @@ import {
   recyclerPadXZ,
   enemyBaseOf,
   setStructureShadowPrep,
-} from './replay-structures.js?v=shadows1';
+} from './replay-structures.js?v=pools1';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -880,6 +879,7 @@ function initPools() {
   if (objs.length === 0) return;
   const group = buildObjectsGroup({ ...STATE.mapData, objects: objs });
   group.name = 'replay-pools';
+  group.userData.poolPoints = objs.map((o) => ({ x: o.x, z: o.z }));
   group.visible = STATE.poolsVisible;
   STATE.poolsGroup = group;
   STATE.pools = objs;
@@ -2514,7 +2514,7 @@ function renderFrame(dtSec = 0) {
   }
   if (STATE.structures) {
     updateStructuresLayer(STATE.structures, STATE.progressSec);
-    applyPoolUpgradeTint(STATE.poolsGroup, livingUpgradeAnchors(STATE.structures));
+    applyPoolUpgradeTint(STATE.poolsGroup, STATE.structures);
   }
   if (STATE.armoryDrops && STATE.armoryDrops.length) {
     updateArmoryDrops(STATE.worldGroup, STATE.armoryDrops, dtSec || 0.016);

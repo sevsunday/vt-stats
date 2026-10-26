@@ -1,4 +1,5 @@
 {
+  "AIState": "Unused, planned for replay mode",
   "BuildEvent.buildPosition": "Only defined for BUILD events",
   "BulletHit": "Either shooter or victim must be a player for this event to be recorded right now, but if there is interest in AI vs AI hits we can implement that",
   "BulletHit.shooter": "undefined if not a player",
@@ -6,6 +7,9 @@
   "DamageDealt.ordnanceOdf": "undefined for environmental damage (water, other unknown sources)",
   "DamageDealt.shooter": "undefined if not a player",
   "DamageDealt.victim": "undefined if not a player",
+  "MagnetForce": "This event is triggered for any of the \"magnet\" items like sonic wave, mits, mcurt, etc.",
+  "MagnetForce.magnetHandle": "use this to differentiate between different events on the same object/ordnance",
+  "MagnetForce.magnetOwner": "undefined if ai owns the weapon/mine, otherwise the player s64",
   "PickupPowerup": "This detects pod and crate pickups",
   "PickupPowerup.picker": "if an AI picks up the powerup this is undefined",
   "PickupPowerup.powerupTeam": "the team that owns the powerup",
@@ -14,6 +18,7 @@
   "PlayerState.ammo": "Same as health",
   "PlayerState.hasTarget": "are they using the T key?",
   "PlayerState.health": "Actual hp values not ratio",
+  "PlayerState.orientation": "Replay mode data",
   "ResourceState.poolCount": "total pool count including upgrades",
   "ResourceState.upgradeCount": "only upgrades",
   "StatHeader.shutdownRequested": "this is true if the stat session was cancelled via mission script or console command, otherwise false if the game ended normally",

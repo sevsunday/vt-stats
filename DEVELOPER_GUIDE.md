@@ -237,6 +237,18 @@ A projectile connects with a target.
 
 v2 `StatEvent` reserves oneof field `4` so the v1 layout cannot be mistakenly re-introduced.
 
+#### `PoolPlanted` (field 10, proto v5)
+
+Written from the mission `AddObject` hook for `CLASS_EXTRACTOR` only. A plant is a base pool (Extractor / Harvester / Collector). The upgrade replaces that object, so it fires a second plant at the same spot. There is no ODF and no handle.
+
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `uint32` | Game tick. Plants before the match window are clamped to `tick_range[0]` |
+| `teamnum` | `uint32` | Team slot 1-10. Slot 0 is dropped |
+| `position` | `Vec3` | World meters |
+
+`MagnetForce` is oneof field 11 (sonic wave / mits / mcurt). The collector callback is commented out, so no recording has it. Field 10 was empty before this arm, so v4 did not need a freeze. A file with no `pool_planted` event still stamps `proto_schema_version: "v4"`.
+
 ### Critical: Damage Event Semantics
 
 The `team` field is **always the owning player's slot number (1-10)**, not a faction ID. Faction membership is determined by slot convention: 1-5 = Team 1, 6-10 = Team 2.
@@ -388,6 +400,8 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 9. Update this document and `.cursor/rules/data-schema.mdc`
 
 The triple-descriptor strategy means every v1/v2 session must continue to decode and produce byte-identical processed JSON. Add a parity test to your migration plan: reprocess the corpus after the schema change (`--force`) and `git diff data/processed` — the only differences must be the version bumps and any new optional fields you're intentionally adding. Remember detection ordering: parse-failure only identifies v1; v2-vs-v3 requires the `header.players` presence check (no wire conflicts in either direction).
+
+**Proto v5 (2026-10-26)** adds `PoolPlanted` as oneof field 10. Detection is that arm's presence, after the v4 marker scan and before `header.players`. A recording with no plants stays v4. v5 uses the v4 roster, economy, and damage-calibration paths. `MagnetForce` moved to field 11 and is not recorded, so nothing already on disk used field 10 and no v4 freeze was required. Fixture gate: `_investigation/check_pool_structures.py`. First real batch: `_investigation/probe_pool_planted.py`.
 
 ### Future Schema Considerations
 
@@ -933,6 +947,7 @@ Key behaviors:
 - `trail.segments[]` splits the trail at teleport detections (death/respawn warps). Frontends draw one polyline per segment; renderers must not interpolate across gaps.
 - `ship_timeline` (**`match.schema_version` 25**, `PIPELINE_VERSION` 45) is the full-rate `UpdateTick.PlayerState.odf` step function (transitions only, 0.1 s precision, verbatim wire ODF strings). The 3D replay (`replay-ship-tracker.js`) prefers it over the pre-v25 sparse kill/pickup/snipe reconstruction, which lagged re-ships until the player's next attesting event. Display-only; not in contributions. Pre-v25 JSON has no field (tracker falls back).
 - **v26 / `PIPELINE_VERSION` 46:** `trail.target[]` (0/1 T-lock) and `trail.speed[]` (authored `PlayerState.speed`, 1 dp) ride parallel to `t/x/y/z`. `builds.feed[].position` is the wire `BuildEvent.build_position` Vec3 on BUILD rows (`null` otherwise). Top-level `structures[]` is the 3D replay's building layer: starting recyclers + constructor BUILD xyz; deaths from `UnitDestroyed` only; turret-class instances stay `death_reason: "untracked"` while `TURRET_DEATHS_RELIABLE` is False and are not rendered. Rating-inert (`_investigation/golden_replay_v26_inert.py`). Not in contributions.
+- **v34 / `PIPELINE_VERSION` 58:** `PoolPlanted` (proto v5) becomes timed extractor instances on `structures[]`. A plant on a free site is the faction base pool (`ibscav_vsr` / `ebscav_vsr` / `fbscav_vsr`). A plant on a site that team already holds is the upgrade: the base dies `death_reason: "upgraded"` and the upgrade model (a joined `*bscup` BUILD, else the faction `*bscup_vsr` stem) appears on the same tick. A same-team kill is an ordinary `destroyed`. A pool that vanishes with no kill row (a constructor demolish has no event) retires `death_reason: "census"` after `CENSUS_GRACE_SEC`. `pool_census` / `pool_plant_count` are omitted when there were no plants. Pre-v5 `*bscup` rows gain `site` and `kind: "extractor_upgrade"`. `match.has_pool_plant_data` is mirrored on the manifest and is not in contributions. The replay draws the extractor mesh and tints each map scrap-pool pad by the holding team. Display-only. Gate: `_investigation/check_pool_structures.py`.
 - **v27 / `PIPELINE_VERSION` 48:** top-level `engagements` block (coalesced player-vs-player `DamageDealt` intervals; `{window_sec, min_damage, pairs:[{s,v,t0,t1,dmg}]}`) for the 3D replay's attack-line overlay. Coalesced in the normalized `de_*` damage loop (covers v1-v4), keyed by canonical nick. Display-only, rating-inert (`_investigation/golden_replay_v26_inert.py`), not in contributions. Pre-v27 matches fall back to kill-feed-synthesized lead-in intervals client-side (`buildEngagementIndex()`).
 - When no `UpdateTick` data is present, the block emits with `has_position_data: false`, empty `players: {}`, and nulls/zeros elsewhere. Frontend gates Positioning-tab UI off this flag.
 - Full schema with field tables, derivations, and known limitations lives in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) under "Positioning Block".
@@ -3379,7 +3394,7 @@ Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pip
 
 `data/lego/odf-map.json` (`schema_version: 1`) is the hand-maintained join from a stock ODF stem to one Studio `.io` (`source_file`, `unit_name`, `kind`, `yaw_deg`). Slug and `model.ldr` come from `data/lego/index.json` at load time. `_vsr` and a trailing `vsr` (`apwrckvsr`) are not duplicated; the replay strips them the same way it resolves game meshes. `scripts/build_lego.py` fails the run when a mapped file is missing, the ODF is absent, or `unit_name` disagrees with `data/odf.min.json`. It does not invent links.
 
-The 3D replay Models menu stores `lego` in `vt.replay.textureSet`, beside Stock / Enhanced / Redux. While that choice is on, a mapped ODF draws the brick model (scaled to the stock mesh's horizontal extent, hull bottom on the ground, `yaw_deg` before the usual nose wrapper) and every other ODF keeps the stock game mesh. Brick meshes are not team-tinted, and a morph deploy pose is not applied. Gun Spire and Gun Tower stay in the map; the replay still skips turret-class structures. Day Wrecker (`apwrck.odf`) is mapped and is not drawn until the replay instantiates powerups. Extractor (`ibscav.odf`) is mapped and is not drawn either: scavengers deploy extractors without a constructor `BUILD`, so `structures.instances` never holds one. Extractor+ (`ibscup.odf`) is a constructor build and draws from its `BUILD` tick. Power maps to `ibpgen.odf` because matches record the plant as `ibpgen_vsr`; `ibpgen01.odf`, the label in Darkvale's list, is the separate Power Generator building. Credit Darkvale on the LEGO row.
+The 3D replay Models menu stores `lego` in `vt.replay.textureSet`, beside Stock / Enhanced / Redux. While that choice is on, a mapped ODF draws the brick model (scaled to the stock mesh's horizontal extent, hull bottom on the ground, `yaw_deg` before the usual nose wrapper) and every other ODF keeps the stock game mesh. Brick meshes are not team-tinted, and a morph deploy pose is not applied. Gun Spire and Gun Tower stay in the map; the replay still skips turret-class structures. Day Wrecker (`apwrck.odf`) is mapped and is not drawn until the replay instantiates powerups. Extractor (`ibscav.odf`) is drawn on proto v5 matches from `PoolPlanted` (`structures.instances` `kind: "extractor"`); older matches still have no base-pool row, because scavengers deploy them without a constructor `BUILD`. Extractor+ (`ibscup.odf`) is a constructor build and draws from its `BUILD` tick, which a v5 upgrade plant reuses. Power maps to `ibpgen.odf` because matches record the plant as `ibpgen_vsr`; `ibpgen01.odf`, the label in Darkvale's list, is the separate Power Generator building. Credit Darkvale on the LEGO row.
 
 ## 19. YouTube VOD Timestamp Sync
 

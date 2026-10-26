@@ -14,6 +14,8 @@
  *   3. v4-vs-v3 is a payload presence check (v4 is purely additive over
  *      v3, so decode success proves nothing): any `buildEvent` arm or any
  *      `updateTick` carrying per-team ResourceState stamps the file v4.
+ *      A `poolPlanted` arm stamps v5 (v4 plus that event). A v4 file is
+ *      scanned to the end so a late plant is not missed.
  * The output includes the detected `schema` field so it's obvious which
  * path succeeded.
  *
@@ -74,17 +76,23 @@ if (schema === 'v3') {
   // v2 re-decode). v4 is purely additive over v3, so decode success
   // proves nothing: any buildEvent arm or any updateTick carrying
   // per-team ResourceState stamps the file v4.
+  let foundV4 = false;
   for (const evt of msg.eventStream || []) {
+    if (evt.poolPlanted != null) {
+      schema = 'v5';
+      foundV4 = false;
+      break;
+    }
     if (
       evt.buildEvent != null ||
       (evt.updateTick &&
         (evt.updateTick.team1Resources != null ||
           evt.updateTick.team2Resources != null))
     ) {
-      schema = 'v4';
-      break;
+      foundV4 = true;
     }
   }
+  if (schema === 'v3' && foundV4) schema = 'v4';
 }
 if (schema === 'v3' && !(msg.header && msg.header.players && msg.header.players.length > 0)) {
   // v2-vs-v3 presence check: no wire conflicts in either direction, so a
@@ -118,6 +126,8 @@ const counts = {
   unit_sniped: 0,
   pickup_powerup: 0,
   build_event: 0,
+  pool_planted: 0,
+  magnet_force: 0,
 };
 
 const camelToSnake = {
@@ -130,6 +140,8 @@ const camelToSnake = {
   unitSniped: 'unit_sniped',
   pickupPowerup: 'pickup_powerup',
   buildEvent: 'build_event',
+  poolPlanted: 'pool_planted',
+  magnetForce: 'magnet_force',
 };
 
 const stream = obj.eventStream || [];

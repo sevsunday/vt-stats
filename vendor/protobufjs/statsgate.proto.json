@@ -19,6 +19,27 @@
             }
           }
         },
+        "Quat": {
+          "edition": "2023",
+          "fields": {
+            "x": {
+              "type": "float",
+              "id": 1
+            },
+            "y": {
+              "type": "float",
+              "id": 2
+            },
+            "z": {
+              "type": "float",
+              "id": 3
+            },
+            "w": {
+              "type": "float",
+              "id": 4
+            }
+          }
+        },
         "Race": {
           "edition": "2023",
           "values": {
@@ -53,6 +74,15 @@
               "type": "string",
               "id": 3
             }
+          }
+        },
+        "RecorderType": {
+          "edition": "2023",
+          "values": {
+            "RECORDER_TYPE_UNSPECIFIED": 0,
+            "RECORDER_TYPE_FREESTANDING": 1,
+            "RECORDER_TYPE_HOSTED_DLL": 2,
+            "RECORDER_TYPE_HOSTED_LUA": 3
           }
         },
         "StatHeader": {
@@ -146,6 +176,11 @@
               "rule": "repeated",
               "type": "PlayerInfo",
               "id": 22
+            },
+            "recorderType": {
+              "type": "RecorderType",
+              "id": 23,
+              "protoName": "recorder_type"
             }
           },
           "reserved": [
@@ -299,6 +334,35 @@
               "type": "bool",
               "id": 7,
               "protoName": "has_target"
+            },
+            "orientation": {
+              "type": "Quat",
+              "id": 9
+            }
+          }
+        },
+        "AIState": {
+          "edition": "2023",
+          "fields": {
+            "odf": {
+              "type": "string",
+              "id": 1
+            },
+            "position": {
+              "type": "Vec3",
+              "id": 2
+            },
+            "orientation": {
+              "type": "Quat",
+              "id": 3
+            },
+            "health": {
+              "type": "float",
+              "id": 4
+            },
+            "ammo": {
+              "type": "float",
+              "id": 5
             }
           }
         },
@@ -522,6 +586,75 @@
             }
           }
         },
+        "PoolPlanted": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "teamnum": {
+              "type": "uint32",
+              "id": 2
+            },
+            "position": {
+              "type": "Vec3",
+              "id": 3
+            }
+          }
+        },
+        "MagnetTarget": {
+          "edition": "2023",
+          "values": {
+            "MAGNET_TARGET_UNSPECIFIED": 0,
+            "MAGNET_TARGET_GAME_OBJECT": 1,
+            "MAGNET_TARGET_ORDNANCE": 2
+          }
+        },
+        "MagnetForce": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "magnetOwner": {
+              "type": "uint64",
+              "id": 2,
+              "protoName": "magnet_owner"
+            },
+            "magnetTeam": {
+              "type": "uint32",
+              "id": 3,
+              "protoName": "magnet_team"
+            },
+            "magnetOdf": {
+              "type": "string",
+              "id": 4,
+              "protoName": "magnet_odf"
+            },
+            "magnetTarget": {
+              "type": "MagnetTarget",
+              "id": 5,
+              "protoName": "magnet_target"
+            },
+            "magnetHandle": {
+              "type": "uint32",
+              "id": 6,
+              "protoName": "magnet_handle"
+            },
+            "targetTeam": {
+              "type": "uint32",
+              "id": 7,
+              "protoName": "target_team"
+            },
+            "targetOdf": {
+              "type": "string",
+              "id": 8,
+              "protoName": "target_odf"
+            }
+          }
+        },
         "StatEvent": {
           "edition": "2023",
           "oneofs": {
@@ -534,7 +667,9 @@
                 "unitDestroyed",
                 "unitSniped",
                 "pickupPowerup",
-                "buildEvent"
+                "buildEvent",
+                "poolPlanted",
+                "magnetForce"
               ]
             }
           },
@@ -578,6 +713,16 @@
               "type": "BuildEvent",
               "id": 9,
               "protoName": "build_event"
+            },
+            "poolPlanted": {
+              "type": "PoolPlanted",
+              "id": 10,
+              "protoName": "pool_planted"
+            },
+            "magnetForce": {
+              "type": "MagnetForce",
+              "id": 11,
+              "protoName": "magnet_force"
             }
           },
           "reserved": [

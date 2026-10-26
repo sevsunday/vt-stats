@@ -47,6 +47,8 @@ const DEPLOY_LEAD_SEC = 2;
 const RECYCLER_SIZE = [20, 8, 14];
 const BUILDING_SIZE = [12, 7, 12];
 const UPGRADE_SIZE = [8, 5, 8];
+// Fallback box when the extractor catalog mesh is not loaded.
+const POOL_SIZE = [10, 4, 10];
 const Y_OFF_RECYCLER = 4;
 const Y_OFF_BUILDING = 3.5;
 // Catalog floors are coplanar with the heightfield, so the terrain shows
@@ -407,9 +409,15 @@ function applyFactoryReplacements(items, matchData, tickRate) {
   applyFactoryQueueClears(items, feed, tickRate);
 }
 
+function isPoolKind(inst) {
+  if (!inst) return false;
+  return inst.kind === 'extractor' || inst.kind === 'extractor_upgrade' || isUpgradeOdf(inst.odf);
+}
+
 function instanceSize(inst) {
   if (inst.kind === 'recycler' || (inst.odf && /recy/i.test(inst.odf))) return RECYCLER_SIZE;
-  if (isUpgradeOdf(inst.odf)) return UPGRADE_SIZE;
+  if (inst.kind === 'extractor') return POOL_SIZE;
+  if (isUpgradeOdf(inst.odf) || inst.kind === 'extractor_upgrade') return UPGRADE_SIZE;
   return BUILDING_SIZE;
 }
 
@@ -472,7 +480,7 @@ export function buildStructuresLayer(matchData, mapData) {
       deploySec,
       spawnSec: tickToSec(inst.spawn_tick || 0, tickRate),
       deathSec: inst.death_tick != null ? tickToSec(inst.death_tick, tickRate) : null,
-      isUpgrade: isUpgradeOdf(inst.odf),
+      isUpgrade: isUpgradeOdf(inst.odf) || inst.kind === 'extractor_upgrade',
       team: inst.team,
       x: pad.x,
       z: pad.z,
@@ -530,7 +538,10 @@ export function updateStructuresLayer(items, tSec) {
   if (!items) return;
   for (const it of items) {
     const born = tSec >= (it.spawnSec || 0) - 0.05;
-    const dead = it.deathSec != null && tSec >= it.deathSec;
+    // An upgrade swap uses the same 0.05s lead as birth, so the base model
+    // drops in the frame the upgrade model appears. Scrubbing back restores it.
+    const upgraded = it.inst && it.inst.death_reason === 'upgraded';
+    const dead = it.deathSec != null && tSec >= it.deathSec - (upgraded ? 0.05 : 0);
     // Same 0.05s lead as birth, so the base drops the moment the upgrade appears.
     const replaced = it.replacedSec != null && tSec >= it.replacedSec - 0.05;
     const alive = born && !dead && !replaced;
@@ -552,29 +563,83 @@ export function livingUpgradeAnchors(items) {
   return out;
 }
 
-export function applyPoolUpgradeTint(poolsGroup, livingUpgrades) {
+const POOL_BASE_COLOR = 0xffd24a;
+
+function poolAnchorOf(it) {
+  if (!it || !it.alive) return null;
+  const inst = it.inst || {};
+  if (!isPoolKind(inst) && !it.isUpgrade) return null;
+  if (!Number.isFinite(it.x) || !Number.isFinite(it.z)) return null;
+  return {
+    x: it.x,
+    z: it.z,
+    team: it.team != null ? it.team : inst.team,
+    upgrade: !!(it.isUpgrade || inst.kind === 'extractor_upgrade' || isUpgradeOdf(inst.odf)),
+    spawn: it.spawnSec || 0,
+  };
+}
+
+/**
+ * Color each map scrap-pool pad by the team that holds it.
+ * `items` is the structure layer (alive flags already updated).
+ * A pad snaps to the nearest living extractor within POOL_SNAP_M.
+ * Upgraded pads pulse; the rest of the mesh stays the stock yellow.
+ */
+export function applyPoolUpgradeTint(poolsGroup, items) {
   if (!poolsGroup) return;
-  const mats = [];
+  const meshes = [];
   poolsGroup.traverse((obj) => {
     if (obj.isInstancedMesh && obj.userData && obj.userData.kind === 'scrap_pool') {
-      mats.push(obj);
+      meshes.push(obj);
     }
   });
-  const owned = livingUpgrades && livingUpgrades.length > 0;
-  for (const mesh of mats) {
-    if (!mesh.material) continue;
-    if (!mesh.userData.vtBaseEmissive) {
-      mesh.userData.vtBaseEmissive = mesh.material.emissive ? mesh.material.emissive.getHex() : 0x553300;
-      mesh.userData.vtBaseIntensity = mesh.material.emissiveIntensity || 0.4;
+  if (!meshes.length) return;
+  const anchors = [];
+  for (const it of items || []) {
+    const anchor = poolAnchorOf(it);
+    if (anchor) anchors.push(anchor);
+  }
+  const points = poolsGroup.userData.poolPoints || [];
+  const pulse = 0.72 + 0.28 * Math.sin(performance.now() / 400);
+  const limit = POOL_SNAP_M * POOL_SNAP_M;
+  const color = new THREE.Color();
+  for (const mesh of meshes) {
+    const n = mesh.count || 0;
+    if (!mesh.userData.vtPoolTintReady && mesh.material) {
+      mesh.userData.vtBaseColor = mesh.material.color ? mesh.material.color.getHex() : POOL_BASE_COLOR;
+      // instanceColor multiplies material.color, so drive the pad color
+      // entirely from the instance and keep the material white.
+      mesh.material.color.setHex(0xffffff);
+      if (mesh.material.emissive) mesh.material.emissive.setHex(0x000000);
+      mesh.material.emissiveIntensity = 0;
+      mesh.userData.vtPoolTintReady = true;
     }
-    if (!owned) {
-      mesh.material.emissive.setHex(mesh.userData.vtBaseEmissive);
-      mesh.material.emissiveIntensity = mesh.userData.vtBaseIntensity;
-      continue;
+    for (let i = 0; i < n; i++) {
+      const p = points[i];
+      let owner = null;
+      let best = limit;
+      if (p) {
+        for (const a of anchors) {
+          const dx = a.x - p.x;
+          const dz = a.z - p.z;
+          const d = dx * dx + dz * dz;
+          if (d > limit) continue;
+          const closer = d < best - 1e-6;
+          const tie = Math.abs(d - best) <= 1e-6 && owner && a.spawn >= owner.spawn;
+          if (!owner || closer || tie) {
+            best = d;
+            owner = a;
+          }
+        }
+      }
+      if (!owner) color.setHex(mesh.userData.vtBaseColor || POOL_BASE_COLOR);
+      else {
+        color.setHex(teamColor(owner.team));
+        if (owner.upgrade) color.multiplyScalar(pulse);
+      }
+      mesh.setColorAt(i, color);
     }
-    /* Whole-pool instanced mesh: pulse when any upgrade is live. */
-    const pulse = 0.55 + 0.25 * Math.sin(performance.now() / 400);
-    mesh.material.emissiveIntensity = pulse;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 }
 
@@ -673,6 +738,8 @@ export function findStructureDeaths(items, loSec, hiSec) {
   if (!items) return hits;
   for (const it of items) {
     if (it.deathSec == null) continue;
+    // An upgrade swap is not a destruction.
+    if (it.inst && it.inst.death_reason === 'upgraded') continue;
     if (it.deathSec > loSec && it.deathSec <= hiSec) {
       hits.push({
         x: it.x,

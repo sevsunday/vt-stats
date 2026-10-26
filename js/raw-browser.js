@@ -74,6 +74,7 @@
   const PROTO_SCHEMA_V2 = 'v2';
   const PROTO_SCHEMA_V3 = 'v3';
   const PROTO_SCHEMA_V4 = 'v4';
+  const PROTO_SCHEMA_V5 = 'v5';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
   const PROTO_DOCS_URL = ROOT + 'data/proto-docs.json';
   const FIELD_DOCS_MANUAL_URL = ROOT + 'data/field-docs-manual.json';
@@ -111,6 +112,10 @@
     'eventStream.*.pickupPowerup': 'PickupPowerup',
     // v4: commander economy + build telemetry.
     'eventStream.*.buildEvent': 'BuildEvent',
+    'eventStream.*.buildEvent.buildPosition': 'Vec3',
+    'eventStream.*.poolPlanted': 'PoolPlanted',
+    'eventStream.*.poolPlanted.position': 'Vec3',
+    'eventStream.*.magnetForce': 'MagnetForce',
     'eventStream.*.updateTick.team1Resources': 'ResourceState',
     'eventStream.*.updateTick.team2Resources': 'ResourceState',
     // v3: per-tick-accumulated roster entries on the header.
@@ -127,19 +132,22 @@
   const EVENT_ARMS_ALL = [
     'bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
     'updateTick', 'unitDestroyed', 'unitSniped', 'pickupPowerup',
-    'buildEvent',
+    'buildEvent', 'poolPlanted', 'magnetForce',
   ];
   // Per-schema chip set. v2/v3 reserve `damage_received` (field 4) on
   // StatEvent so the arm never appears in modern matches. v3's event
   // stream is shape-identical to v2 (the schema change is header-only:
   // players roster + game_outcome). v4 adds the `build_event` arm
-  // (field 9) plus per-team ResourceState on UpdateTick; only v4
-  // sessions can carry buildEvent rows.
+  // (field 9) plus per-team ResourceState on UpdateTick. v5 adds
+  // `poolPlanted` (field 10) and `magnetForce` (field 11, declared but
+  // not yet recorded). Older sessions never carry those arms.
+  const EVENT_ARMS_V5 = ['poolPlanted', 'magnetForce'];
   const EVENT_ARMS_BY_SCHEMA = {
-    v1: EVENT_ARMS_ALL.filter(a => a !== 'buildEvent'),
-    v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent'),
-    v3: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent'),
-    v4: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
+    v1: EVENT_ARMS_ALL.filter(a => a !== 'buildEvent' && !EVENT_ARMS_V5.includes(a)),
+    v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent' && !EVENT_ARMS_V5.includes(a)),
+    v3: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent' && !EVENT_ARMS_V5.includes(a)),
+    v4: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && !EVENT_ARMS_V5.includes(a)),
+    v5: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
   };
   // Back-compat alias: many existing call sites read `EVENT_ARMS`
   // directly. Re-exposed as a getter so reads always reflect the
@@ -157,6 +165,8 @@
     unitSniped: 'UnitSniped',
     pickupPowerup: 'PickupPowerup',
     buildEvent: 'BuildEvent',
+    poolPlanted: 'PoolPlanted',
+    magnetForce: 'MagnetForce',
   };
 
   // --- DOM handles (populated after DOMContentLoaded) ---
@@ -209,9 +219,10 @@
     // Frozen v2 descriptor pair (lazy, mirrors the v1 pair above).
     protoRootV2: null,
     rootMessageTypeV2: null,
-    // 'v1' | 'v2' | 'v3' | 'v4' -- detected per match by
+    // 'v1' | 'v2' | 'v3' | 'v4' | 'v5' -- detected per match by
     // fetchAndDecodeBinpb() (v1 via decode throw, v2-vs-v3 via
-    // header.players presence, v3-vs-v4 via v4 payload presence). Drives
+    // header.players presence, v3-vs-v4 via v4 payload presence,
+    // v5 via a poolPlanted arm). Drives
     // EVENT_ARMS chip filtering and Reconcile view computations downstream.
     protoSchemaVersion: PROTO_SCHEMA_V3,
     // resolvers (match-specific)
@@ -571,17 +582,23 @@
       // resource/build data). Short-circuits on the first v4 payload;
       // genuine v4 files carry ResourceState on the very first UpdateTick.
       const es = msg.eventStream || [];
+      let foundV4 = false;
       for (const evt of es) {
+        if (evt.poolPlanted != null) {
+          schema = PROTO_SCHEMA_V5;
+          foundV4 = false;
+          break;
+        }
         if (
           evt.buildEvent != null ||
           (evt.updateTick &&
             (evt.updateTick.team1Resources != null ||
               evt.updateTick.team2Resources != null))
         ) {
-          schema = PROTO_SCHEMA_V4;
-          break;
+          foundV4 = true;
         }
       }
+      if (schema === PROTO_SCHEMA_V3 && foundV4) schema = PROTO_SCHEMA_V4;
     }
     if (schema === PROTO_SCHEMA_V3) {
       const players = msg.header && msg.header.players;
@@ -591,7 +608,7 @@
         schema = PROTO_SCHEMA_V2;
       }
     }
-    const decodeType = (schema === PROTO_SCHEMA_V3 || schema === PROTO_SCHEMA_V4) ? typeV3
+    const decodeType = (schema === PROTO_SCHEMA_V3 || schema === PROTO_SCHEMA_V4 || schema === PROTO_SCHEMA_V5) ? typeV3
       : schema === PROTO_SCHEMA_V2 ? state.rootMessageTypeV2
       : state.rootMessageTypeV1;
     // toObject flattens protobufjs runtime wrappers to plain JS. `longs:
@@ -2523,6 +2540,18 @@
           const p = String(payload.producer || '').replace('PRODUCER_TYPE_', '');
           sub = [t, p].filter(Boolean).map(s => s.charAt(0) + s.slice(1).toLowerCase()).join(' · ');
         }
+        // v5 PoolPlanted: team slot only (no ODF on the wire). MagnetForce
+        // is declared but not recorded yet; surface its ODF if one arrives.
+        if (arm === 'poolPlanted') {
+          if (payload.teamnum != null) team = payload.teamnum;
+          sub = 'Pool';
+        }
+        if (arm === 'magnetForce') {
+          if (payload.magnetTeam != null) team = payload.magnetTeam;
+          if (payload.magnetOdf) ordnance = payload.magnetOdf;
+          if (payload.targetOdf) victimOdf = payload.targetOdf;
+          if (payload.magnetOwner != null) shooter = String(payload.magnetOwner);
+        }
       }
       const typeLabel = EVENT_ARM_LABELS[arm] || arm || '';
       const extraOdfs = payload ? [
@@ -2927,6 +2956,9 @@
     if (state.processed.economy && state.processed.economy.has_resource_data) {
       metrics.push(computeEconomyTicks());
     }
+    if (state.processed.structures && state.processed.structures.pool_plant_count != null) {
+      metrics.push(computePoolPlants());
+    }
     const s64 = $reconcilePlayer.value;
     const html = [];
     if (s64) {
@@ -2990,6 +3022,25 @@
   // Each computeX returns:
   //   { label, processed, computed, rule, kind: 'float' | 'int' }
   // The renderer handles delta + color coding uniformly.
+
+  // v5: structures.pool_plant_count is the plant events the pipeline kept
+  // (team slot 1-10). Team 0 is dropped on both sides, so the counts match.
+  function computePoolPlants() {
+    const processed = state.processed.structures.pool_plant_count;
+    let count = 0;
+    for (const r of state.events.rows) {
+      if (r.arm !== 'poolPlanted') continue;
+      const slot = Number(r.team);
+      if (slot >= 1 && slot <= 10) count++;
+    }
+    return {
+      label: 'structures.pool_plant_count',
+      processed: Number(processed),
+      computed: count,
+      rule: 'count(poolPlanted with teamnum 1-10)',
+      kind: 'int',
+    };
+  }
 
   function computeSnipes() {
     const processed = state.processed.match && state.processed.match.snipe_count;

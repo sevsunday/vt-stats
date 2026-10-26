@@ -4,28 +4,28 @@ overview: Sync the upstream statsgate proto (new PoolPlanted event, oneof field 
 todos:
   - id: proto-sync
     content: Mirror upstream statsgate.proto, regenerate statsgate_pb2.py and protobufjs JSON, stamp v5 in load_session + raw-browser detection, verify_proto_decode on one file per era
-    status: pending
+    status: completed
   - id: raw-browser
     content: "Raw browser: poolPlanted/magnetForce arms, labels, PROTO_TYPE_MAP, v5 arm list, reconcile row"
-    status: pending
+    status: completed
   - id: pipeline-collect
     content: "process_match: pool_planted branch (team-0 skip, pre-roll clamp, has_pool_plant_data) passing plants to compute_structures"
-    status: pending
+    status: completed
   - id: pipeline-structures
     content: "compute_structures pool pass: sites, base instances, upgrade replacement/join, kill deaths, census deaths, pool_census QA; site/kind on legacy upgrade rows; version bumps"
-    status: pending
+    status: completed
   - id: replay-render
     content: "replay-structures.js: render extractor instances, upgraded-hides-base, per-pool owner tint via POOL_SNAP_M snap; bump import cache key"
-    status: pending
+    status: completed
   - id: gates
     content: check_pool_structures.py fixture gate; confirm/extend golden_replay_v26_inert.py; full reprocess with rating byte-identity
-    status: pending
+    status: completed
   - id: probe
     content: probe_pool_planted.py for the first real batch (snap distance, upgrade tick gap, census agreement, turret/AI kill deltas)
-    status: pending
+    status: completed
   - id: docs
     content: Update data-schema.mdc, project-overview.mdc, filter-contract.mdc, DEVELOPER_GUIDE.md, DATA_DICTIONARY.md
-    status: pending
+    status: completed
 isProject: false
 ---
 

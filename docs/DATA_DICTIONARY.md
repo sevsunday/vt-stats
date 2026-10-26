@@ -1033,39 +1033,46 @@ other archetype templates are protected by
 `_investigation/check_story_templates.mjs`, which renders every archetype
 and beat template against fixture facts and fails on unfilled slots.
 
-#### `structures` (`match.schema_version` 26)
+#### `structures` (`match.schema_version` 26, block contract 2 at schema 34)
 
-Match-global, always-unfiltered. Always emitted on a v26 reprocess (empty
-`instances` when the match has no constructor BUILD xyz and no team-base
-centroid). Powers the 3D replay's building primitives. Display-only and
-rating-inert (gated by `_investigation/golden_replay_v26_inert.py` — strip
-+ perturb `structures`, `feed[].position`, `trail.target`, `trail.speed`;
+Match-global, always-unfiltered. Always emitted (empty `instances` when the
+match has no constructor BUILD xyz and no team-base centroid). Powers the
+3D replay's building primitives. Display-only and rating-inert (gated by
+`_investigation/golden_replay_v26_inert.py` — the whole `structures` block
+is stripped and replaced, and `match.has_pool_plant_data` is flipped;
 byte-identical VTSR-T + VTSR-C). Not in `_extract_contribution`.
 
 Built by `compute_structures()` after economy/builds/positioning attach.
+Pool plants are a private list; they are not a JSON field.
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | `number` | Structures-block contract (`1`) |
-| `turret_deaths_reliable` | `boolean` | Mirror of `TURRET_DEATHS_RELIABLE` in `process_stats.py`. `false` until the collector emits `UnitDestroyed` for gun-tower / turret-class vehicles. Flip the constant + bump `PIPELINE_VERSION` when upstream is fixed — do **not** infer deaths from HP |
-| `instances[]` | `object[]` | Starting recyclers (one per team: faction ODF, median of recycler-lane BUILD pads else `team_base.centroid`) plus one row per **constructor** BUILD that carries xyz. Factory/armory/recycler *lane* pads are units, not buildings. Includes `*scup` pool upgrades |
+| `schema_version` | `number` | Structures-block contract (`2` since match schema 34) |
+| `turret_deaths_reliable` | `boolean` | Mirror of `TURRET_DEATHS_RELIABLE` in `process_stats.py`. `false` until the collector emits `UnitDestroyed` for gun-tower / turret-class vehicles. Flip the constant + bump `PIPELINE_VERSION` when upstream is fixed — do **not** infer deaths from HP. The same collector commit as `PoolPlanted` calls `WantBotKillMessages()`; whether towers, constructors, service trucks and barracks start getting death rows is measured by `_investigation/probe_pool_planted.py` (old baseline 3/436, 0/839, 0/495, 0/21) before the flag flips |
+| `instances[]` | `object[]` | Starting recyclers (one per team: faction ODF, median of recycler-lane BUILD pads else `team_base.centroid`) plus one row per **constructor** BUILD that carries xyz, plus one row per kept `PoolPlanted` that did not join an existing upgrade BUILD. Factory/armory/recycler *lane* pads are units, not buildings |
+| `pool_plant_count` | `number` | Kept plants (team slot 1-10, with a position). Omitted when there were none. The raw-browser reconcile row compares it to `count(poolPlanted with teamnum 1-10)` |
+| `pool_census` | `object` | Present only when `pool_plant_count` is. `{checked_sec, agree_share, retired_by_census, surplus_sec}`. `checked_sec` is the economy tick span. `agree_share` is the fraction of per-team 1 Hz samples where living planted pools equal `economy.teams[n].pool_count`. `surplus_sec` is team-seconds where the census is higher than the plants we saw |
 
 Each instance:
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `string` | Stable within the match (`recycler-1` / `b-{side}-{stem}-{n}`) |
+| `id` | `string` | Stable within the match (`recycler-1` / `b-{side}-{stem}-{n}` / `pool-{side}-{n}`) |
 | `team` | `number` | 1 or 2 |
-| `odf` | `string` | Normalized stem |
+| `odf` | `string\|null` | Normalized stem. `null` when the team's faction is unknown (display name `Pool`) |
 | `name` | `string` | `odf_map` display name |
 | `cls` | `string` | `"building"` or `"turret"` (inheritanceChain terminal `turret`, via `build_turret_odfs()`) |
+| `kind` | `string` | `"recycler"` on the opening recycler. `"extractor"` on a base pool. `"extractor_upgrade"` on a `*bscup` row (constructor BUILD or a plant that did not join one). Other buildings omit it |
+| `site` | `string` | Pool pad id (`site-N`). Plants and `*bscup` builds within `POOL_SITE_M` (8 m) share one. Omitted on recyclers and other buildings |
 | `x`/`y`/`z` | `number` | World meters, 2 dp |
-| `spawn_tick` | `number` | 0 for starting recyclers; BUILD tick otherwise |
+| `spawn_tick` | `number` | 0 for starting recyclers; BUILD tick, or the plant tick for a pool. A joined upgrade's spawn is moved to the plant tick so the swap is one frame |
 | `max_hp` | `number\|null` | `GameObjectClass.maxHealth` via `ship_caps` |
-| `death_tick` | `number\|null` | Kill-feed / `UnitDestroyed` tick, or `null` if still standing / untracked |
-| `death_reason` | `string\|null` | `"destroyed"` (matched UnitDestroyed), `"untracked"` (turrets while the collector flag is False), or `null` (alive) |
+| `death_tick` | `number\|null` | Kill-feed tick, the upgrade plant tick, the census tick, or `null` if still standing / untracked |
+| `death_reason` | `string\|null` | `"destroyed"` (matched UnitDestroyed, enemy or team kill), `"upgraded"` (replaced by the next plant), `"census"` (pool count dropped and no kill row matched — a demolish, or a missed death), `"untracked"` (turrets while the collector flag is False), or `null` (alive) |
 
-Death matching: `(side, odf)` → nearest living instance to the killer's trail at `(tick − min_tick) / tick_rate`; FIFO if the killer has no trail. Turret-class rows are never matched while `TURRET_DEATHS_RELIABLE` is False and the 3D replay **does not render** them.
+Death matching: `(side, odf)` → nearest living instance to the killer's trail at `(tick − min_tick) / tick_rate`; FIFO if the killer has no trail. Rows that already have a `death_tick` (an upgrade swap) are not matched again. Turret-class rows are never matched while `TURRET_DEATHS_RELIABLE` is False and the 3D replay **does not render** them.
+
+Pool lifecycle (proto v5): a plant on a site with no living same-team pool is the faction base (`ibscav_vsr` / `ebscav_vsr` / `fbscav_vsr`). A plant on a site that team already holds retires that pool as `upgraded`. If a constructor `*bscup` BUILD on the site is within `UPGRADE_JOIN_SEC` (20 s), that BUILD is the upgrade mesh and no second instance is created. With no living pool, a BUILD is joined only inside `UPGRADE_OBJECT_SEC` (2 s), so the opening plant is not swallowed by a later upgrade. After any death the site is free for either team. Census retirement waits `CENSUS_GRACE_SEC` (3 s) and picks the pool nearest an enemy trail, else the oldest. `match.has_pool_plant_data` is true when the recording emitted the arm (absent on older output means false) and is mirrored on `matches.json`.
 
 #### `leaderboard[]`
 
