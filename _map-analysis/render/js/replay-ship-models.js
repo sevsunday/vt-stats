@@ -12,7 +12,9 @@
  * Nose is model-local -Z. Actor yaw 0 faces +X, so the wrapper yaws +90 deg
  * after a negative Z scale (three.js applies scale before rotation). The
  * replay world group mirrors Z; that negative scale cancels the mirror so
- * the hull is not a mirror image. Hull bottom sits at local y = 0.
+ * the hull is not a mirror image. Hull bottom sits at local y = 0, except a
+ * deployed building whose model declares a terrain patch: that one keeps
+ * model y = 0 (the patch) on the ground, the way the game seats it.
  */
 
 import * as THREE from 'three';
@@ -38,6 +40,29 @@ export const MODEL_VISUAL_SCALE = 1;
 // The wrapper's negative Z scale is applied before its yaw (three.js is R*S),
 // which flips the nose, so the yaw is +90 deg rather than -90.
 const NOSE_YAW = Math.PI / 2;
+
+/**
+ * Engine-local cell rect, placed at a structure whose wrapper is this
+ * module's (GLB Z already negated, scale.z = -1 undoes it, then yaw +90).
+ * A 90 deg turn stays axis-aligned: parent x = +engine z, parent z = -engine x.
+ * `seatLift` is the extra local Y between the placed origin and model y = 0
+ * (0 when the building is seated on its patch).
+ */
+export function worldCutRect(rect, px, py, pz, seatLift) {
+  const lift = seatLift || 0;
+  const xLo = Math.min(rect.z0, rect.z1);
+  const xHi = Math.max(rect.z0, rect.z1);
+  const zLo = -Math.max(rect.x0, rect.x1);
+  const zHi = -Math.min(rect.x0, rect.x1);
+  return {
+    x0: px + xLo,
+    x1: px + xHi,
+    z0: pz + zLo,
+    z1: pz + zHi,
+    y0: py + lift + Math.min(rect.y0, rect.y1),
+    y1: py + lift + Math.max(rect.y0, rect.y1),
+  };
+}
 
 const TEAM_GAIN = 1.6;
 const TEAM_UNIFORM_DECL =
@@ -249,6 +274,9 @@ async function ensureIndex() {
             teamColor: m.teamColorTextures || [],
             emissive: m.emissiveTextures || [],
             textureSets: Array.isArray(m.textureSets) ? m.textureSets : [],
+            // A height array on the index, not the heights themselves.
+            // Deployed buildings that have one sit on model y = 0.
+            terrainPatch: !!m.terrainPatch,
           };
           if (!_specByStem.has(m.stem)) _specByStem.set(m.stem, spec);
           const keys = [...(m.odfs || [])];
@@ -870,6 +898,8 @@ function parallelTraverse(a, b, callback) {
  * y = 0, nose along local +X) or null when that template is not loaded.
  * `teamColor` is a hex string or number; it tints the colorizable panels only.
  * `opts.deployed` poses a `deploy` clip on its last frame (buildings only).
+ * A deployed building whose model declares a terrain patch keeps model y = 0
+ * on the ground (`userData.seatBase`) instead of lifting by the lowest vertex.
  */
 export function cloneModelBody(odf, teamColor, opts) {
   if (legoMode()) {
@@ -896,14 +926,18 @@ export function cloneModelBody(odf, teamColor, opts) {
     obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
     obj.userData.sharedGeom = true;
   });
-  if (opts && opts.deployed) poseDeployed(root, tpl.clips);
+  const seatBase = !!(opts && opts.deployed && spec.terrainPatch);
+  root.userData.seatBase = seatBase;
+  if (opts && opts.deployed) poseDeployed(root, tpl.clips, seatBase);
+  if (seatBase) root.position.y = 0;
   return root;
 }
 
 // Frame 0 of `deploy` is the folded hull. Hold the last frame and do not
 // stop the action: three.js restores the bind pose on stop. The template
 // itself stays at rest so ships and mobile hulls are unchanged.
-function poseDeployed(root, clips) {
+// `skipLift` leaves model y = 0 where it is (a building seated on its patch).
+function poseDeployed(root, clips, skipLift) {
   if (!root || !clips || !clips.length) return;
   const clip = THREE.AnimationClip.findByName(clips, 'deploy');
   if (!clip || !(clip.duration > 0)) return;
@@ -921,6 +955,7 @@ function poseDeployed(root, clips) {
     obj.computeBoundingBox();
     obj.computeBoundingSphere();
   });
+  if (skipLift) return;
   const box = new THREE.Box3().setFromObject(root);
   if (Number.isFinite(box.min.y)) {
     root.position.y -= box.min.y;

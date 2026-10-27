@@ -163,7 +163,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 57 -> 58: PoolPlanted extractors (match.schema_version 34). Plant events
 # become timed structures[] instances (base pool, upgrade swap, kill or
 # census death). Display-only; not in contributions. Ratings unmoved.
-PIPELINE_VERSION = 58
+# 58 -> 59: pool timeline. A plant is an upgrade only when a constructor
+# *bscup BUILD is within UPGRADE_OBJECT_SEC and POOL_SITE_M; a replant
+# after a kill is a base pool. Plants and pool-stem kills run in tick
+# order (kills first). Display-only. Ratings unmoved.
+PIPELINE_VERSION = 59
 
 # Building damage inside this many seconds of the last recorded tick is
 # reported separately as `enemy_structure_dealt_late` (the winners' end-of-
@@ -5490,14 +5494,11 @@ _FACTION_UPGRADE_STEM = {
 # replant after a death keeps the site and an upgrade lands on the pool
 # it replaces. Tunable; the first-batch probe measures real distances.
 POOL_SITE_M = 8.0
-# Constructor *bscup BUILD joined to an upgrade plant when the two are
-# this close in time. Used only once a living pool is already on the
-# site, so a base plant cannot swallow a later upgrade.
-UPGRADE_JOIN_SEC = 20.0
-# With no living pool, a plant is the upgrade object only when a *bscup
-# BUILD lands this close. AddObject of the replacement and the BUILD
-# completion should be the same moment; a wider window would turn the
-# opening plant into the upgrade.
+# A PoolPlanted is the upgrade only when an unpaired constructor *bscup
+# BUILD for the same team is this close in time and within POOL_SITE_M.
+# AddObject of the replacement and the BUILD completion are the same
+# moment. A plant with no such BUILD is always a base pool, including a
+# replant on a site whose previous pool was destroyed.
 UPGRADE_OBJECT_SEC = 2.0
 # Census stays below the living planted count for this long, with no
 # kill row, before one pool is retired. Covers a constructor demolish
@@ -5564,6 +5565,12 @@ def _lookup_max_hp(ship_caps, stem):
 def _is_pool_upgrade_stem(stem):
     """Constructor scrap-pool upgrade (*bscup). Not a base extractor."""
     return "scup" in (stem or "")
+
+
+def _is_pool_victim_stem(stem):
+    """Base extractor (*bscav) or its upgrade (*bscup). Not a scavenger."""
+    stem = stem or ""
+    return _is_pool_upgrade_stem(stem) or "bscav" in stem
 
 
 def _assign_pool_site(sites, x, z):
@@ -5722,15 +5729,16 @@ def _tag_upgrade_sites(instances, sites):
             inst["site"] = site["id"]
 
 
-def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_rate, min_tick, sites):
+def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_rate, min_tick, sites, kills, players):
     """Turn PoolPlanted rows into extractor instances. Mutates `instances`.
 
-    A plant on a free site is the faction's base pool. A plant on a site
-    that team already holds, or one that lines up with a constructor
-    *bscup BUILD, is the upgrade replacing that pool: the base dies with
-    death_reason 'upgraded' and the upgrade model takes the same tick.
-    `sites` already holds the constructor upgrades. Returns how many
-    plants were kept (team 0 and unpositioned rows are dropped).
+    A plant is an upgrade only when an unpaired constructor *bscup BUILD
+    for the same team is within UPGRADE_OBJECT_SEC and POOL_SITE_M. That
+    BUILD becomes the upgrade mesh. Every other plant is the faction base
+    pool, including a replant after the previous pool was destroyed.
+    Plants and pool-stem kills are applied in tick order, kills first on
+    a shared tick, so a replant sees the death. Returns how many plants
+    were kept (team 0 and unpositioned rows are dropped).
     """
     if not plants:
         return 0
@@ -5746,12 +5754,14 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
         if tick < min_tick:
             tick = min_tick
         kept.append((tick, side, float(raw["x"]), float(raw.get("y") or 0.0), float(raw["z"])))
+    if not kept:
+        return 0
     kept.sort(key=lambda row: row[0])
     for tick, side, x, y, z in kept:
         _assign_pool_site(sites, x, z)
 
-    window = int(round(UPGRADE_JOIN_SEC * max(1, tick_rate)))
     object_window = int(round(UPGRADE_OBJECT_SEC * max(1, tick_rate)))
+    pair_limit = POOL_SITE_M * POOL_SITE_M
     seq = {1: 0, 2: 0}
 
     def _pretty(stem):
@@ -5759,21 +5769,57 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
             return "Pool"
         return odf_map.get(stem + ".odf") or odf_map.get(stem) or stem
 
-    def _unlinked_build(side, site_id, tick, join_ticks):
+    def _pair_build(side, x, z, tick):
+        """Unpaired constructor upgrade closest in time, then distance."""
+        best = None
+        best_key = None
         for inst in instances:
-            if inst.get("kind") != "extractor_upgrade" or inst.get("_pool_linked"):
-                continue
-            if inst.get("team") != side or inst.get("site") != site_id:
+            if inst.get("_pool_claimed") or inst.get("kind") != "extractor_upgrade":
                 continue
             if not str(inst.get("id") or "").startswith("b-"):
                 continue
-            if abs((inst.get("spawn_tick") or 0) - tick) > join_ticks:
+            if inst.get("team") != side:
                 continue
-            return inst
-        return None
+            if not isinstance(inst.get("x"), (int, float)) or not isinstance(inst.get("z"), (int, float)):
+                continue
+            dt = abs((inst.get("spawn_tick") or 0) - tick)
+            if dt > object_window:
+                continue
+            dist = (inst["x"] - x) ** 2 + (inst["z"] - z) ** 2
+            if dist > pair_limit:
+                continue
+            key = (dt, dist, inst.get("id") or "")
+            if best_key is None or key < best_key:
+                best = inst
+                best_key = key
+        if best is not None:
+            best["_pool_claimed"] = True
+        return best
+
+    classified = []
+    for tick, side, x, y, z in kept:
+        site = _assign_pool_site(sites, x, z)
+        build = _pair_build(side, x, z, tick)
+        classified.append({
+            "tick": tick,
+            "side": side,
+            "x": x,
+            "y": y,
+            "z": z,
+            "site_id": site["id"],
+            "build": build,
+        })
+
+    # site's next plant, for kill ranking. A later base plant means the
+    # pool was gone; a later upgrade means it was still standing.
+    upcoming = {}
+    for plant in classified:
+        upcoming.setdefault((plant["side"], plant["site_id"]), []).append(
+            (plant["tick"], plant["build"] is not None)
+        )
 
     def _holder(side, site_id, tick):
-        # Unlinked constructor BUILDs are join targets, not the pool a plant replaces.
+        # An unlinked constructor BUILD is not in the world yet.
         found = None
         for inst in instances:
             if not _is_pool_instance(inst):
@@ -5788,41 +5834,113 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
                 found = inst
         return found
 
-    for tick, side, x, y, z in kept:
-        site = _assign_pool_site(sites, x, z)
-        holder = _holder(side, site["id"], tick)
-        build = _unlinked_build(
-            side, site["id"], tick, window if holder is not None else object_window,
-        )
-        if build is not None or holder is not None:
-            if holder is not None and holder is not build:
-                holder["death_tick"] = tick
-                holder["death_reason"] = "upgraded"
-            if build is not None:
-                build["spawn_tick"] = tick
-                build["_pool_linked"] = True
-                build["site"] = site["id"]
+    def _retire(inst, tick, reason):
+        inst["death_tick"] = tick
+        inst["death_reason"] = reason
+
+    def _evidence_rank(inst, tick):
+        nxt = None
+        for plant_tick, is_upgrade in upcoming.get((inst.get("team"), inst.get("site")), ()):
+            if plant_tick > tick:
+                nxt = is_upgrade
+                break
+        if nxt is False:
+            return 0
+        if nxt is None:
+            return 1
+        return 2
+
+    def _apply_kill(row, stem):
+        side = _slot_side(row.get("victim_team"))
+        if side not in (1, 2):
+            return
+        tick = int(row.get("tick") or 0)
+        candidates = []
+        for inst in instances:
+            if inst.get("team") != side or not _is_pool_instance(inst):
                 continue
-            code = _faction_code_for_side(match, side)
-            stem = _FACTION_UPGRADE_STEM.get(code)
-            seq[side] += 1
-            inst = _make_pool_instance(
-                side, stem, _pretty(stem), "extractor_upgrade", site["id"],
-                x, y, z, tick, ship_caps,
-            )
-            inst["id"] = f"pool-{side}-{seq[side]}"
-            inst["_pool_linked"] = True
-            instances.append(inst)
-            continue
+            if _norm_build_odf(inst.get("odf")) != stem:
+                continue
+            if str(inst.get("id") or "").startswith("b-") and not inst.get("_pool_linked"):
+                continue
+            if not _pool_alive_at(inst, tick):
+                continue
+            candidates.append(inst)
+        if not candidates:
+            return
+        killer_xz = None
+        killer = row.get("killer")
+        if killer and killer in (players or {}):
+            t_sec = (tick - min_tick) / max(1, tick_rate)
+            killer_xz = _trail_xz_at((players[killer] or {}).get("trail"), t_sec)
+
+        def _key(inst):
+            if killer_xz:
+                dist = (inst["x"] - killer_xz[0]) ** 2 + (inst["z"] - killer_xz[1]) ** 2
+            else:
+                dist = 0.0
+            return (_evidence_rank(inst, tick), dist, inst.get("spawn_tick") or 0, inst.get("id") or "")
+
+        chosen = min(candidates, key=_key)
+        _retire(chosen, tick, "destroyed")
+
+    def _apply_plant(plant):
+        tick = plant["tick"]
+        side = plant["side"]
+        site_id = plant["site_id"]
+        build = plant["build"]
+        holder = _holder(side, site_id, tick)
+        if build is not None:
+            if holder is not None and holder is not build:
+                _retire(holder, tick, "upgraded")
+            build["spawn_tick"] = tick
+            build["_pool_linked"] = True
+            build["site"] = site_id
+            return
+        if holder is not None:
+            _retire(holder, tick, "census")
         code = _faction_code_for_side(match, side)
         stem = _FACTION_EXTRACTOR_STEM.get(code)
         seq[side] += 1
         inst = _make_pool_instance(
-            side, stem, _pretty(stem), "extractor", site["id"],
-            x, y, z, tick, ship_caps,
+            side, stem, _pretty(stem), "extractor", site_id,
+            plant["x"], plant["y"], plant["z"], tick, ship_caps,
         )
         inst["id"] = f"pool-{side}-{seq[side]}"
         instances.append(inst)
+
+    def _apply_orphan(inst):
+        # A constructor upgrade the recording never planted. Still the
+        # upgrade: the pool on its site retires at the BUILD tick.
+        tick = int(inst.get("spawn_tick") or 0)
+        holder = _holder(inst.get("team"), inst.get("site"), tick)
+        if holder is not None and holder is not inst:
+            _retire(holder, tick, "upgraded")
+        inst["_pool_linked"] = True
+
+    events = []
+    for row in kills or []:
+        stem = _norm_build_odf(row.get("victim_odf"))
+        if not _is_pool_victim_stem(stem):
+            continue
+        events.append((int(row.get("tick") or 0), 0, ("kill", row, stem)))
+    for plant in classified:
+        events.append((plant["tick"], 1, ("plant", plant)))
+    for inst in instances:
+        if inst.get("_pool_claimed") or inst.get("kind") != "extractor_upgrade":
+            continue
+        if not str(inst.get("id") or "").startswith("b-"):
+            continue
+        events.append((int(inst.get("spawn_tick") or 0), 2, ("orphan", inst)))
+    events.sort(key=lambda item: (item[0], item[1]))
+    for _tick, _order, event in events:
+        kind = event[0]
+        if kind == "kill":
+            _apply_kill(event[1], event[2])
+        elif kind == "plant":
+            _apply_plant(event[1])
+        else:
+            _apply_orphan(event[1])
     return len(kept)
 
 
@@ -5835,8 +5953,10 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
     only -- never HP inference. Turret-class instances stay
     death_reason='untracked' while TURRET_DEATHS_RELIABLE is False.
 
-    When `pool_plants` is non-empty (proto v5), each plant becomes a
-    base extractor or the upgrade that replaces one. A pool the census
+    When `pool_plants` is non-empty (proto v5), each plant is a base
+    extractor unless a constructor *bscup BUILD pairs with it (then that
+    BUILD is the upgrade and the pool on the site dies 'upgraded').
+    Pool-stem kills run in the same tick-ordered pass. A pool the census
     loses with no kill row is retired death_reason='census' (a demolish
     emits no kill). Always emitted (empty instances list on matches
     with no signal).
@@ -5933,7 +6053,7 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
     _tag_upgrade_sites(instances, pool_sites)
     plant_count = _apply_pool_plants(
         instances, pool_plants or [], match_data, ship_caps, odf_map,
-        tick_rate, min_tick, pool_sites,
+        tick_rate, min_tick, pool_sites, kills, players,
     )
 
     living = {}
@@ -5943,6 +6063,9 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         # An upgrade plant already retired its base. A later kill of that
         # ODF must not land on the retired row.
         if inst.get("death_tick") is not None:
+            continue
+        # v5 pool deaths are applied in the plant/kill pass above.
+        if plant_count and _is_pool_instance(inst):
             continue
         living.setdefault((inst["team"], inst["odf"]), []).append(inst)
 
@@ -5958,22 +6081,27 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         if not pool:
             continue
         tick = int(row.get("tick") or 0)
+        # A row that has not spawned yet is not this kill. Pre-v5 upgrades
+        # and every other building share this gate.
+        alive = [inst for inst in pool if (inst.get("spawn_tick") or 0) <= tick]
+        if not alive:
+            continue
         t_sec = (tick - min_tick) / max(1, tick_rate)
         killer_xz = None
         killer = row.get("killer")
         if killer and killer in players:
             killer_xz = _trail_xz_at((players[killer] or {}).get("trail"), t_sec)
         chosen = None
-        if killer_xz and len(pool) > 1:
+        if killer_xz and len(alive) > 1:
             kx, kz = killer_xz
             best = None
-            for inst in pool:
+            for inst in alive:
                 d = (inst["x"] - kx) ** 2 + (inst["z"] - kz) ** 2
                 if best is None or d < best[0]:
                     best = (d, inst)
-            chosen = best[1] if best else pool[0]
+            chosen = best[1] if best else alive[0]
         else:
-            chosen = pool[0]
+            chosen = alive[0]
         chosen["death_tick"] = tick
         chosen["death_reason"] = "destroyed"
         pool.remove(chosen)
@@ -5990,6 +6118,7 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         )
     for inst in instances:
         inst.pop("_pool_linked", None)
+        inst.pop("_pool_claimed", None)
     return block
 
 

@@ -4,28 +4,28 @@ overview: "Make the 3D maps treat pools and buildings the way the game does: fla
 todos:
   - id: sidecar
     content: "extract_props.py: deposit ownership, deposit flag, building_cuts.json, schema 4; rerun all maps + verify_terrain_scale.py"
-    status: pending
+    status: completed
   - id: props-bias
     content: "props.js: negative depth offset for pool pads, expose pool handles; bump cache-busters"
-    status: pending
+    status: completed
   - id: markers
     content: unmeshedPools helper; viewer.js and replay.js draw yellow markers only for pools without a mesh
-    status: pending
+    status: completed
   - id: occupancy
     content: "replay-structures.js: applyPoolOccupancy hides pool mesh/marker under a living catalog extractor; extractor snaps to pool row"
-    status: pending
+    status: completed
   - id: pivot-seat
     content: "replay-ship-models.js: seat deployed buildings with a terrainPatch by base level instead of lowest vertex"
-    status: pending
+    status: completed
   - id: terrain-cuts
     content: "terrain-cuts.js: uniform-based discard on terrain materials + depth material, driven by living structures"
-    status: pending
+    status: completed
   - id: docs
     content: Update render README, DEVELOPER_GUIDE 12.2, project-overview replay bullet
-    status: pending
+    status: completed
   - id: verify
     content: "Browser check: map page, Oasis v5 replay, Matriarch replay, shadows/floors/models-off/LEGO"
-    status: pending
+    status: completed
 isProject: false
 ---
 

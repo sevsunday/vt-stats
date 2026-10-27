@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
-import { sampleTerrainHeight } from './objects.js?v=terrain1';
+import { sampleTerrainHeight } from './objects.js?v=pools4';
 
 // Module-relative so a page outside the replay folder still finds the GLBs.
 const MODELS_ROOT = new URL('../../../data/models/', import.meta.url);
@@ -37,8 +37,17 @@ const CUTOUT_MID_SHARE = 0.40;
 
 /* An owning piece shares faces with the terrain snapped to its patch (the
  * gate's wing tops sit exactly at the patch height). Pushing the piece back
- * in depth lets the terrain draw there, as the game does. */
+ * in depth lets the terrain draw there, as the game does. A pool pad is the
+ * opposite: it is the surface, and the flattened ground must not show
+ * through it. */
 const OWNER_DEPTH_OFFSET = 1;
+const POOL_DEPTH_OFFSET = -2;
+
+function depthOffsetOf(row) {
+  if (row && row.piece && row.piece.deposit) return POOL_DEPTH_OFFSET;
+  if (ownsTerrain(row)) return OWNER_DEPTH_OFFSET;
+  return 0;
+}
 
 let cutoutCanvas = null;
 
@@ -116,16 +125,16 @@ function loadTex(loader, cache, dir, name, anisotropy, detectCutout) {
   });
 }
 
-async function bindTextures(root, loader, cache, anisotropy, emissive, owner) {
+async function bindTextures(root, loader, cache, anisotropy, emissive, depthOffset) {
   const pending = [];
   root.traverse((obj) => {
     if (!obj.isMesh) return;
     for (const mat of materialsOf(obj)) {
       if (!mat) continue;
-      if (owner) {
+      if (depthOffset) {
         mat.polygonOffset = true;
-        mat.polygonOffsetFactor = OWNER_DEPTH_OFFSET;
-        mat.polygonOffsetUnits = OWNER_DEPTH_OFFSET;
+        mat.polygonOffsetFactor = depthOffset;
+        mat.polygonOffsetUnits = depthOffset;
       }
       if (!mat.name) continue;
       pending.push(loadTex(loader, cache, PERF_DIR, mat.name, anisotropy, true).then((tex) => {
@@ -175,6 +184,7 @@ export async function buildPropsGroup(props, hm, renderer) {
     (renderer && renderer.capabilities.getMaxAnisotropy()) || 1,
   );
   const base = hm.baseOffsetM || 0;
+  const pools = [];
 
   await Promise.all([...byStem.entries()].map(async ([stem, items]) => {
     let gltf;
@@ -186,18 +196,19 @@ export async function buildPropsGroup(props, hm, renderer) {
     }
     const piece = items[0].piece;
     const emissive = new Set(((piece && piece.emissive) || []).map(s => String(s).toLowerCase()));
-    const owner = ownsTerrain(items[0]);
-    await bindTextures(gltf.scene, texLoader, texCache, anisotropy, emissive, owner);
+    await bindTextures(gltf.scene, texLoader, texCache, anisotropy, emissive, depthOffsetOf(items[0]));
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const clone = gltf.scene.clone(true);
       const y = Number.isFinite(item.y) ? item.y - base : sampleTerrainHeight(hm, item.x, item.z);
       clone.position.set(item.x, y, item.z);
+      if (item.piece && item.piece.deposit) pools.push({ x: item.x, y, z: item.z, object: clone });
       clone.scale.z = -1;
       const yaw = Number(item.yaw);
       if (Number.isFinite(yaw)) clone.rotation.y = THREE.MathUtils.degToRad(yaw);
       group.add(clone);
     }
   }));
+  group.userData.pools = pools;
   return group;
 }

@@ -1,15 +1,19 @@
 /* render/js/replay-structures.js
  *
  * Phase 1: starting recycler glyphs from team_base centroids.
- * Phase 3: pre-derived `structures[]` primitives, pool upgrade tint,
+ * Phase 3: pre-derived `structures[]` primitives, pool occupancy,
  * armory delivery drops. Untracked turret instances are never rendered.
+ *
+ * A living catalog extractor hides the empty pool under it (mesh or the
+ * yellow fallback marker) and sits on that pool's row. A box or a LEGO
+ * body leaves the pool showing, because those bodies do not fill the bowl.
  */
 
 import * as THREE from 'three';
-import { sampleTerrainHeight } from './objects.js?v=terrain1';
+import { sampleTerrainHeight } from './objects.js?v=pools4';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
-import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=shadows1';
+import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=pools4';
 
 let prepareShadow = null;
 
@@ -102,13 +106,44 @@ function teamColor(team) {
   return TEAM_TINTS[team] || TEAM_TINTS._;
 }
 
+/**
+ * placeStructureMesh writes the holder's position, which would wipe a lift
+ * stored on the cloned wrapper. Keep that lift on a child. A building seated
+ * on its patch (seatBase) has no lift: model y = 0 stays on the ground.
+ */
+function holdSeat(body) {
+  const seatBase = !!(body.userData && body.userData.seatBase);
+  const lift = seatBase ? 0 : (body.position.y || 0);
+  body.position.y = 0;
+  const pivot = new THREE.Group();
+  pivot.position.y = lift;
+  pivot.add(body);
+  const holder = new THREE.Group();
+  holder.name = body.name;
+  holder.add(pivot);
+  holder.userData.replayModel = true;
+  holder.userData.modelStem = (body.userData && body.userData.modelStem) || '';
+  holder.userData.seatLift = lift;
+  holder.userData.seatBase = seatBase;
+  return holder;
+}
+
+/** A real catalog body. Boxes and LEGO stand-ins do not fill a pool bowl. */
+function isCatalogBody(mesh) {
+  if (!mesh || !mesh.userData || !mesh.userData.replayModel) return false;
+  return String(mesh.userData.modelStem || '').indexOf('lego:') !== 0;
+}
+
 /** Catalog mesh when loaded, otherwise the sized box. Hull-bottom yOff is 0 for a mesh.
  *  `deployedPose` holds a building's deploy clip on its last frame. */
 function makeStructureVisual(odf, team, boxSize, boxName, deployedPose) {
   let visual;
   if (odf && modelsEnabled() && modelReady(odf)) {
-    const body = cloneModelBody(odf, teamColor(team), deployedPose ? { deployed: true } : null);
-    if (body) visual = { mesh: body, yOff: 0, isModel: true };
+    let body = cloneModelBody(odf, teamColor(team), deployedPose ? { deployed: true } : null);
+    if (body) {
+      body = holdSeat(body);
+      visual = { mesh: body, yOff: 0, isModel: true };
+    }
   }
   if (!visual) {
     visual = {
@@ -563,83 +598,109 @@ export function livingUpgradeAnchors(items) {
   return out;
 }
 
-const POOL_BASE_COLOR = 0xffd24a;
+const _hiddenMarker = new THREE.Matrix4().makeTranslation(0, -1e5, 0);
+const _markerScratch = new THREE.Matrix4();
 
 function poolAnchorOf(it) {
   if (!it || !it.alive) return null;
   const inst = it.inst || {};
   if (!isPoolKind(inst) && !it.isUpgrade) return null;
   if (!Number.isFinite(it.x) || !Number.isFinite(it.z)) return null;
-  return {
-    x: it.x,
-    z: it.z,
-    team: it.team != null ? it.team : inst.team,
-    upgrade: !!(it.isUpgrade || inst.kind === 'extractor_upgrade' || isUpgradeOdf(inst.odf)),
-    spawn: it.spawnSec || 0,
-  };
+  return { x: it.x, z: it.z, item: it };
+}
+
+function nearestPool(pools, x, z, limit2) {
+  let best = null;
+  let bestD = limit2;
+  for (let i = 0; i < pools.length; i++) {
+    const p = pools[i];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+    const dx = p.x - x;
+    const dz = p.z - z;
+    const d = dx * dx + dz * dz;
+    if (d > bestD) continue;
+    bestD = d;
+    best = p;
+  }
+  return best;
+}
+
+function snapExtractor(it, pool) {
+  const meshes = [it.deployedMesh, it.mobileMesh, it.mesh];
+  for (let i = 0; i < meshes.length; i++) {
+    const mesh = meshes[i];
+    if (mesh) mesh.position.set(pool.x, pool.y, pool.z);
+  }
+  it.x = pool.x;
+  it.z = pool.z;
+}
+
+function markerBases(mesh) {
+  if (mesh.userData.vtPoolBase) return mesh.userData.vtPoolBase;
+  const bases = [];
+  for (let i = 0; i < mesh.count; i++) {
+    mesh.getMatrixAt(i, _markerScratch);
+    bases.push(_markerScratch.clone());
+  }
+  mesh.userData.vtPoolBase = bases;
+  return bases;
 }
 
 /**
- * Color each map scrap-pool pad by the team that holds it.
- * `items` is the structure layer (alive flags already updated).
- * A pad snaps to the nearest living extractor within POOL_SNAP_M.
- * Upgraded pads pulse; the rest of the mesh stays the stock yellow.
+ * A living extractor occupies the nearest pool within POOL_SNAP_M.
+ * A catalog body hides that pool (the mesh, or the yellow fallback marker)
+ * and takes the pool row's exact position. A box or a LEGO body leaves the
+ * pool showing. Scrubbing back, or a census/kill death, shows the pool again.
+ * `poolProps` is `propsGroup.userData.pools` (empty until the props load).
  */
-export function applyPoolUpgradeTint(poolsGroup, items) {
+export function applyPoolOccupancy(poolsGroup, poolProps, items) {
+  const anchors = [];
+  for (const it of items || []) {
+    const anchor = poolAnchorOf(it);
+    if (anchor) anchors.push(anchor);
+  }
+  const props = poolProps || [];
+  const limit = POOL_SNAP_M * POOL_SNAP_M;
+  const claimed = new Set();
+  for (let i = 0; i < anchors.length; i++) {
+    const anchor = anchors[i];
+    const mesh = anchor.item.mesh;
+    if (!isCatalogBody(mesh)) continue;
+    const pool = nearestPool(props, anchor.x, anchor.z, limit);
+    if (!pool) continue;
+    claimed.add(pool);
+    snapExtractor(anchor.item, pool);
+    anchor.x = pool.x;
+    anchor.z = pool.z;
+  }
+  for (let i = 0; i < props.length; i++) {
+    const pool = props[i];
+    if (pool && pool.object) pool.object.visible = !claimed.has(pool);
+  }
   if (!poolsGroup) return;
+  const points = poolsGroup.userData.poolPoints || [];
   const meshes = [];
   poolsGroup.traverse((obj) => {
     if (obj.isInstancedMesh && obj.userData && obj.userData.kind === 'scrap_pool') {
       meshes.push(obj);
     }
   });
-  if (!meshes.length) return;
-  const anchors = [];
-  for (const it of items || []) {
-    const anchor = poolAnchorOf(it);
-    if (anchor) anchors.push(anchor);
-  }
-  const points = poolsGroup.userData.poolPoints || [];
-  const pulse = 0.72 + 0.28 * Math.sin(performance.now() / 400);
-  const limit = POOL_SNAP_M * POOL_SNAP_M;
-  const color = new THREE.Color();
-  for (const mesh of meshes) {
-    const n = mesh.count || 0;
-    if (!mesh.userData.vtPoolTintReady && mesh.material) {
-      mesh.userData.vtBaseColor = mesh.material.color ? mesh.material.color.getHex() : POOL_BASE_COLOR;
-      // instanceColor multiplies material.color, so drive the pad color
-      // entirely from the instance and keep the material white.
-      mesh.material.color.setHex(0xffffff);
-      if (mesh.material.emissive) mesh.material.emissive.setHex(0x000000);
-      mesh.material.emissiveIntensity = 0;
-      mesh.userData.vtPoolTintReady = true;
-    }
-    for (let i = 0; i < n; i++) {
+  for (let m = 0; m < meshes.length; m++) {
+    const mesh = meshes[m];
+    const bases = markerBases(mesh);
+    for (let i = 0; i < mesh.count; i++) {
       const p = points[i];
-      let owner = null;
-      let best = limit;
+      let occupied = false;
       if (p) {
-        for (const a of anchors) {
-          const dx = a.x - p.x;
-          const dz = a.z - p.z;
-          const d = dx * dx + dz * dz;
-          if (d > limit) continue;
-          const closer = d < best - 1e-6;
-          const tie = Math.abs(d - best) <= 1e-6 && owner && a.spawn >= owner.spawn;
-          if (!owner || closer || tie) {
-            best = d;
-            owner = a;
-          }
+        for (let a = 0; a < anchors.length; a++) {
+          const dx = anchors[a].x - p.x;
+          const dz = anchors[a].z - p.z;
+          if (dx * dx + dz * dz <= limit) { occupied = true; break; }
         }
       }
-      if (!owner) color.setHex(mesh.userData.vtBaseColor || POOL_BASE_COLOR);
-      else {
-        color.setHex(teamColor(owner.team));
-        if (owner.upgrade) color.multiplyScalar(pulse);
-      }
-      mesh.setColorAt(i, color);
+      mesh.setMatrixAt(i, occupied ? _hiddenMarker : bases[i]);
     }
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 }
 

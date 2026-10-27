@@ -27,11 +27,11 @@ import {
   sunDirectionAt,
 } from './atmosphere.js?v=atmo1';
 import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
-import { buildPropsGroup } from './props.js?v=terrain1';
+import { buildPropsGroup } from './props.js?v=props4';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface, buildTunnelIndex, tunnelAt } from './terrain-owners.js?v=3';
 
-import { sampleSheetHeight, sampleTerrainHeight } from './objects.js?v=terrain1';
+import { sampleSheetHeight, sampleTerrainHeight, unmeshedPools } from './objects.js?v=pools4';
 import {
   readReplayUrlParams,
   pushReplayUrlState,
@@ -66,7 +66,7 @@ import {
   modelsEnabled,
   setModelsEnabled,
   ensureMatchModels,
-} from './replay-ship-models.js?v=shadows1';
+} from './replay-ship-models.js?v=pools4';
 import {
   ensureQualityChosen,
   openReplayDialog,
@@ -92,7 +92,7 @@ import {
   updateEngagements,
   clearEngagementHighlights,
 } from './replay-engagements.js';
-import { buildObjectsGroup } from './objects.js?v=terrain1';
+import { buildObjectsGroup } from './objects.js?v=pools4';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
 import { buildShipTracker } from './replay-ship-tracker.js';
@@ -111,7 +111,7 @@ import {
   buildStructuresLayer,
   updateStructuresLayer,
   applyStructureModelMode,
-  applyPoolUpgradeTint,
+  applyPoolOccupancy,
   collectArmoryDrops,
   triggerArmoryDrop,
   updateArmoryDrops,
@@ -120,7 +120,13 @@ import {
   recyclerPadXZ,
   enemyBaseOf,
   setStructureShadowPrep,
-} from './replay-structures.js?v=pools1';
+} from './replay-structures.js?v=pools4';
+import {
+  installTerrainCuts,
+  createCutDepthMaterial,
+  updateTerrainCuts,
+  loadBuildingCuts,
+} from './terrain-cuts.js?v=pools4';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -697,6 +703,7 @@ function detachSkyKeepAtmosphere() {
 // ============================================================================
 
 async function initFloor(mapData) {
+  loadBuildingCuts();
   const hm = mapData.heightmap;
   // One mesh: the 8 m grid at its exact spacing, the 2 m blocks stitched in
   // around tunnel pieces, and the tunnel cuts. hm.surface also drives
@@ -738,10 +745,12 @@ async function initFloor(mapData) {
     metalness: 0.02,
     flatShading: false,
   });
+  installTerrainCuts(rampMat);
   STATE.terrainRampMat = rampMat;
 
   const mesh = new THREE.Mesh(geom, rampMat);
   mesh.name = 'terrain';
+  mesh.customDepthMaterial = createCutDepthMaterial();
   STATE.terrainMesh = mesh;
   STATE.worldGroup.add(mesh);
 
@@ -796,6 +805,7 @@ async function buildMinimapMaterial(mapData) {
     roughness: 0.85,
     metalness: 0.02,
   });
+  installTerrainCuts(STATE.terrainMinimapMat);
 }
 
 function loadTexture(url) {
@@ -875,7 +885,8 @@ function initEngagements() {
 
 function initPools() {
   const allObjs = (STATE.mapData && STATE.mapData.objects) || [];
-  const objs = allObjs.filter(o => o && o.kind === 'scrap_pool');
+  const props = (STATE.mapData && STATE.mapData.props) || [];
+  const objs = unmeshedPools(allObjs, props);
   if (objs.length === 0) return;
   const group = buildObjectsGroup({ ...STATE.mapData, objects: objs });
   group.name = 'replay-pools';
@@ -1132,6 +1143,7 @@ function loadHqFloor() {
         if (!built) return null;
         STATE.terrainTileMat = built.material;
         STATE.terrainTileTextures = built.textures;
+        installTerrainCuts(built.material);
         if (STATE.shadows) STATE.shadows.prepareMaterial(built.material);
         return built.material;
       });
@@ -2514,8 +2526,14 @@ function renderFrame(dtSec = 0) {
   }
   if (STATE.structures) {
     updateStructuresLayer(STATE.structures, STATE.progressSec);
-    applyPoolUpgradeTint(STATE.poolsGroup, STATE.structures);
+    applyPoolOccupancy(
+      STATE.poolsGroup,
+      STATE.propsGroup && STATE.propsGroup.userData.pools,
+      STATE.structures,
+    );
   }
+  const cutItems = STATE.structures || STATE.recyclers;
+  if (cutItems) updateTerrainCuts(cutItems, STATE.camera);
   if (STATE.armoryDrops && STATE.armoryDrops.length) {
     updateArmoryDrops(STATE.worldGroup, STATE.armoryDrops, dtSec || 0.016);
   }

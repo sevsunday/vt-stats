@@ -24,7 +24,7 @@ import {
   modelsEnabled,
   stemForOdf,
   modelReady,
-} from './replay-ship-models.js?v=shadows1';
+} from './replay-ship-models.js?v=pools4';
 
 // ------------------ Constants ------------------
 

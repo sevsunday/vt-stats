@@ -119,6 +119,37 @@ function buildSingleKind(kind, objects, hm) {
   return mesh;
 }
 
+const POOL_MESH_MATCH_M = 2;
+
+/**
+ * Scrap-pool markers with no deposit mesh within 2 m. A placed pool model
+ * (props sidecar, piece.deposit) is the pool; the yellow cylinder is only
+ * the fallback for a map whose pool mesh we could not resolve.
+ */
+export function unmeshedPools(objects, props) {
+  const deposits = [];
+  for (const row of props || []) {
+    if (!row || !row.piece || !row.piece.deposit) continue;
+    if (!Number.isFinite(row.x) || !Number.isFinite(row.z)) continue;
+    deposits.push(row);
+  }
+  const out = [];
+  for (const obj of objects || []) {
+    if (!obj || obj.kind !== 'scrap_pool') continue;
+    let meshed = false;
+    for (let i = 0; i < deposits.length; i++) {
+      const row = deposits[i];
+      if (Math.abs(row.x - obj.x) <= POOL_MESH_MATCH_M
+          && Math.abs(row.z - obj.z) <= POOL_MESH_MATCH_M) {
+        meshed = true;
+        break;
+      }
+    }
+    if (!meshed) out.push(obj);
+  }
+  return out;
+}
+
 function buildLooseScrap(objects, hm) {
   const items = objects.filter(o => o.kind === 'loose_scrap');
   if (items.length === 0) return null;

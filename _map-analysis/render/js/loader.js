@@ -225,7 +225,7 @@ export async function loadPropsSidecar(stem) {
   const empty = { props: [], terrainHires: [] };
   if (!stem) return empty;
   try {
-    const res = await fetch(dataUrl(`${stem}.props.json?v=props3`));
+    const res = await fetch(dataUrl(`${stem}.props.json?v=props4`));
     if (!res.ok) return empty;
     const doc = await res.json();
     if (!Array.isArray(doc.props)) return empty;

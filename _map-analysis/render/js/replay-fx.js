@@ -13,7 +13,7 @@
  */
 
 import * as THREE from 'three';
-import { sampleTerrainHeight } from './objects.js?v=terrain1';
+import { sampleTerrainHeight } from './objects.js?v=pools4';
 
 const BEACON_HEIGHT_M    = 220;     // tall enough to be visible above ridges
 const BEACON_RADIUS_M    = 4.5;

@@ -247,11 +247,11 @@ corpus-wide frame test. Run it after any `.TER`, `_ter_full.py` or
 ## Props sidecar and terrain ownership: `<stem>.props.json`
 
 Written by `scripts/extract_props.py` (standalone; rerun after a models
-index regen or a `.TER` change). Schema 3:
+index regen or a `.TER` change). Schema 4:
 
 ```jsonc
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "map_stem": "vsroverlook",
   "props": [ { "stem": "pbtunn03", "x": -112, "y": 50, "z": 48, "yaw": 180 } ],
   "pieces": {
@@ -326,9 +326,63 @@ reference point is inside a rect, within its span, and under the sheet.
 Every prop sits at its authored BZN height, as in the game: authors sink
 rocks, palms and ruin walls on purpose (Oasis buries `rbruin08` 13.5 m,
 Beyond sinks all its scenery 1 m). A row without a height is snapped to the
-drawn surface. `OWNERSHIP_SCOPE` in the extractor limits rects and patches to tunnel pieces
-(generic props whose cells open onto another piece, bridges included);
-`"all"` would also flatten under pools and buildings.
+drawn surface. `OWNERSHIP_SCOPE` stays `"tunnels"`, and deposits are admitted
+alongside those pieces. A pool ODF (`inheritanceChain` ending in `deposit`,
+`uepool01`, `miradorpool`, …) gets `piece.deposit: true`, its flat
+`terrainPatch` (the pad) and its bowl `tunnels` rect. The 2 m `terrainHires`
+blocks follow any patch, so pool edges are crisp. Buildings that declare
+cells but are not tunnel pieces stay out of the static map; the replay cuts
+those while the building stands (`building_cuts.json`, below). `"all"` would
+also flatten under every such building.
+
+Deposit pads are coplanar with that flattened ground. `props.js` gives them
+`POOL_DEPTH_OFFSET` (−2) so the pad draws over the terrain; every other
+terrain owner keeps `OWNER_DEPTH_OFFSET` (+1) so the ground wins.
+`buildPropsGroup` records `group.userData.pools` (`{x, y, z, object}`, scene
+space, y already minus `baseOffsetM`) for the replay's extractor swap. The
+map page, the replay and the Explorer all pick up the pad, the bowl cut and
+the depth bias from this sidecar. A yellow cylinder (`unmeshedPools` in
+`objects.js`) is drawn only for a `scrap_pool` with no deposit row within 2 m.
+
+## Building cuts: `building_cuts.json`
+
+`extract_props.py` also writes `data/render/building_cuts.json` (schema 1,
+one file for the corpus, not one per map). One entry per building ODF with
+`tunnelCount > 0` and a model: `{stem, rects: [{x0, x1, z0, z1, y0, y1}]}`
+in engine-local metres, the same construction as a prop's `tunnels` without
+the edge string. Keyed by ODF, because two ODFs can share a mesh and still
+declare different cells. The vertical span of each rect is the mesh bounds,
+not a per-cell height.
+
+The static surface does not cut these. `js/terrain-cuts.js` does, in the
+replay only, and only while a catalog model of that ODF is alive (not a box,
+not a LEGO body, not a recycler still on its mobile hull).
+`installTerrainCuts` discards a fragment that falls inside an active rect and
+within that rect's vertical span (`SPAN_MARGIN_M` 0.5, the same margin as
+`terrain-owners.js`). The rects are uniforms (`MAX_CUT_RECTS` 64), no new
+sampler, so the floor stays within `5 + groups + 4 <= 16`. The terrain
+mesh's `customDepthMaterial` discards the same fragments, so the cut ground
+does not shadow the pit. Call `installTerrainCuts` after the material's own
+`onBeforeCompile` and before `shadows.js` `prepareMaterial`, which chains the
+same way. Rects follow the model wrapper (`worldCutRect` in
+`replay-ship-models.js`: the GLB's Z is already negated, `scale.z = -1`
+undoes it, then yaw +90, which stays axis-aligned). A deployed building whose
+model declares a `terrainPatch` is seated on model y = 0 (the patch). Ships,
+mobile recycler hulls and buildings without a patch stay on their lowest
+vertex. `STRUCTURE_GROUND_LIFT` (0.35 m) still raises the holder.
+
+A living catalog extractor hides the empty pool under it and takes that
+row's exact x, y, z (`applyPoolOccupancy`, within 8 m). The upgrade swap
+already kills the base and spawns the upgrade on the same tick, so the pool
+stays hidden through it. A census or kill death shows the pool again. A box
+or a LEGO body leaves the pool visible. Extractors declare no cells of their
+own; their sunken parts sit in the pool's bowl cut.
+
+There is no runtime flatten for these replay-placed buildings (the 2 m
+ground is not shipped to the browser). On a sloped pad the cut edge may not
+meet the floor. The wireframe floor is the raw mesh, so it still draws the
+lines inside a cut. No `PIPELINE_VERSION`, match schema or rating change.
+The committed top-down PNGs change only if they are regenerated.
 
 ## Atmosphere: `<stem>.sky.json` (schema 5) and the lighting / fog model
 

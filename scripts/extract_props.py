@@ -19,6 +19,13 @@ every placed piece with a terrain patch, in world metres. The `.3d.json`
 heightmap is box-averaged to 8 m, which turns the engine's 2 m cliff walls at
 a tunnel mouth into 8-16 m ramps; the renderer swaps these blocks in.
 
+Schema 4 admits deposit pieces (scrap pools) into that same ownership.
+A pool's flat `terrain__h` patch flattens the pad and its `tunnelNN` cell
+cuts the bowl, and the piece is flagged `"deposit": true`. The same run
+writes `data/render/building_cuts.json`: engine-local open cells for every
+building ODF that declares `tunnelCount`, so the replay can cut the ground
+under a building while it stands.
+
     python scripts/extract_props.py
     python scripts/extract_props.py --stem vsroasis
 """
@@ -43,15 +50,15 @@ from _ter_full import _decode_v5  # noqa: E402
 from analyze_map import analyze_map_dir  # noqa: E402
 from extract_3d import find_first_file  # noqa: E402
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MODELS_INDEX = ROOT / "data" / "models" / "index.json"
 GEOMETRY_DIR = ROOT / "data" / "models" / "geometry"
 ODF_DB = ROOT / "data" / "odf.min.json"
 
-# "tunnels": only tunnel pieces carry rects and terrain patches into the
-# sidecar. "all": every ODF with tunnelCount > 0 gets its rects and every mesh
-# with a terrain__h node its patch (engine-true flattening under pools and
-# buildings, which also cuts the terrain inside their passable cells).
+# "tunnels": tunnel pieces carry rects and terrain patches. Deposit pieces
+# (scrap pools) are admitted too: their flat patch is the pad and their one
+# open cell is the bowl. "all": every ODF with tunnelCount > 0 gets its rects
+# and every mesh with a terrain__h node its patch.
 OWNERSHIP_SCOPE = "tunnels"
 
 # One tunnelNN X0/Z0/DX/DZ unit is one 8 m terrain square.
@@ -219,20 +226,33 @@ def _tunnel_defs(entry: dict) -> list[tuple[float, float, float, float, str]]:
     return out
 
 
+def _chain_tail(entry: dict | None) -> str:
+    chain = (entry or {}).get("inheritanceChain") or []
+    return str(chain[-1]).lower() if chain else ""
+
+
+def _is_deposit(entry: dict | None) -> bool:
+    """A scrap pool. The engine flattens its pad and hides the terrain over the bowl."""
+    return _chain_tail(entry) == "deposit"
+
+
 def _is_tunnel_piece(entry: dict) -> bool:
     """A generic placed prop whose passable cells join another tunnel piece.
 
-    Pools, factories, recyclers and bays also declare tunnelNN cells (for their
+    Factories, recyclers and bays also declare tunnelNN cells (for their
     drive-in pads); their inheritance chain ends in a gameplay class, so they
-    stay out. Bridges are admitted: their decks use the same cells."""
-    chain = entry.get("inheritanceChain") or []
-    if not chain or str(chain[-1]).lower() != "i76building":
+    stay out of the static map. The replay cuts those from building_cuts.json
+    while the building stands. Bridges are admitted: their decks use the same
+    cells. Deposits are admitted by _admitted, not here."""
+    if _chain_tail(entry) != "i76building":
         return False
     return any("f" in edge for *_unit, edge in _tunnel_defs(entry))
 
 
 def _admitted(entry: dict) -> bool:
-    return OWNERSHIP_SCOPE == "all" or _is_tunnel_piece(entry)
+    if OWNERSHIP_SCOPE == "all":
+        return True
+    return _is_tunnel_piece(entry) or _is_deposit(entry)
 
 
 def _fit_shift(rects: list[dict], lo_key: str, hi_key: str, lo: float, hi: float) -> float:
@@ -281,13 +301,16 @@ def _piece_for(stem: str, entry: dict | None, model: dict) -> dict:
     bounds = _glb_bounds(stem)
     bmin, bmax = bounds if bounds else ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
     admitted = bool(bounds and entry and _admitted(entry))
-    return {
+    piece = {
         "bboxMin": bmin,
         "bboxMax": bmax,
         "emissive": list(model.get("emissiveTextures") or []),
         "terrainPatch": model.get("terrainPatch") if admitted else None,
         "tunnels": _tunnel_rects(stem, entry, bmin, bmax) if admitted else [],
     }
+    if _is_deposit(entry):
+        piece["deposit"] = True
+    return piece
 
 
 # ----------------------------- sidecars -----------------------------
@@ -469,6 +492,39 @@ def _iter_maps(only: str | None):
         yield stem, folder
 
 
+def _building_cuts(odf_db: dict[str, dict], odf_index: dict[str, str]) -> dict[str, dict]:
+    """Engine-local open cells for every building ODF that declares some.
+
+    Keyed by the ODF name, not the mesh: two ODFs can share a stem and still
+    declare different cells (stock Matriarch vs the VSR one). Rects are the
+    same construction the map uses, without the edge string the static cutter
+    needs. The replay rotates them by the model's wrapper when it places one.
+    """
+    bounds_cache: dict[str, tuple[list[float], list[float]] | None] = {}
+    cuts: dict[str, dict] = {}
+    for name in sorted(odf_db):
+        entry = odf_db[name]
+        if not _tunnel_defs(entry):
+            continue
+        stem = odf_index.get(name)
+        if not stem:
+            continue
+        if stem not in bounds_cache:
+            bounds_cache[stem] = _glb_bounds(stem)
+        bounds = bounds_cache[stem]
+        if not bounds:
+            continue
+        bmin, bmax = bounds
+        rects = _tunnel_rects(stem, entry, bmin, bmax)
+        if not rects:
+            continue
+        cuts[name] = {
+            "stem": stem,
+            "rects": [{k: r[k] for k in ("x0", "x1", "z0", "z1", "y0", "y1")} for r in rects],
+        }
+    return cuts
+
+
 def extract(only: str | None) -> int:
     if not MODELS_INDEX.is_file():
         print(f"missing {MODELS_INDEX}")
@@ -476,10 +532,17 @@ def extract(only: str | None) -> int:
     odf_index, models = _load_models_index()
     odf_db = _load_odf_db()
     RENDER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    cuts = _building_cuts(odf_db, odf_index)
+    (RENDER_DATA_DIR / "building_cuts.json").write_text(
+        json.dumps({"schema_version": 1, "odfs": cuts}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(f"wrote building_cuts.json, {len(cuts)} ODFs")
     cache: dict = {}
     written = 0
     placed = 0
     tunnel_maps = 0
+    deposit_maps = 0
     hires_maps = 0
     hires_blocks = 0
     for stem, folder in _iter_maps(only):
@@ -500,10 +563,12 @@ def extract(only: str | None) -> int:
         out.write_text(_dumps_sidecar(doc), encoding="utf-8")
         written += 1
         placed += len(rows)
-        if any(p["tunnels"] for p in pieces.values()):
+        if any(p["tunnels"] and not p.get("deposit") for p in pieces.values()):
             tunnel_maps += 1
+        if any(p.get("deposit") for p in pieces.values()):
+            deposit_maps += 1
     print(f"wrote {written} prop sidecars, {placed} placements, {tunnel_maps} maps with tunnel pieces, "
-          f"{hires_blocks} hires terrain blocks on {hires_maps} maps")
+          f"{deposit_maps} maps with pools, {hires_blocks} hires terrain blocks on {hires_maps} maps")
     return 0 if written else 1
 
 
