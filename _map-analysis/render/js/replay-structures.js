@@ -626,10 +626,14 @@ function nearestPool(pools, x, z, limit2) {
 }
 
 function snapExtractor(it, pool) {
+  // pool.y is the flattened pad. The square floor is that same plane, so
+  // without the lift the terrain draws through it. Other buildings keep
+  // this clearance in placeStructureMesh; the snap used to wipe it.
+  const y = pool.y + STRUCTURE_GROUND_LIFT;
   const meshes = [it.deployedMesh, it.mobileMesh, it.mesh];
   for (let i = 0; i < meshes.length; i++) {
     const mesh = meshes[i];
-    if (mesh) mesh.position.set(pool.x, pool.y, pool.z);
+    if (mesh) mesh.position.set(pool.x, y, pool.z);
   }
   it.x = pool.x;
   it.z = pool.z;
@@ -649,7 +653,8 @@ function markerBases(mesh) {
 /**
  * A living extractor occupies the nearest pool within POOL_SNAP_M.
  * A catalog body hides that pool (the mesh, or the yellow fallback marker)
- * and takes the pool row's exact position. A box or a LEGO body leaves the
+ * and takes the pool row's x/z, raised by STRUCTURE_GROUND_LIFT so the
+ * square floor clears the pad. A box or a LEGO body leaves the
  * pool showing. Scrubbing back, or a census/kill death, shows the pool again.
  * `poolProps` is `propsGroup.userData.pools` (empty until the props load).
  */

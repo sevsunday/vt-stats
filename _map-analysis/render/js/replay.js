@@ -120,7 +120,7 @@ import {
   recyclerPadXZ,
   enemyBaseOf,
   setStructureShadowPrep,
-} from './replay-structures.js?v=pools4';
+} from './replay-structures.js?v=pools5';
 import {
   installTerrainCuts,
   createCutDepthMaterial,

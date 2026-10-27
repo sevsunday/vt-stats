@@ -372,7 +372,9 @@ mobile recycler hulls and buildings without a patch stay on their lowest
 vertex. `STRUCTURE_GROUND_LIFT` (0.35 m) still raises the holder.
 
 A living catalog extractor hides the empty pool under it and takes that
-row's exact x, y, z (`applyPoolOccupancy`, within 8 m). The upgrade swap
+row's x and z (`applyPoolOccupancy`, within 8 m), with y raised by
+`STRUCTURE_GROUND_LIFT` so the square floor covers the flattened pad.
+The upgrade swap
 already kills the base and spawns the upgrade on the same tick, so the pool
 stays hidden through it. A census or kill death shows the pool again. A box
 or a LEGO body leaves the pool visible. Extractors declare no cells of their
