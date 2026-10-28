@@ -653,8 +653,11 @@ function looseWindowChoices(durationSec) {
   let options;
   if (dur < 20 * 60) options = [60, 120];
   else if (dur < 40 * 60) options = [120, 300];
-  else options = [300, 600];
-  // Default is the window whose bar count sits nearest 10. An equal
+  else {
+    // 40 minutes and longer always open on 5 min. 10 min stays available.
+    return { options: [300, 600], defaultSec: 300 };
+  }
+  // Shorter matches: the window whose bar count sits nearest 10. An equal
   // distance keeps the finer window (it is listed first).
   const target = 10;
   let best = options[0];

@@ -383,7 +383,7 @@ On 312 sessions Flame Mine (`xfbseek`) and Solar Flare (`flare_s`) were **100% o
 
 Display-only. The 1 Hz `scrap[]` series cannot recover loose, so the full-rate classifier appends each loose delivery as `(tick, amount)` and the emit folds those into `economy.teams{n}.loose_buckets` at `ECON_LOOSE_BUCKET_SEC` (60). `economy.loose_bucket_sec` is the grain the page reads. Both teams are padded to the match length, quiet minutes included, and a delivery past the last window clamps into it. **`sum(loose_buckets) == income_loose`**, gated in `g_econ_invariants` for schema ≥ 36. A withheld-overflow flush books in the window the bank receives it. Not in contributions. `scripts/elo.py` and `scripts/elo_commander.py` do not read it — no Elo schema bump.
 
-The Economy tab card `#section-economy-loose` is a grouped bar chart. The page sums adjacent buckets. Under 20 minutes the pills are 1 and 2 minutes; 20–40 minutes, 2 and 5; 40 minutes and longer, 5 and 10. The default is the window whose bar count sits nearest 10. The card hides when the arrays are missing or both teams collected 0. Copy says collected and leads with the scrap amount.
+The Economy tab card `#section-economy-loose` is a grouped bar chart. The page sums adjacent buckets. Under 20 minutes the pills are 1 and 2 minutes; 20–40 minutes, 2 and 5; 40 minutes and longer, 5 and 10, opening on 5. Shorter matches default to the window whose bar count sits nearest 10. The card hides when the arrays are missing or both teams collected 0. Copy says collected and leads with the scrap amount.
 
 ### Loadout Profile + Per-Ship Combat (v2.3 addition)
 
