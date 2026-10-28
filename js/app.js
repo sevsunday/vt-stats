@@ -4734,12 +4734,50 @@
   // Free-text find bar. Matches the DISPLAYED unit name, the ODF stem, and
   // the resolved producer lane (so "recycler" narrows to recycler-lane
   // orders). Event type is deliberately excluded -- the filter pills own it.
-  function buildlogQueryFn(row) {
-    if (!buildlogQuery) return true;
-    const q = buildlogQuery;
+  // A comma splits the box into independent terms; a row stays if any term
+  // matches. "scav, hedoux" is Scavengers plus Hedoux. Blank pieces are
+  // dropped, so a trailing comma is the same as the word before it.
+  function buildlogQueryTerms(raw) {
+    if (!raw) return [];
+    return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  function buildlogTermMatches(row, q) {
     return econRowDisplayName(row.odf, row.name).toLowerCase().includes(q)
         || (row.odf || '').toLowerCase().includes(q)
         || (row.producer_resolved || row.producer || '').toLowerCase().includes(q);
+  }
+
+  function buildlogQueryFn(row) {
+    const terms = buildlogQueryTerms(buildlogQuery);
+    if (!terms.length) return true;
+    return terms.some(q => buildlogTermMatches(row, q));
+  }
+
+  // Scrap cost of the rows this heading counts, including ones still behind
+  // Show more. Null costs and dedup_folded queue duplicates are skipped:
+  // the pipeline keeps those rows for reconcile and leaves them out of
+  // every scrap total. Returns null when rows remain but none have a cost
+  // (the heading then shows an em dash, never a fake 0). An empty list is 0.
+  // Queue and Build rows for one order both carry that order's cost, so
+  // both pills on counts the order twice.
+  function buildlogScrapSum(rows) {
+    let sum = 0;
+    let known = false;
+    let counted = false;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.dedup_folded) continue;
+      counted = true;
+      const cost = r.scrap_cost;
+      if (cost === null || cost === undefined) continue;
+      const n = Number(cost);
+      if (!Number.isFinite(n)) continue;
+      sum += n;
+      known = true;
+    }
+    if (!counted) return 0;
+    return known ? sum : null;
   }
 
   // Four plain cells: cost, bank, cap, pools, all read at the row's own
@@ -4855,8 +4893,10 @@
       const bt = ((currentData.builds || {}).teams || {})[String(side)] || {};
       const c = bt.commander;
       const teamColor = side === 1 ? 'var(--kb-primary)' : 'var(--kb-success)';
+      const rows = byTeam[side];
+      const scrapTip = 'Scrap cost of these rows';
       return `<div class="vt-econ-log-head"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>
-        Team ${side}${c ? ' — ' + esc(c.name) : ''} <span class="text-muted">(${byTeam[side].length})</span></div>`;
+        Team ${side}${c ? ' — ' + esc(c.name) : ''} <span class="text-muted">(${rows.length}) \u00b7 <span title="${scrapTip}">${fmtScrap(buildlogScrapSum(rows))} scrap</span></span></div>`;
     };
 
     // A single-commander scope drops the other column entirely and gives the
