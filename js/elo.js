@@ -33,9 +33,10 @@
  *
  * The 1v1 pill (VTSR-1v1, elo_1v1_current.json + elo_1v1_history.json)
  * is a third, separate ladder: plain Elo over recorded head-to-head games.
- * The 2v2 dropdown pill (elo_2v2_current.json + elo_2v2_history.json)
- * holds VTSR-2v2C and VTSR-2v2T; the thug pane switches between its two
- * ratings with &view=perf|wl|compare.
+ * The 2v2C and 2v2T pills (elo_2v2_current.json + elo_2v2_history.json)
+ * are separate top-level pills. The thug pane switches between its two
+ * ratings with &view=perf|wl|compare. The four explainer pills stay in
+ * the markup with d-none; their panes and ?tab= links still work.
  *
  * URL routing: ?tab=vtsr-c|vtsr-t|1v1|2v2c|2v2t|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
@@ -2103,7 +2104,7 @@
       <section class="vt-vtsr-doc-section">
         <h6>The 2v2 ladders (VTSR-2v2C and VTSR-2v2T)</h6>
         ${E.twoVTwoLaddersHtml ? E.twoVTwoLaddersHtml() : ''}
-        <p class="mb-0 mt-2 text-muted small">The ladders are on the 2v2 pill: <a href="?tab=2v2c" data-elo-tab-link="2v2c">commanders</a> and <a href="?tab=2v2t" data-elo-tab-link="2v2t">thugs</a>.</p>
+        <p class="mb-0 mt-2 text-muted small">The ladders are the <a href="?tab=2v2c" data-elo-tab-link="2v2c">2v2C</a> and <a href="?tab=2v2t" data-elo-tab-link="2v2t">2v2T</a> pills.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -2709,13 +2710,6 @@
     if (tabsEl) {
       tabsEl.addEventListener('shown.bs.tab', (e) => {
         const target = e.target.getAttribute('data-bs-target');
-        // Bootstrap's Tab opens a dropdown's menu when one of its items
-        // activates; close it so a deep link doesn't land with it open.
-        const dd = e.target.closest && e.target.closest('.dropdown');
-        const ddToggle = dd && dd.querySelector('[data-bs-toggle="dropdown"]');
-        if (ddToggle && window.bootstrap && bootstrap.Dropdown) {
-          bootstrap.Dropdown.getOrCreateInstance(ddToggle).hide();
-        }
         if (target) {
           renderTabIfNeeded(target);
           const btn = e.target && e.target.closest ? e.target.closest('[data-bs-target]') : e.target;

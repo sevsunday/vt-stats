@@ -361,18 +361,15 @@
     width: 9rem;
 }
 
-/* 2v2 pill: dropdown inside the scrolling pill row. The toggle reads as
-   active whenever one of its two panes is shown (Bootstrap marks it). */
-.vt-elo-tabs .dropdown-toggle.active::after {
-    border-top-color: currentColor;
-}
-.vt-elo-2v2-menu {
-    font-size: 0.85rem;
-}
-.vt-elo-2v2-menu .dropdown-item.active,
-.vt-elo-2v2-menu .dropdown-item:active {
-    background: var(--kb-primary);
-    color: var(--kb-primary-fg);
+/* Vertical rules splitting the row into VTSR-C / VTSR-T, the 2v2 pair, and 1v1. */
+.vt-elo-tab-sep {
+    width: 1px;
+    flex: 0 0 1px;
+    align-self: stretch;
+    margin: 0.35rem 0.35rem;
+    padding: 0;
+    background: color-mix(in oklab, var(--kb-text-muted) 35%, transparent);
+    pointer-events: none;
 }
 
 /* Small "Experimental" tag beside the 2v2 card titles. */
