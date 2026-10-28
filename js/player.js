@@ -306,6 +306,8 @@
     v1Elo:         undefined, // parsed elo_1v1_current.json (lazy; undefined = unfetched, null = 404)
     v1EloHistory:  undefined, // parsed elo_1v1_history.json (lazy; same contract)
     v1RatingChart: null,     // Chart.js instance for the VTSR-1v1 time-series (Commander tab)
+    v2Elo:         undefined, // parsed elo_2v2_current.json (lazy; undefined = unfetched, null = 404)
+    v2EloHistory:  undefined, // parsed elo_2v2_history.json (lazy; same contract)
     overviewRadarChart: null, // Chart.js instance for the Overview VTSR-T radar
     mapRegistry:   undefined, // parsed data/map-registry.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
@@ -2426,6 +2428,26 @@
     return _v1EloFetchPromise;
   }
 
+  // Lazy one-shot fetch of the 2v2 ladders (current + history). 404-safe:
+  // null caches and the Commander tab's 2v2 block self-omits.
+  let _v2EloFetchPromise = null;
+  function ensureV2EloLoaded() {
+    if (state.v2Elo !== undefined && state.v2EloHistory !== undefined) {
+      return Promise.resolve(state.v2Elo);
+    }
+    if (!_v2EloFetchPromise) {
+      _v2EloFetchPromise = Promise.all([
+        fetchJson(`${state.dataPrefix}data/processed/elo_2v2_current.json`).catch(() => null),
+        fetchJson(`${state.dataPrefix}data/processed/elo_2v2_history.json`).catch(() => null),
+      ]).then(([cur, hist]) => {
+        state.v2Elo = cur || null;
+        state.v2EloHistory = hist || null;
+        return state.v2Elo;
+      });
+    }
+    return _v2EloFetchPromise;
+  }
+
   let _mapRegistryFetchPromise = null;
   function ensureMapRegistryLoaded() {
     if (state.mapRegistry !== undefined) return Promise.resolve(state.mapRegistry);
@@ -3457,6 +3479,116 @@
     </div></div>`;
   }
 
+  // ---- VTSR-2v2 block (separate 2v2 ladders) ----------------------------
+
+  function v2RatingRowFor(ladder, sid) {
+    const l = state.v2Elo && state.v2Elo.ladders && state.v2Elo.ladders[ladder];
+    const rows = (l && l.ratings) || [];
+    return rows.find(r => String(r.steam64 || '') === sid) || null;
+  }
+
+  /** This player's 2v2 games, newest first, with role, partner and deltas. */
+  function buildV2Games(sid) {
+    const games = (state.v2EloHistory && state.v2EloHistory.games) || [];
+    const out = [];
+    for (const g of games) {
+      for (const side of ['1', '2']) {
+        const s = (g.sides || {})[side] || {};
+        const role = String((s.commander || {}).steam64 || '') === sid ? 'commander'
+          : String((s.thug || {}).steam64 || '') === sid ? 'thug' : null;
+        if (!role) continue;
+        const me = s[role] || {};
+        const partner = s[role === 'commander' ? 'thug' : 'commander'] || {};
+        const opp = (g.sides || {})[side === '1' ? '2' : '1'] || {};
+        const won = g.outcome === `team${side}`;
+        const lost = g.outcome === `team${side === '1' ? '2' : '1'}`;
+        out.push({
+          game: g, side, role, me, partner,
+          opponents: [opp.commander || {}, opp.thug || {}],
+          result: g.outcome === 'draw' ? 'Draw' : won ? 'Win' : lost ? 'Loss' : null,
+        });
+      }
+    }
+    return out.reverse();
+  }
+
+  function v2NameLink(p) {
+    const name = escapeHtml((p && p.name) || 'unknown');
+    return p && p.steam64 ? `<a href="${playerHref(p.steam64)}">${name}</a>` : name;
+  }
+
+  function v2Delta(d) {
+    if (!Number.isFinite(d)) return '\u2014';
+    const cls = d >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative';
+    return `<span class="${cls}">${d >= 0 ? '+' : ''}${d.toFixed(1)}</span>`;
+  }
+
+  function render2v2BlockHtml(sid) {
+    if (!state.v2Elo) return '';
+    const rows = {
+      commander: v2RatingRowFor('commander', sid),
+      thug_wl: v2RatingRowFor('thug_wl', sid),
+      thug_perf: v2RatingRowFor('thug_perf', sid),
+    };
+    const games = buildV2Games(sid);
+    if (!games.length || (!rows.commander && !rows.thug_wl && !rows.thug_perf)) return '';
+
+    const stat = (label, row, tip) => {
+      if (!row) {
+        return `<div title="${escapeHtml(tip)}"><div class="text-secondary small">${label}</div><div class="fs-5 fw-semibold text-secondary">\u2014</div></div>`;
+      }
+      const prov = row.provisional
+        ? ' <span class="vt-cmdr-riv-tag" title="Fewer than 5 games on this ladder: still settling in.">provisional</span>' : '';
+      const rec = label.startsWith('Thug performance')
+        ? `${row.games} duel${row.games === 1 ? '' : 's'}`
+        : `${row.wins}-${row.losses}${row.draws ? '-' + row.draws : ''}`;
+      return `<div title="${escapeHtml(tip)}"><div class="text-secondary small">${label}</div>
+        <div class="fs-5 fw-semibold vt-matchlog-num">${Math.round(row.rating)}${prov}</div>
+        <div class="text-secondary small vt-matchlog-num">${rec}</div></div>`;
+    };
+
+    const logRows = games.map((x) => {
+      const g = x.game;
+      const resCls = x.result === 'Win' ? 'vt-vtsr-delta-positive' : x.result === 'Loss' ? 'vt-vtsr-delta-negative' : '';
+      const wlDelta = x.me.wl ? x.me.wl.delta : null;
+      const perfDelta = x.me.perf ? x.me.perf.delta : null;
+      const delta = x.role === 'thug' && perfDelta != null
+        ? `${v2Delta(wlDelta)} <span class="text-secondary small">W/L</span> ${v2Delta(perfDelta)} <span class="text-secondary small">perf</span>`
+        : v2Delta(wlDelta);
+      const src = g.source === 'f9'
+        ? ' <span class="vt-cmdr-riv-tag" title="From F9bomber\u2019s community ledger">F9</span>'
+        : (g.match_id ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(g.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>` : '');
+      return `<tr>
+        <td class="vt-matchlog-num">${cmdrDateLabel(g.date)}${src}</td>
+        <td>${x.role === 'commander' ? 'Cmdr' : 'Thug'}</td>
+        <td>${v2NameLink(x.partner)}</td>
+        <td>${x.opponents.map(v2NameLink).join(' + ')}</td>
+        <td class="${resCls}">${x.result || '\u2014'}</td>
+        <td class="text-end vt-matchlog-num">${delta}</td>
+        <td>${escapeHtml(g.map || '\u2014')}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="card mb-3" id="vt-player-2v2"><div class="card-body">
+      <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+        <i class="bi bi-people-fill me-1"></i>2v2 (VTSR-2v2)
+      </h2>
+      <p class="text-secondary small mb-3">Separate 2v2 ladders: a commander and one thug per side, recorded games plus
+        <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>&rsquo;s ledger. Thugs carry two ratings for now.
+        None of this affects VTSR-C, VTSR-T or VTSR-1v1. <a href="${state.dataPrefix}elo/?tab=2v2c">Full 2v2 ladders</a>.</p>
+      <div class="d-flex flex-wrap gap-4 mb-3">
+        ${stat('Commander (2v2C)', rows.commander, 'Win/loss Elo for 2v2 commanders.')}
+        ${stat('Thug win/loss (2v2T)', rows.thug_wl, 'Win/loss Elo for 2v2 thugs.')}
+        ${stat('Thug performance (2v2T)', rows.thug_perf, 'Damage-share duel against the other thug, recorded games only.')}
+      </div>
+      <h3 class="h6 text-secondary mb-2">2v2 games</h3>
+      <div class="table-responsive vt-cmdr-scroll"><table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Date</th><th>Role</th><th>Partner</th><th>Opponents</th><th>Result</th><th class="text-end">&Delta;</th><th>Map</th></tr></thead>
+        <tbody>${logRows}</tbody>
+      </table></div>
+    </div></div>`;
+  }
+
   function drawV1RatingChart(sid) {
     if (state.v1RatingChart) {
       try { state.v1RatingChart.destroy(); } catch (_) {}
@@ -3531,24 +3663,27 @@
     const cmdrPending = state.cmdrElo === undefined || state.cmdrEloHistory === undefined;
     const mapPending = state.mapRegistry === undefined;
     const v1Pending = state.v1Elo === undefined || state.v1EloHistory === undefined;
-    if (cmdrPending || mapPending || v1Pending) {
+    const v2Pending = state.v2Elo === undefined || state.v2EloHistory === undefined;
+    if (cmdrPending || mapPending || v1Pending || v2Pending) {
       const jobs = [];
       if (cmdrPending) jobs.push(Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]));
       if (mapPending) jobs.push(ensureMapRegistryLoaded());
       if (v1Pending) jobs.push(ensureV1EloLoaded());
+      if (v2Pending) jobs.push(ensureV2EloLoaded());
       Promise.all(jobs).then(() => scheduleCommanderRerender(rating));
     }
     const riv = buildCommanderRivalries(sid);
     const series = buildCmdrRatingSeries(sid);
     const ladder = cmdrLadderRowFor(sid);
     const v1Html = render1v1BlockHtml(sid);
+    const v2Html = render2v2BlockHtml(sid);
     if (cmdrPending && riv.commandedTotal < 1) {
       pane.innerHTML = phasePlaceholder('Commander', 'Loading commander rating.');
       return;
     }
     if (!cmdrPending && riv.commandedTotal < 1 && series.length < 1 && !ladder) {
-      if (v1Html) {
-        pane.innerHTML = v1Html;
+      if (v1Html || v2Html) {
+        pane.innerHTML = `${v1Html}${v2Html}`;
         drawV1RatingChart(sid);
         return;
       }
@@ -3566,7 +3701,8 @@
       ${renderCmdrFactionsHtml(sid)}
       ${renderCmdrDuelLogHtml(series)}
       ${econCard}
-      ${v1Html}`;
+      ${v1Html}
+      ${v2Html}`;
     drawCmdrRatingChart(rating, sid);
     drawV1RatingChart(sid);
   }

@@ -33,8 +33,11 @@
  *
  * The 1v1 pill (VTSR-1v1, elo_1v1_current.json + elo_1v1_history.json)
  * is a third, separate ladder: plain Elo over recorded head-to-head games.
+ * The 2v2 dropdown pill (elo_2v2_current.json + elo_2v2_history.json)
+ * holds VTSR-2v2C and VTSR-2v2T; the thug pane switches between its two
+ * ratings with &view=perf|wl|compare.
  *
- * URL routing: ?tab=vtsr-c|vtsr-t|1v1|how|axes|fairness|accuracy (replaceState
+ * URL routing: ?tab=vtsr-c|vtsr-t|1v1|2v2c|2v2t|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
  * VTSR-C pane is the default and writes no ?tab= at all. `vtsr-t` opens
  * the thug board; `leaderboard` is a permanent inbound alias rewritten to
@@ -158,6 +161,8 @@
     cmdrHistory: null,    // elo_commander_history.json (null on 404 — detail panels degrade)
     v1Elo: null,          // elo_1v1_current.json (null on 404 — 1v1 card hides)
     v1History: null,      // elo_1v1_history.json (null on 404 — game logs degrade)
+    v2Elo: null,          // elo_2v2_current.json (null on 404 — 2v2 cards hide)
+    v2History: null,      // elo_2v2_history.json (null on 404 — game logs degrade)
     slugMap: null,
     validation: null,
     careerStats: [],      // corpus-wide aggregate join source
@@ -1519,6 +1524,434 @@
   }
 
   // ----------------------------------------------------------------------
+  // 2v2 ladders (VTSR-2v2C + VTSR-2v2T). Three ratings from
+  // elo_2v2_current.json `ladders`: commander (win/loss), thug_wl
+  // (win/loss, same walk) and thug_perf (thug-vs-thug damage duel).
+  // ----------------------------------------------------------------------
+
+  const V2_VIEWS = ['perf', 'wl', 'compare'];
+  const V2_LADDER_FOR_VIEW = { perf: 'thug_perf', wl: 'thug_wl' };
+  const v2SortState = {
+    commander: { key: 'rating', asc: false },
+    thug_wl: { key: 'rating', asc: false },
+    thug_perf: { key: 'rating', asc: false },
+    compare: { key: 'perf', asc: false },
+  };
+  const expandedV2Rows = new Set();
+  let v2View = 'perf';
+
+  function v2Ladder(name) {
+    const l = state.v2Elo && state.v2Elo.ladders && state.v2Elo.ladders[name];
+    return (l && Array.isArray(l.ratings)) ? l.ratings : [];
+  }
+
+  function v2Key(p) {
+    return p && p.steam64 ? String(p.steam64) : `name:${(p && p.name) || ''}`;
+  }
+
+  // Game log rows for one player in one ladder, newest first.
+  function v2GamesFor(r, ladder) {
+    const games = (state.v2History && state.v2History.games) || [];
+    const role = ladder === 'commander' ? 'commander' : 'thug';
+    const field = ladder === 'thug_perf' ? 'perf' : 'wl';
+    const k = v2Key(r);
+    const out = [];
+    for (const g of games) {
+      if (!g[field]) continue;
+      for (const s of ['1', '2']) {
+        const me = (g.sides && g.sides[s] && g.sides[s][role]) || null;
+        if (me && v2Key(me) === k) out.push({ g, side: s, me });
+      }
+    }
+    return out.reverse();
+  }
+
+  function v2SourceChip(g) {
+    return g.source === 'f9'
+      ? '<span class="vt-elo-2v2-src" data-bs-toggle="tooltip" data-bs-placement="top" title="From F9bomber&#39;s community ledger (result only).">F9</span>'
+      : '<span class="vt-elo-2v2-src vt-elo-2v2-src--rec" data-bs-toggle="tooltip" data-bs-placement="top" title="Recorded on VT Stats.">Rec</span>';
+  }
+
+  function renderV2Detail(r, ladder) {
+    const entries = v2GamesFor(r, ladder);
+    if (!entries.length) {
+      return '<div class="text-muted small p-2">Game-by-game detail unavailable (elo_2v2_history.json missing).</div>';
+    }
+    const perf = ladder === 'thug_perf';
+    const role = ladder === 'commander' ? 'commander' : 'thug';
+    const partnerRole = role === 'commander' ? 'thug' : 'commander';
+    const rows = entries.map(({ g, side, me }) => {
+      const opp = String(3 - Number(side));
+      const sides = g.sides || {};
+      const partner = (sides[side] || {})[partnerRole] || {};
+      const oc = (sides[opp] || {}).commander || {};
+      const ot = (sides[opp] || {}).thug || {};
+      const blk = me[perf ? 'perf' : 'wl'] || {};
+      const d = blk.delta || 0;
+      const dCls = d > 0 ? 'vt-vtsr-delta-positive' : d < 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+      let res = '\u2014';
+      let resCls = 'text-muted';
+      if (g.outcome === 'draw') res = 'D';
+      else if (g.outcome) {
+        const won = g.outcome === `team${side}`;
+        res = won ? 'W' : 'L';
+        resCls = won ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative';
+      }
+      const exp = perf ? (g.perf.expected || {})[side] : (g.wl.expected || {})[side];
+      const expCell = perf
+        ? `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="Damage share expected from the two thugs' ratings, then what happened.">${Math.round((exp || 0) * 100)}% &rarr; ${Math.round(((g.perf.score || {})[side] || 0) * 100)}%</td>`
+        : `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="Pre-game win chance from both commanders' and both thugs' 2v2 ratings.">${Math.round((exp || 0) * 100)}%</td>`;
+      const link = g.match_id
+        ? `<a href="../index.html?match=${encodeURIComponent(g.match_id)}" class="text-muted"
+              title="Open this match on the dashboard" aria-label="Open this match on the dashboard"><i class="bi bi-box-arrow-up-right"></i></a>`
+        : '';
+      return `<tr>
+        <td class="text-muted">${esc(String(g.date || '').slice(0, 10))} ${v2SourceChip(g)}</td>
+        <td>${playerLinkHtml(partner.name || '?', partner.steam64)}</td>
+        <td>${playerLinkHtml(oc.name || '?', oc.steam64)} + ${playerLinkHtml(ot.name || '?', ot.steam64)}</td>
+        <td>${esc(g.map || '')}</td>
+        <td class="text-center ${resCls} fw-semibold">${res}</td>
+        <td class="text-end ${dCls}">${d > 0 ? '+' : ''}${d.toFixed(1)}</td>
+        ${expCell}
+        <td class="text-end">${link}</td>
+      </tr>`;
+    }).join('');
+    const statsHtml = perf
+      ? `<div><span class="vt-stat-label">Beat expectation</span><span class="vt-stat-value">${r.beat_expected || 0} / ${r.games}</span></div>
+         <div><span class="vt-stat-label">Avg damage share</span><span class="vt-stat-value">${r.mean_score != null ? Math.round(r.mean_score * 100) + '%' : '\u2014'}</span></div>`
+      : `<div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>
+         <div><span class="vt-stat-label">Recorded / F9</span><span class="vt-stat-value">${r.games_recorded} / ${r.games_f9}</span></div>`;
+    return `<div class="vt-vtsr-detail-body">
+      <section class="vt-vtsr-detail-section">
+        <h6>2v2 summary</h6>
+        <div class="vt-vtsr-detail-stats">
+          ${statsHtml}
+          <div><span class="vt-stat-label">Peak</span><span class="vt-stat-value">${Math.round(r.peak || r.rating)}</span></div>
+          <div><span class="vt-stat-label">Rated games</span><span class="vt-stat-value">${r.games}</span></div>
+        </div>
+      </section>
+      <section class="vt-vtsr-detail-section">
+        <h6>Game log</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" style="font-size: 0.8rem;">
+            <thead><tr>
+              <th>Date</th><th>${role === 'commander' ? 'Thug' : 'Commander'}</th><th>Opponents</th><th>Map</th>
+              <th class="text-center">Result</th><th class="text-end">\u0394</th>
+              <th class="text-end">${perf ? 'Share: expected &rarr; actual' : 'Win chance'}</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </section>
+    </div>`;
+  }
+
+  function v2ProgressChipHtml(r, c) {
+    const status = r.inactive_status || 'active';
+    const need = comebackGamesRequired(c);
+    const win = inactivityWindowDays(c);
+    if (status === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      return statusChipHtml('vt-vtsr-inactive-chip', `Inactive \u00b7 ${d}d ago`,
+        `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`);
+    }
+    if (status === 'returning') {
+      return statusChipHtml('vt-vtsr-returning-chip', 'Returning',
+        `Play ${r.comeback_games_remaining || 0} more game${(r.comeback_games_remaining || 0) === 1 ? '' : 's'} of any kind to rejoin.`);
+    }
+    const min = v1LadderMinGames(c);
+    return statusChipHtml('vt-cmdr-progress-chip', `${r.games} / ${min} 2v2s`,
+      `${r.games} of ${min} rated games on this ladder to join the ranked table.`);
+  }
+
+  function v2Sort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':   va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'record': va = (a.wins || 0) - (a.losses || 0); vb = (b.wins || 0) - (b.losses || 0); break;
+        case 'win_pct': va = a.win_pct || 0; vb = b.win_pct || 0; break;
+        case 'beat':   va = a.games ? (a.beat_expected || 0) / a.games : 0; vb = b.games ? (b.beat_expected || 0) / b.games : 0; break;
+        case 'share':  va = a.mean_score || 0; vb = b.mean_score || 0; break;
+        case 'games':  va = a.games || 0; vb = b.games || 0; break;
+        case 'peak':   va = a.peak || 0; vb = b.peak || 0; break;
+        case 'last':   va = a.last_2v2_date || ''; vb = b.last_2v2_date || ''; break;
+        case 'rating':
+        default:       va = a.rating || 0; vb = b.rating || 0; break;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      const na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    };
+  }
+
+  const V2_RATING_TIPS = {
+    commander: 'VTSR-2v2C: win/loss Elo for 2v2 commanders. The win chance counts both commanders and both thugs (anchor 1500, scale 400, K 40 to 20).',
+    thug_wl: 'VTSR-2v2T (win/loss): the thug moves with the game result, in the same walk as the commanders.',
+    thug_perf: 'VTSR-2v2T (performance): each game is a duel between the two thugs over their share of the enemy damage. The result does not move it.',
+  };
+
+  function renderV2Row(r, c, rank, ladder) {
+    const rowKey = `${ladder}-${cmdrRowKey(r)}`;
+    const expanded = expandedV2Rows.has(rowKey);
+    const detailId = `vtsr-2v2-detail-${rowKey}`;
+    const prov = r.provisional
+      ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Provisional \u2014 fewer than ${c.provisional_threshold ?? 5} rated games on this ladder.">?</span>`
+      : '';
+    const chip = rank == null ? v2ProgressChipHtml(r, c) : '';
+    const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
+    const gamesTip = ladder === 'thug_perf' ? 'Recorded games only.'
+      : `${r.games_recorded} recorded, ${r.games_f9} from F9bomber's ledger.`;
+    const mid = ladder === 'thug_perf'
+      ? `<td class="text-end">${r.beat_expected || 0} / ${r.games}</td>
+         <td class="text-end">${r.mean_score != null ? Math.round(r.mean_score * 100) + '%' : '\u2014'}</td>`
+      : `<td class="text-end">${r.wins}-${r.losses}-${r.draws}</td>
+         <td class="text-end">${r.win_pct != null ? Math.round(r.win_pct * 100) + '%' : '\u2014'}</td>`;
+    return `<tr>
+      <td class="vt-vtsr-expand-col">
+        <button type="button" class="vt-row-expand"
+                data-bs-toggle="collapse" data-bs-target="#${detailId}"
+                aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
+                aria-label="Toggle 2v2 game log">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </td>
+      <td class="text-muted">${rank == null ? '\u2014' : rank}</td>
+      <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${chip}</td>
+      <td class="text-end vt-vtsr-rating">${Math.round(r.rating)}</td>
+      ${mid}
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(gamesTip)}">${r.games}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak || r.rating)}</td>
+      <td class="text-end text-muted">${esc(r.last_2v2_date || '\u2014')}</td>
+    </tr>
+    <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
+      <td colspan="9">${renderV2Detail(r, ladder)}</td>
+    </tr>`;
+  }
+
+  function renderV2TableHtml(rows, c, ranked, ladder) {
+    const st = v2SortState[ladder];
+    const th = (key, label, extra = '') =>
+      `<th data-sort="${key}" class="text-end${st.key === key ? ' sort-active' : ''}"${extra}>${label}</th>`;
+    const mid = ladder === 'thug_perf'
+      ? `${th('beat', 'Beat exp.', ' data-bs-toggle="tooltip" data-bs-placement="top" title="Games where this thug&#39;s damage share beat what the two ratings predicted."')}
+         ${th('share', 'Avg share', ' data-bs-toggle="tooltip" data-bs-placement="top" title="Average share of the two thugs&#39; enemy damage."')}`
+      : `${th('record', 'W-L-D')}${th('win_pct', 'Win %')}`;
+    const body = rows.map((r, i) => renderV2Row(r, c, ranked ? i + 1 : null, ladder)).join('');
+    return `<div class="table-responsive">
+      <table class="table table-hover align-middle mb-2" data-v2-ladder="${ladder}" style="font-size: 0.85rem;">
+        <thead><tr>
+          <th class="vt-vtsr-expand-col"></th>
+          <th>#</th>
+          <th data-sort="name">Player</th>
+          ${th('rating', 'Rating', ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(V2_RATING_TIPS[ladder])}"`)}
+          ${mid}
+          ${th('games', 'Games')}
+          ${th('peak', 'Peak')}
+          ${th('last', 'Last 2v2')}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function v2LadderHtml(ladder, c, noun) {
+    const ratings = v2Ladder(ladder);
+    const min = v1LadderMinGames(c);
+    const win = inactivityWindowDays(c);
+    const sorter = v2Sort(v2SortState[ladder].key, v2SortState[ladder].asc);
+    const ranked = ratings.filter(r => r.leaderboard_eligible).slice().sort(sorter);
+    const unranked = ratings.filter(r => !r.leaderboard_eligible).slice().sort(sorter);
+    const rankedHtml = ranked.length
+      ? renderV2TableHtml(ranked, c, true, ladder)
+      : `<p class="text-muted small">Nobody has ${fmt(min)} rated 2v2s as a ${noun} yet.</p>`;
+    const unrankedHtml = unranked.length
+      ? `<div class="vt-vtsr-c-unranked">
+          <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
+          <p class="vt-vtsr-c-unranked-blurb">Need ${fmt(min)} rated 2v2s as a ${noun} and a game within ${fmt(win)} days of the newest match. No rank is assigned here.</p>
+          ${renderV2TableHtml(unranked, c, false, ladder)}
+        </div>`
+      : '';
+    return rankedHtml + unrankedHtml;
+  }
+
+  function v2CompareHtml() {
+    const perf = new Map(v2Ladder('thug_perf').map(r => [v2Key(r), r]));
+    const wl = new Map(v2Ladder('thug_wl').map(r => [v2Key(r), r]));
+    const rankOf = (list) => {
+      const m = new Map();
+      list.slice().sort((a, b) => b.rating - a.rating).forEach((r, i) => m.set(v2Key(r), i + 1));
+      return m;
+    };
+    const pRank = rankOf([...perf.values()]);
+    const wRank = rankOf([...wl.values()]);
+    const keys = [...new Set([...perf.keys(), ...wl.keys()])];
+    const rows = keys.map(k => {
+      const p = perf.get(k) || null;
+      const w = wl.get(k) || null;
+      const base = p || w;
+      return { k, name: base.name, steam64: base.steam64, p, w, pr: pRank.get(k), wr: wRank.get(k) };
+    });
+    const st = v2SortState.compare;
+    const val = (row) => {
+      switch (st.key) {
+        case 'name': return (row.name || '').toLowerCase();
+        case 'wl': return row.w ? row.w.rating : -Infinity;
+        case 'gap': return (row.pr && row.wr) ? Math.abs(row.pr - row.wr) : -Infinity;
+        case 'perf':
+        default: return row.p ? row.p.rating : -Infinity;
+      }
+    };
+    rows.sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (va < vb) return st.asc ? -1 : 1;
+      if (va > vb) return st.asc ? 1 : -1;
+      return (a.name || '').toLowerCase() < (b.name || '').toLowerCase() ? -1 : 1;
+    });
+    const cell = (r, rank) => r
+      ? `${Math.round(r.rating)} <span class="text-muted small">#${rank} &middot; ${r.games}g${r.provisional ? ' ?' : ''}</span>`
+      : '<span class="text-muted">\u2014</span>';
+    const th = (key, label, extra = '') =>
+      `<th data-sort="${key}" class="${key === 'name' ? '' : 'text-end'}${st.key === key ? ' sort-active' : ''}"${extra}>${label}</th>`;
+    const body = rows.map(row => {
+      const gap = (row.pr && row.wr) ? row.pr - row.wr : null;
+      const gapHtml = gap == null ? '<span class="text-muted">\u2014</span>'
+        : gap === 0 ? 'same rank'
+          : `${Math.abs(gap)} place${Math.abs(gap) === 1 ? '' : 's'} ${gap > 0 ? 'higher on win/loss' : 'higher on performance'}`;
+      return `<tr>
+        <td class="fw-semibold">${playerLinkHtml(row.name, row.steam64)}</td>
+        <td class="text-end">${cell(row.p, row.pr)}</td>
+        <td class="text-end">${cell(row.w, row.wr)}</td>
+        <td class="text-end">${gapHtml}</td>
+      </tr>`;
+    }).join('');
+    return `<p class="small text-muted mb-2">Every thug on either 2v2 thug ladder. The two ratings answer different questions:
+      <strong>Performance</strong> asks whether you out-damaged the other thug more than expected (recorded games only);
+      <strong>Win/loss</strong> asks whether your team won more than expected (recorded games plus F9bomber&rsquo;s ledger).
+      Both run side by side until enough recorded 2v2s exist to test which one predicts winners better.</p>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-2" data-v2-ladder="compare" style="font-size: 0.85rem;">
+          <thead><tr>
+            ${th('name', 'Player')}
+            ${th('perf', 'Performance')}
+            ${th('wl', 'Win/loss')}
+            ${th('gap', 'Rank gap')}
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function v2Banner(c, kind) {
+    const rec = c.wl_games_recorded || 0;
+    const f9 = c.wl_games_f9 || 0;
+    const credit = '<a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>';
+    const lead = kind === 'commander'
+      ? 'Two commanders, each with one thug. Win/loss Elo for the commander; the win chance counts both commanders and both thugs.'
+      : 'Two commanders, each with one thug. Two thug ratings run side by side for now.';
+    return `<div class="alert alert-secondary py-2 px-3 mb-3 small">
+      ${lead} Separate from VTSR-C, VTSR-T and VTSR-1v1. Camera-pod spectators don&rsquo;t count as players;
+      a 2v2 where someone was idle or left early isn&rsquo;t rated. Built from ${fmt(rec)} recorded 2v2s
+      and ${fmt(f9)} games from ${credit}&rsquo;s community ledger. Experimental: everyone started at 1500
+      and most players have only a few games.
+    </div>`;
+  }
+
+  function bindV2Body(body, rerender) {
+    if (!body.dataset.vtCollapseListenersBound) {
+      body.dataset.vtCollapseListenersBound = '1';
+      const prefix = 'vtsr-2v2-detail-';
+      body.addEventListener('shown.bs.collapse', (e) => {
+        const id = (e.target && e.target.id) || '';
+        if (id.startsWith(prefix)) expandedV2Rows.add(id.slice(prefix.length));
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      });
+      body.addEventListener('hidden.bs.collapse', (e) => {
+        const id = (e.target && e.target.id) || '';
+        if (id.startsWith(prefix)) expandedV2Rows.delete(id.slice(prefix.length));
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+    body.querySelectorAll('table[data-v2-ladder] th[data-sort]').forEach(th => {
+      const ladder = th.closest('table').dataset.v2Ladder;
+      const st = v2SortState[ladder];
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        if (st.key === th.dataset.sort) st.asc = !st.asc;
+        else { st.key = th.dataset.sort; st.asc = th.dataset.sort === 'name'; }
+        rerender();
+      };
+    });
+    ensureTooltips(body);
+  }
+
+  function v2ShowOrEmpty(cardId, emptyId) {
+    const card = document.getElementById(cardId);
+    const $empty = document.getElementById(emptyId);
+    const c = state.v2Elo;
+    const ok = !!(c && c.ladders && (c.games_rated || 0) > 0);
+    if (card) card.classList.toggle('d-none', !ok);
+    if ($empty) $empty.classList.toggle('d-none', ok);
+    return ok ? c : null;
+  }
+
+  function render2v2CommanderLadder() {
+    const body = document.getElementById('vtsr-2v2c-body');
+    const c = v2ShowOrEmpty('section-vtsr-2v2c', 'elo-vtsr-2v2c-empty');
+    if (!body || !c) return;
+    body.innerHTML = v2Banner(c, 'commander') + v2LadderHtml('commander', c, 'commander');
+    bindV2Body(body, render2v2CommanderLadder);
+  }
+
+  function v2ViewFromUrl() {
+    const v = new URLSearchParams(window.location.search).get('view');
+    return V2_VIEWS.includes(v) ? v : 'perf';
+  }
+
+  function setV2View(view, writeUrl) {
+    v2View = V2_VIEWS.includes(view) ? view : 'perf';
+    document.querySelectorAll('#vtsr-2v2t-view [data-view]').forEach(b => {
+      const on = b.dataset.view === v2View;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    if (writeUrl) {
+      const url = new URL(window.location.href);
+      if (v2View === 'perf') url.searchParams.delete('view');
+      else url.searchParams.set('view', v2View);
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+  }
+
+  function render2v2ThugLadder() {
+    const body = document.getElementById('vtsr-2v2t-body');
+    const c = v2ShowOrEmpty('section-vtsr-2v2t', 'elo-vtsr-2v2t-empty');
+    if (!body || !c) return;
+    const group = document.getElementById('vtsr-2v2t-view');
+    if (group && !group.dataset.vtBound) {
+      group.dataset.vtBound = '1';
+      setV2View(v2ViewFromUrl(), false);
+      group.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-view]');
+        if (!b || b.dataset.view === v2View) return;
+        setV2View(b.dataset.view, true);
+        render2v2ThugLadder();
+      });
+    }
+    const content = v2View === 'compare'
+      ? v2CompareHtml()
+      : v2LadderHtml(V2_LADDER_FOR_VIEW[v2View], c, 'thug');
+    body.innerHTML = v2Banner(c, 'thug') + content;
+    bindV2Body(body, render2v2ThugLadder);
+  }
+
+  // ----------------------------------------------------------------------
   // Tab routing (?tab=) + lazy renderers.
   // ----------------------------------------------------------------------
 
@@ -1531,6 +1964,9 @@
     'vtsr-c': DEFAULT_TAB_TARGET,
     'vtsr-t': THUG_TAB_TARGET,
     '1v1': '#elo-tab-1v1',
+    '2v2c': '#elo-tab-2v2c',
+    '2v2t': '#elo-tab-2v2t',
+    '2v2': '#elo-tab-2v2c',
     how: '#elo-tab-how',
     axes: '#elo-tab-axes',
     fairness: '#elo-tab-fairness',
@@ -1541,6 +1977,8 @@
   const tabRenderers = {
     '#elo-tab-vtsr-c': renderCommanderLadder,
     '#elo-tab-1v1': render1v1Ladder,
+    '#elo-tab-2v2c': render2v2CommanderLadder,
+    '#elo-tab-2v2t': render2v2ThugLadder,
     '#elo-tab-how': renderHowTab,
     '#elo-tab-axes': renderAxesTab,
     '#elo-tab-fairness': renderFairnessTab,
@@ -1579,6 +2017,8 @@
     const url = new URL(window.location.href);
     if (target === DEFAULT_TAB_TARGET) url.searchParams.delete('tab');
     else url.searchParams.set('tab', slugForTarget(target));
+    if (target !== '#elo-tab-2v2t') url.searchParams.delete('view');
+    else if (v2View !== 'perf') url.searchParams.set('view', v2View);
     const next = url.pathname + url.search + url.hash;
     const cur = window.location.pathname + window.location.search + window.location.hash;
     if (next === cur) return;
@@ -1602,8 +2042,8 @@
       }
       return;
     }
-    // Rewrite the pre-split alias to the slug this pane actually emits.
-    if (slug === 'leaderboard') syncUrl(target, 'replace');
+    // Rewrite inbound aliases to the slug this pane actually emits.
+    if (slug === 'leaderboard' || slug === '2v2') syncUrl(target, 'replace');
     const btn = document.querySelector(`#elo-tabs [data-bs-target="${target}"]`);
     if (!btn || btn.classList.contains('active')) return;
     btn._vtQuiet = true;
@@ -1670,6 +2110,17 @@
         <h6>The 1v1 ladder (VTSR-1v1)</h6>
         ${E.oneVOneLadderHtml ? E.oneVOneLadderHtml() : ''}
         <p class="mb-0 mt-2 text-muted small">Every player&rsquo;s 1v1 rating, record and game log is on the <a href="?tab=1v1" data-elo-tab-link="1v1">1v1</a> pill.</p>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>The 2v2 ladders (VTSR-2v2C and VTSR-2v2T)</h6>
+        ${E.twoVTwoLaddersHtml ? E.twoVTwoLaddersHtml() : ''}
+        <p class="mb-0 mt-2 text-muted small">The ladders are on the 2v2 pill: <a href="?tab=2v2c" data-elo-tab-link="2v2c">commanders</a> and <a href="?tab=2v2t" data-elo-tab-link="2v2t">thugs</a>.</p>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>Which ladder rates my game?</h6>
+        ${E.formatLinesHtml ? E.formatLinesHtml() : ''}
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -2255,8 +2706,10 @@
 
     // "How It's Calculated" on the leaderboard card switches to the
     // How-it-works pill (no modal on this page — the tab IS the modal).
-    ['vtsr-how-link', 'vtsr-1v1-how-link'].forEach((id) => {
-      const howLink = document.getElementById(id);
+    const howLinks = ['vtsr-how-link', 'vtsr-1v1-how-link']
+      .map(id => document.getElementById(id))
+      .concat([...document.querySelectorAll('[data-elo-how-link]')]);
+    howLinks.forEach((howLink) => {
       if (!howLink) return;
       howLink.addEventListener('click', () => {
         const btn = document.querySelector('#elo-tabs [data-bs-target="#elo-tab-how"]');
@@ -2268,6 +2721,13 @@
     if (tabsEl) {
       tabsEl.addEventListener('shown.bs.tab', (e) => {
         const target = e.target.getAttribute('data-bs-target');
+        // Bootstrap's Tab opens a dropdown's menu when one of its items
+        // activates; close it so a deep link doesn't land with it open.
+        const dd = e.target.closest && e.target.closest('.dropdown');
+        const ddToggle = dd && dd.querySelector('[data-bs-toggle="dropdown"]');
+        if (ddToggle && window.bootstrap && bootstrap.Dropdown) {
+          bootstrap.Dropdown.getOrCreateInstance(ddToggle).hide();
+        }
         if (target) {
           renderTabIfNeeded(target);
           const btn = e.target && e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
@@ -2279,7 +2739,7 @@
 
     // Core data, all in parallel + 404-safe.
     const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory,
-      v1Elo, v1History] = await Promise.all([
+      v1Elo, v1History, v2Elo, v2History] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
       fetchJson(`${DATA}player_slugs.json`),
@@ -2289,6 +2749,8 @@
       fetchJson(`${DATA}elo_commander_history.json`),
       fetchJson(`${DATA}elo_1v1_current.json`),
       fetchJson(`${DATA}elo_1v1_history.json`),
+      fetchJson(`${DATA}elo_2v2_current.json`),
+      fetchJson(`${DATA}elo_2v2_history.json`),
     ]);
     if (window.VTSRDisplay) VTSRDisplay.setConfig(elo);
     state.elo = elo;
@@ -2299,6 +2761,8 @@
     state.cmdrHistory = cmdrHistory;
     state.v1Elo = v1Elo;
     state.v1History = v1History;
+    state.v2Elo = v2Elo;
+    state.v2History = v2History;
 
     // Corpus-wide career join source (Primary Ship / K/D / Acc columns +
     // detail panels). Threshold 0 so even fresh players get a join row —

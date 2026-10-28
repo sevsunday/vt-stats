@@ -81,6 +81,16 @@
  *   - Rated-but-provisional carry their actual rating + flag
  *
  * Empty state: < 2 active roster players.
+ *
+ * 2v2 mode (header `Team | 2v2` pills, in-memory, Reset all -> Team):
+ *   the same win-probability formula, fed commander VTSR-2v2C and thug
+ *   VTSR-2v2T (win/loss) with the 2v2 file's own lambda / scale. The
+ *   performance 2v2T shows on thug rows as context only. The meter needs
+ *   exactly 4 playing players in a 2-2 layout (the lobby API cannot tell
+ *   a spectator from a player, so the user ignores spectators by
+ *   right-click); hidden lobby members are auto-ignored while 2v2 is on
+ *   and can be restored. Suggest keeps commanders that are set and
+ *   otherwise tries every commander pair; the empty-seat rule is off.
  */
 (function () {
   'use strict';
@@ -116,6 +126,12 @@
 
   /** Uneven rated games in the corpus when the seat rule shipped (chip copy). */
   const SEAT_RULE_UNEVEN_GAMES_SEEN = 8;
+
+  /** Players a 2v2 holds: two commanders, one thug each. */
+  const TWO_V_TWO_PLAYERS = 4;
+
+  /** Recorded 2v2s with a winner needed before the thug-rating review. */
+  const TWO_V_TWO_REVIEW_GAMES = 30;
 
   const VALIDATION_URL_CANDIDATES = [
     '../data/processed/validation_summary.json',
@@ -185,6 +201,14 @@
    * @type {Set<string>}
    */
   const ignoredKeys = new Set();
+
+  /** Game format the meter reads: 'team' (main ladders) or '2v2'. */
+  let format = 'team';
+  /** Hidden lobby members 2v2 mode ignored on its own (restored on leaving it). */
+  const autoIgnoredKeys = new Set();
+  /** Hidden members the user restored while in 2v2; not re-ignored. */
+  const restoredHiddenKeys = new Set();
+
   /** Last roster-page mode seen on `vt-tools:roster` ('auto' | 'manual'). */
   let lastPageMode = null;
   /** Last non-null lobby session id, for the new-lobby reset. */
@@ -259,6 +283,58 @@
     return (meta && Number.isFinite(meta.anchor)) ? meta.anchor : ANCHOR;
   }
 
+  function is2v2() {
+    return format === '2v2';
+  }
+
+  function v2Anchor() {
+    const meta = window.VTToolsResolver && window.VTToolsResolver.get2v2Meta
+      ? window.VTToolsResolver.get2v2Meta()
+      : null;
+    return (meta && Number.isFinite(meta.anchor)) ? meta.anchor : ANCHOR;
+  }
+
+  /** Commander rating the meter uses in the current format. */
+  function cmdrRatingOf(p) {
+    if (!is2v2()) return vtsrCOf(p);
+    return (p && Number.isFinite(p.vtsr2v2cEffective)) ? p.vtsr2v2cEffective : v2Anchor();
+  }
+
+  /** Thug rating the meter uses in the current format. */
+  function thugRatingOf(p) {
+    if (!is2v2()) return p.vtsr;
+    return Number.isFinite(p.vtsr2v2tWlEffective) ? p.vtsr2v2tWlEffective : v2Anchor();
+  }
+
+  /** Rating summed into a side's total (Suggest's tie-break). */
+  function sumRatingOf(p, isCmdr) {
+    if (!is2v2()) return p.vtsr;
+    return isCmdr ? cmdrRatingOf(p) : thugRatingOf(p);
+  }
+
+  /** The empty-seat rule, or a pass-through in 2v2 mode (it is off there). */
+  function seatPad(vals1, vals2, n1, n2) {
+    if (is2v2()) {
+      return { vals1, vals2, seatRule: { active: false, extra: 0, shortSide: null, rating: null } };
+    }
+    return padShortSide(vals1, vals2, n1, n2);
+  }
+
+  /** Why the 2v2 meter cannot run, or null when the layout is a 2v2. */
+  function twoVTwoProblem(state) {
+    const n = playingRoster().length;
+    if (n > TWO_V_TWO_PLAYERS) {
+      return `2v2 needs exactly 4 players; ${n} are counted. Right-click spectators and choose Ignore this player.`;
+    }
+    if (n < TWO_V_TWO_PLAYERS) {
+      return `2v2 needs exactly 4 players; ${n} ${n === 1 ? 'is' : 'are'} counted.`;
+    }
+    if (state && (state.teams[1].length !== 2 || state.teams[2].length !== 2)) {
+      return `2v2 needs two players on each team; this layout is ${state.teams[1].length}v${state.teams[2].length}. Drag a player across, or press Suggest.`;
+    }
+    return null;
+  }
+
   /**
    * Rating a phantom thug on the short side is worth under the empty-seat
    * rule: the VTSR-T floor from elo_current.json, never a tuned number.
@@ -294,8 +370,11 @@
 
   /** Model dials, read from the emitted JSON — never hardcoded here. */
   function modelConstants() {
-    const meta = window.VTToolsResolver && window.VTToolsResolver.getCmdrEloMeta
-      ? window.VTToolsResolver.getCmdrEloMeta()
+    const R = window.VTToolsResolver;
+    const meta = R
+      ? (is2v2()
+        ? (R.get2v2Meta ? R.get2v2Meta() : null)
+        : (R.getCmdrEloMeta ? R.getCmdrEloMeta() : null))
       : null;
     const fallback = window.VTBalonce || {};
     return {
@@ -332,21 +411,21 @@
     const sums = { 1: 0, 2: 0 };
     const thugVals = { 1: [], 2: [] };
     for (const side of [1, 2]) {
-      sums[side] = teams[side].reduce((s, p) => s + p.vtsr, 0);
+      sums[side] = teams[side].reduce((s, p) => s + sumRatingOf(p, playerKey(p) === cmdrKeys[side]), 0);
       thugVals[side] = teams[side]
         .filter((p) => playerKey(p) !== cmdrKeys[side])
-        .map((p) => p.vtsr);
+        .map(thugRatingOf);
     }
     // Empty-seat rule: uneven columns pad the short side before the means.
-    const padded = padShortSide(thugVals[1], thugVals[2], teams[1].length, teams[2].length);
+    const padded = seatPad(thugVals[1], thugVals[2], teams[1].length, teams[2].length);
     const thugMeans = { 1: mean(padded.vals1), 2: mean(padded.vals2) };
 
     const consts = modelConstants();
     // With fewer than two commanders set, the commander term is dropped
     // entirely (equal-commanders assumption) rather than pitting a known
     // rating against an unknown one.
-    const rc1 = bothCmdrs ? vtsrCOf(cmdrs[1]) : ANCHOR;
-    const rc2 = bothCmdrs ? vtsrCOf(cmdrs[2]) : ANCHOR;
+    const rc1 = bothCmdrs ? cmdrRatingOf(cmdrs[1]) : ANCHOR;
+    const rc2 = bothCmdrs ? cmdrRatingOf(cmdrs[2]) : ANCHOR;
     const probT1 = window.VTBalonce
       ? window.VTBalonce.computeWinProb({
         rc1, rc2,
@@ -411,8 +490,8 @@
   function findBestPartition(thugs, cmdr1, cmdr2) {
     const bothCmdrs = !!(cmdr1 && cmdr2);
     const consts = modelConstants();
-    const rc1 = bothCmdrs ? vtsrCOf(cmdr1) : ANCHOR;
-    const rc2 = bothCmdrs ? vtsrCOf(cmdr2) : ANCHOR;
+    const rc1 = bothCmdrs ? cmdrRatingOf(cmdr1) : ANCHOR;
+    const rc2 = bothCmdrs ? cmdrRatingOf(cmdr2) : ANCHOR;
     const probFor = (t1Mean, t2Mean) => (window.VTBalonce
       ? window.VTBalonce.computeWinProb({
         rc1, rc2, t1Mean, t2Mean, lambda: consts.lambda, scale: consts.scale,
@@ -424,13 +503,13 @@
       return {
         team1: cmdr1 ? [playerKey(cmdr1)] : [],
         team2: cmdr2 ? [playerKey(cmdr2)] : [],
-        delta: Math.abs((cmdr1 ? cmdr1.vtsr : 0) - (cmdr2 ? cmdr2.vtsr : 0)),
+        delta: Math.abs((cmdr1 ? sumRatingOf(cmdr1, true) : 0) - (cmdr2 ? sumRatingOf(cmdr2, true) : 0)),
         probT1: probFor(null, null),
       };
     }
     const M = thugs.length;
-    const cmdr1Vtsr = cmdr1 ? cmdr1.vtsr : 0;
-    const cmdr2Vtsr = cmdr2 ? cmdr2.vtsr : 0;
+    const cmdr1Vtsr = cmdr1 ? sumRatingOf(cmdr1, true) : 0;
+    const cmdr2Vtsr = cmdr2 ? sumRatingOf(cmdr2, true) : 0;
     const cmdr1Slots = cmdr1 ? 1 : 0;
     const cmdr2Slots = cmdr2 ? 1 : 0;
 
@@ -452,10 +531,10 @@
       for (let i = 0; i < M; i++) {
         if ((mask >> i) & 1) {
           team1Thugs.push(thugs[i]);
-          team1Sum += thugs[i].vtsr;
+          team1Sum += sumRatingOf(thugs[i], false);
         } else {
           team2Thugs.push(thugs[i]);
-          team2Sum += thugs[i].vtsr;
+          team2Sum += sumRatingOf(thugs[i], false);
         }
       }
       const team1Size = team1Thugs.length + cmdr1Slots;
@@ -470,9 +549,9 @@
       if (Math.abs(team1Size - team2Size) > MAX_TEAM_SIZE_GAP) continue;
 
       const delta = Math.abs(team1Sum - team2Sum);
-      const padded = padShortSide(
-        team1Thugs.map((p) => p.vtsr),
-        team2Thugs.map((p) => p.vtsr),
+      const padded = seatPad(
+        team1Thugs.map(thugRatingOf),
+        team2Thugs.map(thugRatingOf),
         team1Size,
         team2Size,
       );
@@ -568,7 +647,48 @@
     };
   }
 
+  /** Drop every ignore, including 2v2 mode's own bookkeeping. */
+  function clearIgnores() {
+    ignoredKeys.clear();
+    autoIgnoredKeys.clear();
+    restoredHiddenKeys.clear();
+  }
+
+  /**
+   * 2v2 mode ignores hidden lobby members (slot 255) on its own: they are
+   * almost always spectators, and the meter needs exactly four players.
+   * A member the user restored stays restored.
+   */
+  function applyHiddenAutoIgnore() {
+    if (!is2v2()) return;
+    for (const p of activeRoster) {
+      if (!p.isLiveHidden) continue;
+      const key = playerKey(p);
+      if (ignoredKeys.has(key) || restoredHiddenKeys.has(key)) continue;
+      ignoredKeys.add(key);
+      autoIgnoredKeys.add(key);
+    }
+  }
+
+  function setFormat(next) {
+    const target = next === '2v2' ? '2v2' : 'team';
+    if (target === format) return;
+    format = target;
+    if (format === '2v2') {
+      applyHiddenAutoIgnore();
+    } else {
+      for (const key of autoIgnoredKeys) ignoredKeys.delete(key);
+      autoIgnoredKeys.clear();
+      restoredHiddenKeys.clear();
+    }
+    invalidateSuggestion();
+    compute();
+    render();
+    updateMainState();
+  }
+
   function compute() {
+    applyHiddenAutoIgnore();
     // Two-mode dispatch:
     //
     //   LIVE   — the panel is a passive mirror of the lobby. Every
@@ -615,6 +735,7 @@
       state.components.balonce.manualSwaps = new Set(manualSwaps);
       state.components.balonce.partition = bestPartition ? { ...bestPartition } : null;
       state.components.balonce.mode = mode;
+      state.components.balonce.format = format;
     }
   }
 
@@ -730,10 +851,12 @@
     const suggestNote = renderSuggestNote();
     const cmdrConfig = renderCmdrConfig();
     const teamColumns = renderTeamColumns();
-    const playedMeter = renderPlayedMeter();
+    const problem = is2v2() ? twoVTwoProblem(balanceState()) : null;
+    const playedMeter = problem ? render2v2Guard(problem) : renderPlayedMeter();
 
     bodyEl.innerHTML = `
       ${renderRatingBasis()}
+      ${render2v2Hint()}
       ${banner}
       ${manualBanner}
       ${suggestNote}
@@ -802,7 +925,14 @@
    */
   function updateHeaderButtons() {
     const playingCount = playingRoster().length;
-    if (autoSuggestBtn) {
+    updateFormatPills();
+    if (autoSuggestBtn && is2v2()) {
+      const ok = playingCount === TWO_V_TWO_PLAYERS;
+      autoSuggestBtn.disabled = !ok;
+      autoSuggestBtn.title = ok
+        ? 'Suggest a 2v2: one commander and one thug per side, closest to 50% (keeps commanders you set; switches to Manual)'
+        : '2v2 needs exactly 4 players counted. Ignore spectators first.';
+    } else if (autoSuggestBtn) {
       const tooSmall = playingCount < 2;
       const tooBig = playingCount > TEAM_SLOT_CAP * 2;
       autoSuggestBtn.disabled = tooSmall || tooBig;
@@ -889,6 +1019,44 @@
   function wireManualBannerControls() {
     const btn = bodyEl.querySelector('[data-vt-balonce-snap-to-live]');
     if (btn) btn.addEventListener('click', snapToLive);
+    const fmt = bodyEl.querySelector('[data-vt-balonce-try-2v2]');
+    if (fmt) fmt.addEventListener('click', () => setFormat('2v2'));
+  }
+
+  function updateFormatPills() {
+    const group = document.getElementById('vt-tools-balonce-format');
+    if (!group) return;
+    const buttons = group.querySelectorAll('[data-vt-balonce-format]');
+    for (let i = 0; i < buttons.length; i++) {
+      const on = buttons[i].getAttribute('data-vt-balonce-format') === format;
+      buttons[i].classList.toggle('active', on);
+      buttons[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+
+  /** Team mode with exactly four counted: offer the 2v2 ladders. */
+  function render2v2Hint() {
+    if (is2v2() || playingRoster().length !== TWO_V_TWO_PLAYERS) return '';
+    return `
+      <div class="vt-tools-balonce-format-hint" role="note">
+        <i class="bi bi-people" aria-hidden="true"></i>
+        <span>4 players counted. If this is a 2v2, the 2v2 ladders rate it.</span>
+        <button type="button" class="vt-tools-balonce-format-hint-action" data-vt-balonce-try-2v2>Use 2v2</button>
+      </div>`;
+  }
+
+  /** Shown in place of the meter when 2v2 mode cannot score the layout. */
+  function render2v2Guard(problem) {
+    return `
+      <div class="vt-tools-balonce-played-meter vt-tools-balonce-2v2-guard" role="status">
+        <i class="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>${escapeHtml(problem)}
+      </div>`;
+  }
+
+  /** Seeded from a match, As played: the 2v2 numbers are still today's. */
+  function render2v2BasisNote() {
+    if (!is2v2() || !matchSeed || ratingBasis() === 'now') return '';
+    return '<div class="vt-tools-balonce-banner-note small mt-1">2v2 ratings are today\u2019s. As played covers the main ladders only.</div>';
   }
 
   function updateCmdrStatusBadge(setCount) {
@@ -914,6 +1082,7 @@
   }
 
   function renderBanner(setCount) {
+    if (is2v2()) return render2v2Banner(setCount);
     const provisionalCount = playingRoster().filter((p) => p.isProvisional).length;
     const provisionalNote = provisionalCount > 0
       ? `<div class="vt-tools-balonce-banner-note small mt-1">${provisionalCount} provisional player${provisionalCount === 1 ? '' : 's'} included — balance has reduced confidence.</div>`
@@ -972,6 +1141,44 @@
     `;
   }
 
+  /** 2v2 mode banner: same three states, 2v2 ladder copy. */
+  function render2v2Banner(setCount) {
+    const basisNote = render2v2BasisNote();
+    if (setCount < 2) {
+      const lead = setCount === 0 ? '0 commanders set.' : '1 of 2 commanders set.';
+      return `
+        <div class="vt-tools-balonce-banner vt-tools-balonce-banner--${setCount === 0 ? 'orange' : 'yellow'}">
+          <i class="bi bi-info-circle me-1"></i>
+          <strong>2v2 &middot; ${lead}</strong>
+          Until both commanders are set, the prediction uses the thugs&rsquo; 2v2 win/loss ratings only. Suggest picks the commanders and pairs each with a thug.
+          ${basisNote}
+        </div>
+      `;
+    }
+    const { cmdr1, cmdr2 } = getActiveCommanders();
+    const gap = cmdrRatingOf(cmdr1) - cmdrRatingOf(cmdr2);
+    const gapTxt = Math.abs(gap) < 1
+      ? 'Cmdr \u0394VTSR-2v2C: level'
+      : `Cmdr \u0394VTSR-2v2C: ${gap > 0 ? '+' : '\u2212'}${Math.round(Math.abs(gap))} (${escapeHtml((gap > 0 ? cmdr1 : cmdr2).displayName)})`;
+    const newCount = playingRoster().filter((p) => {
+      const isCmdr = p === cmdr1 || p === cmdr2;
+      return isCmdr ? p.vtsr2v2cProvisional : p.vtsr2v2tWlProvisional;
+    }).length;
+    const newNote = newCount > 0
+      ? `<div class="vt-tools-balonce-banner-note small mt-1">${newCount} of 4 have fewer than 5 games on their 2v2 ladder, so the call is rough.</div>`
+      : '';
+    return `
+      <div class="vt-tools-balonce-banner vt-tools-balonce-banner--green">
+        <i class="bi bi-check-circle me-1"></i>
+        <strong>2v2 &middot; both commanders set.</strong>
+        Prediction is using VTSR-2v2C for the commanders and VTSR-2v2T (win/loss) for the thugs.
+        <span class="vt-tools-balonce-cmdr-delta-chip ms-2">${gapTxt}</span>
+        ${newNote}
+        ${basisNote}
+      </div>
+    `;
+  }
+
   /** Shown when the playing roster cannot fit in two teams of 5. */
   function renderFitNote() {
     const n = playingRoster().length;
@@ -999,9 +1206,14 @@
     const opts = playingRoster().map((p) => {
       const key = playerKey(p);
       const sel = key === currentKey ? ' selected' : '';
-      const rating = Number.isFinite(p.vtsrC)
-        ? `C${Math.round(p.vtsrC)}`
-        : (p.band ? p.band.shortLabel : '?');
+      let rating;
+      if (is2v2()) {
+        rating = Number.isFinite(p.vtsr2v2c) ? `2v2C ${Math.round(p.vtsr2v2c)}` : '2v2C new';
+      } else {
+        rating = Number.isFinite(p.vtsrC)
+          ? `C${Math.round(p.vtsrC)}`
+          : (p.band ? p.band.shortLabel : '?');
+      }
       return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - ${escapeHtml(rating)}</option>`;
     }).join('');
     return `
@@ -1019,7 +1231,7 @@
     // Disadvantage is now keyed to the model's win probability, not the
     // raw rating sum — a side can carry more total VTSR-T and still be
     // the underdog once the commander gap is in play.
-    const disadvantaged = state.disadvantaged;
+    const disadvantaged = (is2v2() && twoVTwoProblem(state)) ? null : state.disadvantaged;
 
     const disadvTip = state.fav.team
       ? `The model gives Team ${state.fav.team} a ${Math.round(state.fav.prob * 100)}% chance here.`
@@ -1084,6 +1296,9 @@
     const provisionalChip = p.isProvisional
       ? `<span class="vt-tools-balonce-row-provisional" title="${escapeHtml(p.isCustom ? 'Custom entry' : 'Provisional / unrated')}">${p.isCustom ? 'cust' : 'prov'}</span>`
       : '';
+    const ratingChips = is2v2()
+      ? render2v2RowChips(p, isCmdr)
+      : `${cmdrEloChip}${tierBadge}${provisionalChip}`;
     // No live team slot: parked on Team 1 and still counted. Engine-hidden
     // players (slot 255 / omitted team) get a `hidden` chip; everyone else
     // with no side yet (DM, not yet slotted) keeps `unsplit`.
@@ -1101,12 +1316,32 @@
         <i class="bi bi-grip-vertical vt-tools-balonce-row-grip" aria-hidden="true"></i>
         ${cmdrChip}
         <span class="vt-tools-balonce-row-name" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</span>
-        ${cmdrEloChip}
-        ${tierBadge}
-        ${provisionalChip}
+        ${ratingChips}
         ${slotChip}
       </div>
     `;
+  }
+
+  /**
+   * 2v2 rows show 2v2 numbers. A commander carries VTSR-2v2C; a thug
+   * carries both VTSR-2v2T ratings, win/loss (used in the prediction)
+   * first and performance (context only) second.
+   */
+  function render2v2RowChips(p, isCmdr) {
+    const chip = (label, value, games, provisional, tip, extraClass) => {
+      const shown = Number.isFinite(value) ? Math.round(value) : v2Anchor();
+      const mark = !Number.isFinite(value) ? '*' : (provisional ? '?' : '');
+      return `<span class="vt-tools-balonce-row-cmdrelo${extraClass || ''}${Number.isFinite(value) ? '' : ' is-unrated'}"
+        title="${escapeHtml(`${tip} ${Number.isFinite(value) ? `${games} game${games === 1 ? '' : 's'} on this ladder${provisional ? ', still provisional' : ''}.` : `No game on this ladder yet; read at ${v2Anchor()}.`}`)}">${label} ${shown}${mark}</span>`;
+    };
+    if (isCmdr) {
+      return chip('2v2C', p.vtsr2v2c, p.vtsr2v2cGames, p.vtsr2v2cProvisional,
+        'Commander 2v2 rating (VTSR-2v2C), used in the prediction.');
+    }
+    return chip('W/L', p.vtsr2v2tWl, p.vtsr2v2tWlGames, p.vtsr2v2tWlProvisional,
+      'Thug 2v2 win/loss rating (VTSR-2v2T), used in the prediction.')
+      + chip('Perf', p.vtsr2v2tPerf, p.vtsr2v2tPerfGames, p.vtsr2v2tPerfProvisional,
+        'Thug 2v2 performance rating (VTSR-2v2T), shown for comparison only.', ' is-context');
   }
 
   /**
@@ -1154,7 +1389,10 @@
 
     const parts = [];
     if (Number.isFinite(state.cmdrGap)) {
-      parts.push(`<span class="vt-balonce-part" title="Commander rating gap (VTSR-C), Team 1 minus Team 2. The strongest single term in the prediction.">Cmdr gap <span class="vt-mono">${signed(state.cmdrGap)}</span></span>`);
+      const gapTip = is2v2()
+        ? 'Commander rating gap (VTSR-2v2C), Team 1 minus Team 2.'
+        : 'Commander rating gap (VTSR-C), Team 1 minus Team 2. The strongest single term in the prediction.';
+      parts.push(`<span class="vt-balonce-part" title="${gapTip}">Cmdr gap <span class="vt-mono">${signed(state.cmdrGap)}</span></span>`);
     }
     if (Number.isFinite(state.thugGap)) {
       const seatNote = state.seatRule && state.seatRule.active
@@ -1180,7 +1418,11 @@
         lambda: state.lambda,
         scale: state.scale,
         cmdrName: (side) => (state.cmdrs[side] ? state.cmdrs[side].displayName : null),
-        validation: validationSummary || null,
+        // The corpus record for each reason class is a team-game record;
+        // an empty object (not null) keeps the window fallback out of 2v2.
+        validation: is2v2() ? {} : (validationSummary || null),
+        cmdrLabel: is2v2() ? 'VTSR-2v2C' : undefined,
+        thugNoun: is2v2() ? 'thug' : undefined,
       }), { bsTooltip: false })
       : '';
 
@@ -1212,6 +1454,7 @@
    * validation_summary.json is unavailable rather than guessed at.
    */
   function renderMeterFooter(state) {
+    if (is2v2()) return render2v2Footer(state);
     const bits = [];
 
     // --- confidence
@@ -1288,13 +1531,68 @@
   }
 
   /**
-   * ` · Ratings as of <local date time>` from elo_current.computed_at, or
-   * '' while the resolver is still loading / in rating-blind mode.
+   * 2v2 footer: confidence from 2v2 game counts, the ladder's own record
+   * when the validator has one, and the review count. The empty-seat chip
+   * never shows (the meter only runs on a 2-2 layout).
    */
-  function ratingsAsOfHtml() {
-    const meta = window.VTToolsResolver && window.VTToolsResolver.getEloMeta
-      ? window.VTToolsResolver.getEloMeta()
+  function render2v2Footer(state) {
+    if (validationSummary === undefined) loadValidationSummary();
+    const causes = [];
+    for (const side of [1, 2]) {
+      for (const p of state.teams[side]) {
+        const isCmdr = p === state.cmdrs[side];
+        const games = isCmdr ? p.vtsr2v2cGames : p.vtsr2v2tWlGames;
+        const prov = isCmdr ? p.vtsr2v2cProvisional : p.vtsr2v2tWlProvisional;
+        if (!games) causes.push(`${p.displayName} has no 2v2 game`);
+        else if (prov) causes.push(`${p.displayName} has ${games} 2v2 game${games === 1 ? '' : 's'}`);
+      }
+    }
+    if (!state.bothCmdrs) causes.push('commanders not both set');
+    let level = 'high';
+    if (causes.length >= 3) level = 'low';
+    else if (causes.length >= 1) level = 'medium';
+    const confTip = causes.length
+      ? `Reduced confidence: ${causes.join('; ')}.`
+      : 'All four players have 5 or more games on their 2v2 ladder.';
+    const chip = `<span class="vt-balonce-confidence vt-balonce-confidence--${level}" title="${escapeHtml(confTip)}">
+      <i class="bi bi-shield-check" aria-hidden="true"></i>${level === 'high' ? 'High' : level === 'medium' ? 'Medium' : 'Low'} confidence</span>`;
+
+    const meta = window.VTToolsResolver && window.VTToolsResolver.get2v2Meta
+      ? window.VTToolsResolver.get2v2Meta()
       : null;
+    const latest = validationSummary && validationSummary.latest;
+    const recorded = (latest && Number.isFinite(latest.vtsr_2v2_recorded_n))
+      ? latest.vtsr_2v2_recorded_n
+      : (meta ? meta.wl_games_recorded : null);
+    const pieces = ['Model: VTSR-2v2 ladders (experimental)'];
+    if (latest && Number.isFinite(latest.vtsr_2v2_accuracy) && Number.isFinite(latest.vtsr_2v2_n)) {
+      pieces.push(`called ${Math.round(latest.vtsr_2v2_accuracy * 100)}% of ${latest.vtsr_2v2_n} 2v2 winners, most from F9bomber\u2019s ledger`);
+    } else if (meta && Number.isFinite(meta.wl_games_rated)) {
+      pieces.push(`${meta.wl_games_rated} rated 2v2s`);
+    }
+    if (Number.isFinite(recorded)) {
+      pieces.push(`not validated yet: ${recorded} recorded 2v2${recorded === 1 ? '' : 's'} (review at ${TWO_V_TWO_REVIEW_GAMES})`);
+    }
+    const claim = pieces.join(' \u00b7 ');
+    return `
+      <div class="vt-balonce-footer">
+        <span class="vt-tools-balonce-footer-chips">${chip}</span>
+        <span>${escapeHtml(claim)}${ratingsAsOfHtml(meta)} \u00b7
+          <a href="../elo/index.html?tab=2v2c" target="_blank" rel="noopener">2v2 ladders</a>
+        </span>
+      </div>
+    `;
+  }
+
+  /**
+   * ` · Ratings as of <local date time>` from elo_current.computed_at (or
+   * the given meta's), '' while the resolver is still loading / in
+   * rating-blind mode.
+   */
+  function ratingsAsOfHtml(metaOverride) {
+    const meta = metaOverride || (window.VTToolsResolver && window.VTToolsResolver.getEloMeta
+      ? window.VTToolsResolver.getEloMeta()
+      : null);
     if (!meta || !meta.computed_at) return '';
     const d = new Date(meta.computed_at);
     if (Number.isNaN(d.getTime())) return '';
@@ -1609,6 +1907,7 @@
   function restorePlayer(key) {
     if (!key || !ignoredKeys.has(key)) return;
     ignoredKeys.delete(key);
+    if (autoIgnoredKeys.delete(key)) restoredHiddenKeys.add(key);
     invalidateSuggestion();
     if (mode === 'live') {
       const live = deriveLiveCommanderSetup();
@@ -1684,10 +1983,25 @@
 
   // ---------------------------------------------------------------- Auto-suggest / reset
 
+  /**
+   * 2v2 Suggest: one commander and one thug per side. Commanders already
+   * set stay; otherwise every commander pair is tried.
+   */
+  function findBest2v2(roster) {
+    if (roster.length !== TWO_V_TWO_PLAYERS) return null;
+    const { cmdr1, cmdr2 } = getActiveCommanders();
+    if (!cmdr1 || !cmdr2) return findBestBalance(roster);
+    const keys = new Set([playerKey(cmdr1), playerKey(cmdr2)]);
+    const thugs = roster.filter((p) => !keys.has(playerKey(p)));
+    const part = findBestPartition(thugs, cmdr1, cmdr2);
+    return part ? { partition: part, cmdr1, cmdr2 } : null;
+  }
+
   function autoSuggestBoth() {
     const roster = playingRoster();
     if (roster.length < 2 || roster.length > TEAM_SLOT_CAP * 2) return;
-    const best = findBestBalance(roster);
+    if (is2v2() && roster.length !== TWO_V_TWO_PLAYERS) return;
+    const best = is2v2() ? findBest2v2(roster) : findBestBalance(roster);
     if (!best) return;
     manualSwaps.clear();
     commanderSetup = {
@@ -1734,7 +2048,7 @@
    */
   function restoreMatchLayout() {
     if (!matchSeed) return;
-    ignoredKeys.clear();
+    clearIgnores();
     manualSwaps.clear();
     invalidateSuggestion();
     assignmentOverride = new Map();
@@ -1777,7 +2091,7 @@
       },
       label: (seed && seed.label) || '',
     };
-    ignoredKeys.clear();
+    clearIgnores();
     manualSwaps.clear();
     assignmentOverride = new Map();
     for (let i = 0; i < srcKeys.length; i++) {
@@ -1800,7 +2114,7 @@
    * roster (every `p.liveTeam` is null) — see render() for the gating.
    */
   function snapToLive() {
-    ignoredKeys.clear();
+    clearIgnores();
     manualSwaps.clear();
     invalidateSuggestion();
     assignmentOverride = new Map();
@@ -1843,19 +2157,27 @@
     // commander can take their slot on this same pass.
     let clearedIgnores = false;
     if (sessionId && lastSessionId && sessionId !== lastSessionId) {
-      ignoredKeys.clear();
+      clearIgnores();
       clearedIgnores = true;
     }
     if (sessionId) lastSessionId = sessionId;
     if (!clearedIgnores && lastPageMode === 'manual' && pageMode === 'auto') {
-      ignoredKeys.clear();
+      clearIgnores();
       clearedIgnores = true;
     }
     if (!clearedIgnores) {
       for (const k of Array.from(ignoredKeys)) {
-        if (!keys.has(k)) ignoredKeys.delete(k);
+        if (!keys.has(k)) {
+          ignoredKeys.delete(k);
+          autoIgnoredKeys.delete(k);
+        }
+      }
+      for (const k of Array.from(restoredHiddenKeys)) {
+        if (!keys.has(k)) restoredHiddenKeys.delete(k);
       }
     }
+    // 2v2 mode: a hidden joiner is ignored before the commander mirror runs.
+    applyHiddenAutoIgnore();
     lastPageMode = pageMode;
     if (pageMode === 'auto') matchSeed = null;
 
@@ -1886,7 +2208,8 @@
   }
 
   function onResetAll() {
-    ignoredKeys.clear();
+    clearIgnores();
+    format = 'team';
     lastPageMode = null;
     matchSeed = null;
     commanderSetup = { team1: null, team2: null };
@@ -1911,6 +2234,13 @@
     if (autoSuggestBtn) autoSuggestBtn.addEventListener('click', autoSuggestBoth);
     if (swapCmdrsBtn) swapCmdrsBtn.addEventListener('click', swapCommanders);
     if (resetBtn) resetBtn.addEventListener('click', onResetLayout);
+    const formatGroup = document.getElementById('vt-tools-balonce-format');
+    if (formatGroup) {
+      formatGroup.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-vt-balonce-format]');
+        if (btn) setFormat(btn.getAttribute('data-vt-balonce-format'));
+      });
+    }
 
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);

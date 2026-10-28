@@ -37,10 +37,10 @@ docs/DATA_DICTIONARY.md section 18.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 import identity_aliases
 import inactivity
+import match_format
 
 # ---------------------------------------------------------------------------
 # Constants (frozen in critique/decisions/vtsr-1v1-ladder.md)
@@ -77,30 +77,11 @@ def k_factor(games: int) -> float:
     return ONE_V_ONE_K_FLOOR + (ONE_V_ONE_K_BASE - ONE_V_ONE_K_FLOOR) * frac
 
 
-def _slot_side(slot: Any) -> int | None:
-    try:
-        s = int(slot)
-    except (TypeError, ValueError):
-        return None
-    if 1 <= s <= 5:
-        return 1
-    if 6 <= s <= 10:
-        return 2
-    return None
-
-
 def one_v_one_players(md: dict) -> dict[int, dict] | None:
     """{1: row, 2: row} when the match has exactly one non-campod
     leaderboard row per side, else None. Shared with the separation gate
-    and the validator so the 1v1 definition lives in one place."""
-    sides: dict[int, list[dict]] = {1: [], 2: []}
-    for row in md.get("leaderboard") or []:
-        if row.get("is_campod"):
-            continue
-        side = _slot_side(row.get("slot"))
-        if side is None:
-            continue
-        sides[side].append(row)
+    and the validator; the side count is scripts/match_format.py's."""
+    sides = match_format.side_rows(md)
     if len(sides[1]) == 1 and len(sides[2]) == 1:
         return {1: sides[1][0], 2: sides[2][0]}
     return None

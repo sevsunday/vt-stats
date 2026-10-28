@@ -138,6 +138,31 @@
             <i class="bi bi-people me-1"></i>1v1
           </button>
         </li>
+        <!-- 2v2: one pill, two ladders. Fixed Popper strategy so the menu
+             is not clipped by the scrolling pill row. -->
+        <li class="nav-item dropdown" role="presentation">
+          <button class="nav-link dropdown-toggle" id="elo-tab-2v2-btn" type="button"
+                  data-bs-toggle="dropdown" aria-expanded="false"
+                  data-bs-popper-config='{"strategy":"fixed"}'>
+            <i class="bi bi-people-fill me-1"></i>2v2
+          </button>
+          <ul class="dropdown-menu vt-elo-2v2-menu" aria-labelledby="elo-tab-2v2-btn">
+            <li>
+              <button class="dropdown-item" id="elo-tab-2v2c-btn" data-bs-toggle="pill"
+                      data-bs-target="#elo-tab-2v2c" type="button" role="tab"
+                      aria-controls="elo-tab-2v2c" aria-selected="false">
+                <i class="bi bi-person-badge me-2"></i>Commanders &middot; VTSR-2v2C
+              </button>
+            </li>
+            <li>
+              <button class="dropdown-item" id="elo-tab-2v2t-btn" data-bs-toggle="pill"
+                      data-bs-target="#elo-tab-2v2t" type="button" role="tab"
+                      aria-controls="elo-tab-2v2t" aria-selected="false">
+                <i class="bi bi-crosshair me-2"></i>Thugs &middot; VTSR-2v2T
+              </button>
+            </li>
+          </ul>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="elo-tab-how-btn" data-bs-toggle="pill"
                   data-bs-target="#elo-tab-how" type="button" role="tab"
@@ -283,6 +308,61 @@
           <div class="card-body text-center text-muted py-5">
             <i class="bi bi-people d-block mb-2" style="font-size: 1.6rem;"></i>
             No 1v1 ratings published yet &mdash; run the pipeline to generate <code>elo_1v1_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs: 2v2 commanders / thugs (lazy). Separate from every other
+           ladder; recorded strict 2v2s + F9bomber's 2v2 rows. 404-safe. -->
+      <div class="tab-pane fade" id="elo-tab-2v2c" role="tabpanel" aria-labelledby="elo-tab-2v2c-btn">
+        <div class="card mb-4 d-none" id="section-vtsr-2v2c">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">
+              <i class="bi bi-person-badge me-2"></i>2v2 Commander Ratings &mdash; VTSR-2v2C
+              <span class="vt-elo-exp-chip ms-1">Experimental</span>
+            </h5>
+            <button type="button" class="btn btn-sm vt-vtsr-info-btn" data-elo-how-link="1">
+              <i class="bi bi-info-circle me-1"></i>How It's Calculated
+            </button>
+          </div>
+          <div class="card-body" id="vtsr-2v2c-body"></div>
+        </div>
+        <div class="vt-elo-empty card d-none" id="elo-vtsr-2v2c-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-people-fill d-block mb-2" style="font-size: 1.6rem;"></i>
+            No 2v2 ratings published yet &mdash; run the pipeline to generate <code>elo_2v2_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="elo-tab-2v2t" role="tabpanel" aria-labelledby="elo-tab-2v2t-btn">
+        <div class="card mb-4 d-none" id="section-vtsr-2v2t">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">
+              <i class="bi bi-crosshair me-2"></i>2v2 Thug Ratings &mdash; VTSR-2v2T
+              <span class="vt-elo-exp-chip ms-1">Experimental</span>
+            </h5>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <ul class="nav nav-pills vt-econ-log-pills vt-elo-2v2-view" role="radiogroup"
+                  aria-label="Which thug rating" id="vtsr-2v2t-view">
+                <li class="nav-item"><button type="button" class="nav-link active" role="radio"
+                    aria-checked="true" data-view="perf">Performance</button></li>
+                <li class="nav-item"><button type="button" class="nav-link" role="radio"
+                    aria-checked="false" data-view="wl">Win/loss</button></li>
+                <li class="nav-item"><button type="button" class="nav-link" role="radio"
+                    aria-checked="false" data-view="compare">Compare</button></li>
+              </ul>
+              <button type="button" class="btn btn-sm vt-vtsr-info-btn" data-elo-how-link="1">
+                <i class="bi bi-info-circle me-1"></i>How It's Calculated
+              </button>
+            </div>
+          </div>
+          <div class="card-body" id="vtsr-2v2t-body"></div>
+        </div>
+        <div class="vt-elo-empty card d-none" id="elo-vtsr-2v2t-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-crosshair d-block mb-2" style="font-size: 1.6rem;"></i>
+            No 2v2 ratings published yet &mdash; run the pipeline to generate <code>elo_2v2_current.json</code>.
           </div>
         </div>
       </div>

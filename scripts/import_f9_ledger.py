@@ -18,6 +18,9 @@ committed artifacts:
                                    picks, map counts, play_dates) consumed
                                    404-safe by js/player.js, js/app.js
                                    (Meta tab) and js/maps.js
+  data/external/f9_ledger_2v2.json the same funnel with one thug per side
+                                   (consumed only by scripts/elo_2v2.py;
+                                   `--only-2v2` writes just this file)
 
 THIS SCRIPT IS NOT PART OF THE PIPELINE. It runs once per ledger drop
 (`python scripts/import_f9_ledger.py`), requires openpyxl (import-time
@@ -70,6 +73,7 @@ NAME_MAP_PATH = EXTERNAL_DIR / "f9_name_map.json"
 MAP_ALIASES_PATH = EXTERNAL_DIR / "f9_map_aliases.json"
 LEDGER_PATH = EXTERNAL_DIR / "f9_ledger.json"
 COMMUNITY_PATH = EXTERNAL_DIR / "f9_community.json"
+LEDGER_2V2_PATH = EXTERNAL_DIR / "f9_ledger_2v2.json"
 STEAMID_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
 ELO_CURRENT_PATH = PROJECT_ROOT / "data" / "processed" / "elo_current.json"
 MANIFEST_PATH = PROJECT_ROOT / "data" / "processed" / "matches.json"
@@ -81,11 +85,15 @@ PROVIDER_URL = "https://f9bomber.com"
 # Locked gate constants (mirror scripts/elo.py's ELO_MIN_DURATION_SEC).
 MIN_DURATION_SEC = 240
 THUGS_PER_SIDE = (2, 3, 4)          # 3v3 / 4v4 / 5v5 with commanders
+# The separate 2v2 pass (VTSR-2v2, critique/decisions/vtsr-2v2-ladders.md):
+# one thug per side, every other gate identical.
+THUGS_PER_SIDE_2V2 = (1,)
 OVERLAP_DAY_TOLERANCE = 1           # F9 dates are US-local; ours are UTC
 OVERLAP_JACCARD_MIN = 0.4
 
 LEDGER_SCHEMA_VERSION = 1
 COMMUNITY_SCHEMA_VERSION = 1
+LEDGER_2V2_SCHEMA_VERSION = 1
 
 # Faction spellings seen on the sheet -> canonical name + project code.
 FACTION_CANON = {
@@ -306,12 +314,14 @@ def resolve_map_key(map_title: str, map_aliases: dict, title_index: dict):
             or title_index.get(strip_map_title(map_title)))
 
 
-def build_eligible_rows(rows: list[dict], resolver: Resolver
+def build_eligible_rows(rows: list[dict], resolver: Resolver,
+                        thugs_per_side: tuple[int, ...] = THUGS_PER_SIDE,
                         ) -> tuple[list[dict], Counter, Counter]:
     """Gates 1-7 (everything BEFORE overlap pairing): returns
     `(stage, funnel, notes)` where `stage` is the pre-overlap eligible row
     list (`{row, date, map_title, c1, c2, winner, duration_sec, t1, t2,
-    factions_raw}`). Shared by run_import() and the one-shot
+    factions_raw}`). Shared by run_import(), run_import_2v2() (with
+    `thugs_per_side=THUGS_PER_SIDE_2V2`) and the one-shot
     scripts/apply_f9_adjudications.py (which re-derives the eligible set
     for its pairing-uniqueness gates)."""
     funnel: Counter = Counter()
@@ -341,7 +351,7 @@ def build_eligible_rows(rows: list[dict], resolver: Resolver
         if len(u1) != len(u2):
             funnel["x_uneven"] += 1
             continue
-        if len(u1) not in THUGS_PER_SIDE:
+        if len(u1) not in thugs_per_side:
             funnel["x_size"] += 1
             continue
         stragglers = {norm(x) for x in
@@ -391,17 +401,19 @@ def build_eligible_rows(rows: list[dict], resolver: Resolver
     return stage, funnel, notes
 
 
-def run_import(xlsx_path: Path) -> tuple[dict, dict]:
-    name_map, exclude, map_aliases, title_index, manifest = load_inputs()
-    resolver = build_resolver(name_map)
-    rows = read_rows(xlsx_path)
-
-    # ---- gates 1-7 (pre-overlap) ---------------------------------------
-    stage, funnel, notes = build_eligible_rows(rows, resolver)
-
-    # ---- gate 8: overlap pairing vs our corpus (ours supersedes) --------
+def pair_overlaps(stage: list[dict], manifest: list[dict], resolver: Resolver,
+                  map_aliases: dict, title_index: dict, funnel: Counter,
+                  max_active_players: int | None = None,
+                  ) -> tuple[dict[int, tuple[float, int]], list[dict]]:
+    """Gate 8: pair sheet rows with our own recordings (ours supersedes).
+    Returns `(paired_f9, overlaps)`; bumps `funnel["g7_overlap"]`.
+    `max_active_players` drops recordings too big to be the same game (the
+    2v2 pass: a 4v4 we recorded that night is not the sheet's 2v2)."""
     ours = []
     for m in manifest:
+        if (max_active_players is not None
+                and (m.get("active_player_count") or 0) > max_active_players):
+            continue
         dt = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
         leaders = m.get("team_leaders") or {}
         map_file_stem = re.sub(r"\.bzn$", "", str(m.get("map") or "").lower())
@@ -479,8 +491,13 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
             "our_team": our_team,
             "our_decided_by_at_import": o["decided_by"],
         })
+    return paired_f9, overlaps
 
-    # ---- gate 9: excluded-name filter (unpaired rows only) --------------
+
+def filter_excluded(stage: list[dict], paired_f9: dict, exclude: set[str],
+                    funnel: Counter) -> tuple[list[dict], Counter]:
+    """Gate 9: excluded-name filter on the unpaired rows, then the
+    partition check (every sheet row lands in exactly one bucket)."""
     duels = []
     excluded_by_name: Counter = Counter()
     for i, p in enumerate(stage):
@@ -498,7 +515,6 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
         duels.append(p)
     funnel["FINAL"] = len(duels)
 
-    # Partition check: every sheet row lands in exactly one bucket.
     partition = (funnel["x_no_rosters"] + funnel["x_bad_cmdr_parse"]
                  + funnel["x_uneven"] + funnel["x_size"]
                  + funnel["x_straggler"] + funnel["x_winner"]
@@ -508,8 +524,11 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
                  + funnel["FINAL"])
     if partition != funnel["rows_total"]:
         fail(f"funnel partition {partition} != rows_total {funnel['rows_total']}")
+    return duels, excluded_by_name
 
-    # ---- ledger duels --------------------------------------------------
+
+def ledger_duel_rows(duels: list[dict], resolver: Resolver, map_aliases: dict,
+                     title_index: dict) -> list[dict]:
     def side_payload(names: list[str]) -> list[dict]:
         out = []
         for nm in names:
@@ -539,6 +558,64 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
             "winner_side": winner_side,
             "factions": {"1": f1_name, "2": f2_name},
         })
+    return ledger_duels
+
+
+def _provenance(xlsx_path: Path) -> dict:
+    return {
+        "provider": PROVIDER_NAME,
+        "url": PROVIDER_URL,
+        "source_file": xlsx_path.relative_to(PROJECT_ROOT).as_posix(),
+        "sheet_sha256": hashlib.sha256(xlsx_path.read_bytes()).hexdigest(),
+        "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "importer": "scripts/import_f9_ledger.py",
+    }
+
+
+def run_import_2v2(xlsx_path: Path) -> dict:
+    """The VTSR-2v2 pass: one thug per side, every other gate identical.
+    Writes nothing to the 3v3+ ledger or the community rollups."""
+    name_map, exclude, map_aliases, title_index, manifest = load_inputs()
+    resolver = build_resolver(name_map)
+    rows = read_rows(xlsx_path)
+    stage, funnel, notes = build_eligible_rows(
+        rows, resolver, thugs_per_side=THUGS_PER_SIDE_2V2)
+    paired_f9, overlaps = pair_overlaps(
+        stage, manifest, resolver, map_aliases, title_index, funnel,
+        max_active_players=4)
+    duels, excluded_by_name = filter_excluded(stage, paired_f9, exclude, funnel)
+    ledger_duels = ledger_duel_rows(duels, resolver, map_aliases, title_index)
+    for d in ledger_duels:
+        if d["size"] != "2v2":
+            fail(f"2v2 duel r{d['row']} has size {d['size']}")
+        if d["duration_sec"] < MIN_DURATION_SEC:
+            fail(f"2v2 duel r{d['row']} under {MIN_DURATION_SEC}s")
+        if d["winner_side"] not in (1, 2):
+            fail(f"2v2 duel r{d['row']} has no winner_side")
+    return {
+        "schema_version": LEDGER_2V2_SCHEMA_VERSION,
+        "provenance": _provenance(xlsx_path),
+        "funnel": {**{k: funnel[k] for k in sorted(funnel)}, **dict(notes)},
+        "duels": ledger_duels,
+        "overlaps": overlaps,
+        "excluded": {"by_name": {k: excluded_by_name[k]
+                                 for k in sorted(excluded_by_name)}},
+    }
+
+
+def run_import(xlsx_path: Path) -> tuple[dict, dict]:
+    name_map, exclude, map_aliases, title_index, manifest = load_inputs()
+    resolver = build_resolver(name_map)
+    rows = read_rows(xlsx_path)
+
+    # ---- gates 1-7 (pre-overlap) ---------------------------------------
+    stage, funnel, notes = build_eligible_rows(rows, resolver)
+    # ---- gate 8: overlap pairing vs our corpus (ours supersedes) --------
+    paired_f9, overlaps = pair_overlaps(
+        stage, manifest, resolver, map_aliases, title_index, funnel)
+    # ---- gate 9: excluded-name filter (unpaired rows only) --------------
+    duels, excluded_by_name = filter_excluded(stage, paired_f9, exclude, funnel)
+    ledger_duels = ledger_duel_rows(duels, resolver, map_aliases, title_index)
 
     # Per-duel invariants (fail loud; the _investigation gate re-checks).
     for d in ledger_duels:
@@ -551,17 +628,9 @@ def run_import(xlsx_path: Path) -> tuple[dict, dict]:
         if d["winner_side"] not in (1, 2):
             fail(f"duel r{d['row']} has no winner_side")
 
-    sheet_bytes = xlsx_path.read_bytes()
     ledger = {
         "schema_version": LEDGER_SCHEMA_VERSION,
-        "provenance": {
-            "provider": PROVIDER_NAME,
-            "url": PROVIDER_URL,
-            "source_file": xlsx_path.relative_to(PROJECT_ROOT).as_posix(),
-            "sheet_sha256": hashlib.sha256(sheet_bytes).hexdigest(),
-            "imported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "importer": "scripts/import_f9_ledger.py",
-        },
+        "provenance": _provenance(xlsx_path),
         "funnel": {**{k: funnel[k] for k in sorted(funnel)}, **dict(notes)},
         "duels": ledger_duels,
         "overlaps": overlaps,
@@ -647,13 +716,37 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="One-shot F9bomber ledger import")
     ap.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX,
                     help="Path to the F9 spreadsheet (default: %(default)s)")
+    ap.add_argument("--only-2v2", action="store_true",
+                    help="Write only data/external/f9_ledger_2v2.json; leave "
+                         "the 3v3+ ledger and community rollups untouched")
     args = ap.parse_args()
     if not args.xlsx.exists():
         fail(f"{args.xlsx} not found")
 
+    EXTERNAL_DIR.mkdir(parents=True, exist_ok=True)
+    ledger_2v2 = run_import_2v2(args.xlsx)
+    with open(LEDGER_2V2_PATH, "w", encoding="utf-8") as f:
+        json.dump(ledger_2v2, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    fn2 = ledger_2v2["funnel"]
+    unresolved_2v2 = sorted({
+        p["name"]
+        for d in ledger_2v2["duels"]
+        for p in [d["commanders"]["1"], d["commanders"]["2"],
+                  *d["thugs"]["1"], *d["thugs"]["2"]]
+        if not p["steam64"]
+    }, key=str.lower)
+    print("=== F9 2v2 ledger import ===")
+    print(f"  rows_total {fn2.get('rows_total', 0)}  x_size {fn2.get('x_size', 0)}  "
+          f"g7_overlap {fn2.get('g7_overlap', 0)}  "
+          f"x_excluded_name {fn2.get('x_excluded_name', 0)}  FINAL {fn2.get('FINAL', 0)}")
+    print(f"  unresolved names: {', '.join(unresolved_2v2) or 'none'}")
+    print(f"  wrote {LEDGER_2V2_PATH.relative_to(PROJECT_ROOT)}")
+    if args.only_2v2:
+        return
+
     ledger, community = run_import(args.xlsx)
 
-    EXTERNAL_DIR.mkdir(parents=True, exist_ok=True)
     with open(LEDGER_PATH, "w", encoding="utf-8") as f:
         json.dump(ledger, f, indent=2, ensure_ascii=False)
         f.write("\n")

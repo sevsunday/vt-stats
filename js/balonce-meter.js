@@ -111,6 +111,10 @@
     'data/processed/elo_commander_history.json',
     '../data/processed/elo_commander_history.json',
   ];
+  const TWO_V_TWO_HISTORY_URL_CANDIDATES = [
+    'data/processed/elo_2v2_history.json',
+    '../data/processed/elo_2v2_history.json',
+  ];
 
   const AXIS_LABELS = {
     enemy_damage_share: 'enemy damage',
@@ -305,6 +309,41 @@
       });
     }
     return _cmdrHistPromise;
+  }
+
+  let _twoVTwoHistPromise = null;
+
+  /**
+   * Same single-flight loader for `elo_2v2_history.json`, into the shared
+   * `window.__vtElo2v2History` sentinel. Used by the Outcome card's 2v2
+   * branch and by js/match-elo.js's 2v2 card.
+   */
+  function ensure2v2HistoryLoaded() {
+    if (window.__vtElo2v2History !== undefined) {
+      return Promise.resolve(window.__vtElo2v2History);
+    }
+    if (!_twoVTwoHistPromise) {
+      _twoVTwoHistPromise = (async () => {
+        for (const url of TWO_V_TWO_HISTORY_URL_CANDIDATES) {
+          try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (res && res.ok) return await res.json();
+          } catch (_) { /* try next candidate */ }
+        }
+        return null;
+      })().then((json) => {
+        window.__vtElo2v2History = json;
+        return json;
+      });
+    }
+    return _twoVTwoHistPromise;
+  }
+
+  /** This match's row in elo_2v2_history.json, or null. */
+  function find2v2Game(matchId) {
+    const hist = window.__vtElo2v2History;
+    if (!hist || !Array.isArray(hist.games) || !matchId) return null;
+    return hist.games.find((g) => g.source !== 'f9' && g.match_id === matchId) || null;
   }
 
   /** Model constants as emitted by elo_commander.py (never hardcoded). */
@@ -835,19 +874,21 @@
     const thugSide = thugTerm > 0 ? 1 : 2;
     const cmdrSide = cmdrTerm > 0 ? 1 : 2;
 
+    const cl = o.cmdrLabel || 'VTSR-C';
+    const thugs = o.thugNoun || 'thugs';
     let text;
     if (key === 'even' || !favored) {
-      text = 'Neither the commanders nor the thugs give either side a real edge.';
+      text = `Neither the commanders nor the ${thugs} give either side a real edge.`;
     } else if (key === 'commander_edge') {
       text = Math.abs(thugTerm) >= evenPts && thugSide !== cmdrSide
-        ? `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} VTSR-C) outweighs ${team(thugSide)}'s stronger thugs (+${thugPct}% win chance).`
-        : `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} VTSR-C) is the main edge.`;
+        ? `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} ${cl}) outweighs ${team(thugSide)}'s stronger ${thugs} (+${thugPct}% win chance).`
+        : `${cmdr(cmdrSide)}'s commander rating (+${cmdrPts} ${cl}) is the main edge.`;
     } else if (key === 'thug_edge') {
-      text = `${team(thugSide)}'s stronger thugs are the main edge (+${thugPct}% win chance); the commanders are close.`;
+      text = `${team(thugSide)}'s stronger ${thugs} ${thugs === 'thug' ? 'is' : 'are'} the main edge (+${thugPct}% win chance); the commanders are close.`;
     } else if (key === 'stacked') {
-      text = `${team(thugSide)}'s thugs (+${thugPct}% win chance) outweigh their weaker commander (\u2212${cmdrPts} VTSR-C).`;
+      text = `${team(thugSide)}'s ${thugs} (+${thugPct}% win chance) outweigh${thugs === 'thug' ? 's' : ''} their weaker commander (\u2212${cmdrPts} ${cl}).`;
     } else {
-      text = `${team(favored)} has the stronger commander (+${cmdrPts} VTSR-C) and the stronger thugs (+${thugPct}% win chance).`;
+      text = `${team(favored)} has the stronger commander (+${cmdrPts} ${cl}) and the stronger ${thugs} (+${thugPct}% win chance).`;
     }
     const cls = rec && rec.classes ? rec.classes[key] : null;
     const opposed = rec && rec.classes && rec.classes.commander_edge
@@ -1455,7 +1496,226 @@
       </div>`;
   }
 
+  // ---- 2v2 branch --------------------------------------------------
+  // A rated 2v2 has fewer than three a side, so VTSR-T and VTSR-C both
+  // exclude it and the main join is unavailable. The separate 2v2
+  // ladders carry the read instead: gauge and verdict from the stored
+  // win/loss expectation, the commander and thug win/loss moves, and the
+  // thugs' performance duel. An undecided game moved only the performance
+  // ladder, so it shows that part alone. VTSR-2v2T is not VTSR-T, so its
+  // numbers are printed.
+
+  function join2v2(currentData, g) {
+    const sides = g.sides || {};
+    const side = (k) => sides[k] || {};
+    const wlBefore = (p) => (p && p.wl && isNum(p.wl.before) ? p.wl.before : null);
+    const hist = window.__vtElo2v2History || {};
+    return {
+      available: true,
+      twoVTwo: true,
+      game: g,
+      commanders: { 1: side('1').commander || null, 2: side('2').commander || null },
+      thugs: { 1: side('1').thug || null, 2: side('2').thug || null },
+      duel: null,
+      winner: { decided_by: g.decided_by || ((currentData.match && currentData.match.winner) || {}).decided_by || null },
+      winnerTeam: g.outcome === 'team1' ? 1 : (g.outcome === 'team2' ? 2 : null),
+      isDraw: g.outcome === 'draw',
+      hypothetical: false,
+      probT1: (g.wl && g.wl.expected && isNum(g.wl.expected['1'])) ? g.wl.expected['1'] : null,
+      cmdrBefore: { 1: wlBefore(side('1').commander), 2: wlBefore(side('2').commander) },
+      t1Mean: wlBefore(side('1').thug),
+      t2Mean: wlBefore(side('2').thug),
+      consts: {
+        lambda: (g.wl && isNum(g.wl.lambda)) ? g.wl.lambda : (isNum(hist.lambda) ? hist.lambda : DEFAULT_LAMBDA),
+        scale: isNum(hist.logistic_scale) ? hist.logistic_scale : DEFAULT_SCALE,
+        anchor: isNum(hist.anchor) ? hist.anchor : ANCHOR,
+      },
+    };
+  }
+
+  function twoVTwoChipHtml() {
+    return `<a class="vt-balonce-notrated" href="elo/?tab=2v2c" data-bs-toggle="tooltip" data-bs-placement="top"
+         title="A 2v2 is rated on its own ladders (VTSR-2v2C for commanders, VTSR-2v2T for thugs), never on VTSR-T or VTSR-C. Those ladders are experimental.">
+         <i class="bi bi-people me-1" aria-hidden="true"></i>2v2 ladder \u00b7 experimental</a>`;
+  }
+
+  function zonePrematch2v2Html(j) {
+    const fav = favoriteOf(j.probT1);
+    const cmdrGap = (isNum(j.cmdrBefore[1]) && isNum(j.cmdrBefore[2])) ? j.cmdrBefore[1] - j.cmdrBefore[2] : null;
+    const thugGap = (isNum(j.t1Mean) && isNum(j.t2Mean)) ? j.t1Mean - j.t2Mean : null;
+    const parts = [];
+    if (isNum(cmdrGap)) {
+      parts.push(`<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Commander 2v2 rating gap (VTSR-2v2C), Team 1 minus Team 2.">Cmdr gap <span class="vt-mono">${fmtSigned(cmdrGap)}</span></span>`);
+    }
+    if (isNum(thugGap)) {
+      parts.push(`<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Thug 2v2 win/loss rating gap (VTSR-2v2T), Team 1 minus Team 2. It enters the prediction at lambda ${esc(String(j.consts.lambda))}.">Thug gap <span class="vt-mono">${fmtSigned(thugGap)}</span></span>`);
+    }
+    const headline = fav.team
+      ? `${esc(teamPhrase(j, fav.team))} favored <span class="vt-balonce-prob vt-mono">${fmtPct(fav.prob)}</span>`
+      : 'Dead even going in';
+    const reason = mainReason({
+      cmdrGap,
+      thugGap,
+      lambda: j.consts.lambda,
+      scale: j.consts.scale,
+      teamLabel: (s) => teamPhrase(j, s),
+      cmdrName: (s) => commanderName(j, s),
+      // The corpus record per reason class is a team-game record.
+      validation: {},
+      cmdrLabel: 'VTSR-2v2C',
+      thugNoun: 'thug',
+    });
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--prematch">
+        <div class="vt-balonce-zone-head">
+          <div class="vt-balonce-headline">${headline}</div>
+          ${twoVTwoChipHtml()}
+        </div>
+        ${mainReasonHtml(reason)}
+        ${meterHtml({
+          probT1: j.probT1,
+          leftLabel: `${teamPhrase(j, 1)} disadv`,
+          rightLabel: `${teamPhrase(j, 2)} disadv`,
+        })}
+        <div class="vt-balonce-parts">${parts.join('')}</div>
+      </div>`;
+  }
+
+  function move2v2ChipHtml(p, move, label, tip) {
+    if (!p || !move || !isNum(move.before) || !isNum(move.after)) return '';
+    const delta = isNum(move.delta) ? move.delta : move.after - move.before;
+    const cls = delta > 0 ? 'vt-vtsr-delta-positive' : delta < 0 ? 'vt-vtsr-delta-negative' : '';
+    return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">
+        ${esc(p.name || '?')} <span class="text-muted">${esc(label)}</span>
+        <span class="vt-mono">${Math.round(move.before)} \u2192 ${Math.round(move.after)}</span>
+        <span class="${cls} vt-mono">${fmtSigned(delta, 1)}</span></span>`;
+  }
+
+  function zonePlayed2v2Html(j) {
+    const g = j.game;
+    const blocks = [];
+    if (g.wl) {
+      const win = j.winnerTeam;
+      const fav = favoriteOf(j.probT1);
+      const pair = (s) => esc(`${(j.commanders[s] || {}).name || '?'} and ${(j.thugs[s] || {}).name || '?'}`);
+      let line;
+      if (j.isDraw) line = 'The teams drew; every win/loss rating scored half a point.';
+      else if (!fav.team) line = `${pair(win)} won a game the ratings called even.`;
+      else if (fav.team === win) line = `${pair(win)} were favored (${fmtPct(fav.prob)}) and won.`;
+      else line = `${pair(win)} won as the underdog (${fmtPct(1 - fav.prob)}).`;
+      const chips = [];
+      for (const s of [1, 2]) {
+        const c = j.commanders[s];
+        const t = j.thugs[s];
+        chips.push(move2v2ChipHtml(c, c && c.wl, '2v2C',
+          'Commander 2v2 rating (VTSR-2v2C) movement from this game.'));
+        chips.push(move2v2ChipHtml(t, t && t.wl, '2v2T W/L',
+          'Thug 2v2 win/loss rating movement. Commander and thug on a side move by the same amount here.'));
+      }
+      blocks.push(`
+        <div class="vt-balonce-sub">Win/loss ladders</div>
+        <p class="vt-balonce-duel-line">${line}</p>
+        <div class="vt-balonce-chiprow">${chips.join('')}</div>`);
+    } else {
+      blocks.push(`<p class="vt-balonce-duel-line text-muted">No verified winner, so the win/loss ladders did not move.</p>`);
+    }
+    if (g.perf) {
+      const t1 = j.thugs[1] || {};
+      const t2 = j.thugs[2] || {};
+      const sc = (g.perf.score && isNum(g.perf.score['1'])) ? g.perf.score['1'] : null;
+      const ex = (g.perf.expected && isNum(g.perf.expected['1'])) ? g.perf.expected['1'] : null;
+      const diff = (isNum(sc) && isNum(ex)) ? sc - ex : null;
+      const lead = isNum(diff) && Math.abs(diff) >= 0.02
+        ? ` ${esc(diff > 0 ? (t1.name || 'Team 1') : (t2.name || 'Team 2'))} beat the expectation.`
+        : ' Both played to their ratings.';
+      const text = isNum(sc) && isNum(ex)
+        ? `${esc(t1.name || 'Team 1\u2019s thug')} dealt ${fmtPct(sc)} of the two thugs\u2019 damage to the enemy against ${fmtPct(ex)} expected.${lead}`
+        : '';
+      const chips = [
+        move2v2ChipHtml(t1, t1.perf, '2v2T perf', 'Thug 2v2 performance rating movement.'),
+        move2v2ChipHtml(t2, t2.perf, '2v2T perf', 'Thug 2v2 performance rating movement.'),
+      ].join('');
+      blocks.push(`
+        <div class="vt-balonce-sub" data-bs-toggle="tooltip" data-bs-placement="top"
+          title="The two thugs' share of each other's enemy damage, scored like a 1v1 duel. It counts whether or not a winner is known.">Thug performance duel</div>
+        ${text ? `<p class="vt-balonce-duel-line">${text}</p>` : ''}
+        <div class="vt-balonce-chiprow">${chips}</div>`);
+    }
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--played">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">How it actually played out</h6>
+          <a class="vt-balonce-link" href="?tab=elo" data-vt-balonce-elo-link="1">Full breakdown <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
+        </div>
+        ${blocks.join('')}
+      </div>`;
+  }
+
+  /** Paint the 2v2 branch; true when this match is a rated 2v2. */
+  function render2v2(currentData, read, after, card) {
+    const matchId = currentData && currentData.match && currentData.match.id;
+    const g = find2v2Game(matchId);
+    if (!g) return false;
+    const j = join2v2(currentData, g);
+    read.innerHTML = g.wl
+      ? [zonePrematch2v2Html(j), zoneVerdictHtml(j)].join('')
+      : `<div class="vt-balonce-zone vt-balonce-zone--prematch">
+           <div class="vt-balonce-zone-head">
+             <div class="vt-balonce-headline">No verified winner</div>
+             ${twoVTwoChipHtml()}
+           </div>
+         </div>`;
+    after.innerHTML = zonePlayed2v2Html(j);
+    card.classList.remove('vt-balonce-hypothetical');
+    const whatIf = document.getElementById('outcome-whatif');
+    if (whatIf) {
+      whatIf.classList.add('d-none');
+      whatIf.classList.remove('d-flex');
+    }
+    return true;
+  }
+
+  function rosterRatings2v2(currentData) {
+    const matchId = currentData && currentData.match && currentData.match.id;
+    const g = find2v2Game(matchId);
+    if (!g || !g.sides) return null;
+    const bySteam = new Map();
+    const byName = new Map();
+    const before = (m) => (m && isNum(m.before) ? m.before : null);
+    for (const s of ['1', '2']) {
+      const side = g.sides[s] || {};
+      const c = side.commander;
+      const t = side.thug;
+      if (c) {
+        const rec = { role: 'commander', c: before(c.wl) };
+        if (c.steam64) bySteam.set(String(c.steam64), rec);
+        if (c.name) byName.set(String(c.name).toLowerCase(), rec);
+      }
+      if (t) {
+        const rec = { role: 'thug', tWl: before(t.wl), tPerf: before(t.perf) };
+        if (t.steam64) bySteam.set(String(t.steam64), rec);
+        if (t.name) byName.set(String(t.name).toLowerCase(), rec);
+      }
+    }
+    return { format: '2v2', bySteam, byName };
+  }
+
   // ---- Section render ----------------------------------------------
+
+  function wireEloLink(after) {
+    const eloLink = after.querySelector('[data-vt-balonce-elo-link]');
+    if (!eloLink) return;
+    eloLink.addEventListener('click', (ev) => {
+      const btn = document.getElementById('tab-elo-btn');
+      if (btn && window.bootstrap && bootstrap.Tab) {
+        ev.preventDefault();
+        bootstrap.Tab.getOrCreateInstance(btn).show();
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  }
 
   function render(currentData) {
     const read = readEl();
@@ -1469,6 +1729,20 @@
     const joined = joinMatch(currentData);
     if (!joined.available) {
       clearRead();
+      // A rated 2v2 is unavailable to the main join by construction.
+      if (window.__vtElo2v2History === undefined) {
+        ensure2v2HistoryLoaded().then(() => {
+          if (_lastMatchId === matchId) render(currentData);
+        });
+        return;
+      }
+      if (render2v2(currentData, read, after, card)) {
+        wireEloLink(after);
+        initSectionTooltips();
+        if (typeof window.vtRefreshOutcomeRoster === 'function') {
+          window.vtRefreshOutcomeRoster();
+        }
+      }
       return;
     }
 
@@ -1504,17 +1778,7 @@
       whatIfNow.href = `${base}&ratings=now#vt-tools-balonce`;
     }
 
-    const eloLink = after.querySelector('[data-vt-balonce-elo-link]');
-    if (eloLink) {
-      eloLink.addEventListener('click', (ev) => {
-        const btn = document.getElementById('tab-elo-btn');
-        if (btn && window.bootstrap && bootstrap.Tab) {
-          ev.preventDefault();
-          bootstrap.Tab.getOrCreateInstance(btn).show();
-          btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      });
-    }
+    wireEloLink(after);
 
     initSectionTooltips();
     if (typeof window.vtRefreshOutcomeRoster === 'function') {
@@ -1531,7 +1795,7 @@
    */
   function rosterRatings(currentData) {
     const joined = joinMatch(currentData);
-    if (!joined || !joined.available) return null;
+    if (!joined || !joined.available) return rosterRatings2v2(currentData);
     const bySteam = new Map();
     const byName = new Map();
     for (const team of [1, 2]) {
@@ -1570,6 +1834,8 @@
     fmtPct,
     cmdrConstants,
     ensureCmdrHistoryLoaded,
+    ensure2v2HistoryLoaded,
+    find2v2Game,
     renderMatchSection: render,
     destroyMatchSection,
     rosterRatings,

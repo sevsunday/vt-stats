@@ -26,6 +26,7 @@ import statsgate_pb2          # v3 (current schema: header.players roster + game
 import statsgate_v2_pb2       # v2 (frozen schema, retained for the 2026-04..08 corpus)
 import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
 import identity_aliases
+import match_format
 from google.protobuf.message import DecodeError
 
 # Internal schema labels stamped onto each match_data["match"]["proto_schema_version"].
@@ -2579,6 +2580,7 @@ def load_cache_index():
             "elo_current.json", "elo_history.json",
             "elo_commander_current.json", "elo_commander_history.json",
             "elo_1v1_current.json", "elo_1v1_history.json",
+            "elo_2v2_current.json", "elo_2v2_history.json",
             "elo_current_unlocked.json", "elo_history_unlocked.json",
             "elo_current_max.json", "elo_history_max.json",
             "elo_current_softmax.json", "elo_history_softmax.json",
@@ -3739,6 +3741,23 @@ def _load_f9_ledger():
     print(f"Loaded F9 ledger: {len(ledger.get('duels') or [])} community duels, "
           f"{len(ledger.get('overlaps') or [])} overlap hints")
     return ledger
+
+
+def _load_f9_ledger_2v2():
+    """data/external/f9_ledger_2v2.json `duels[]` (F9 2v2 rows, written by
+    `scripts/import_f9_ledger.py`), or [] when absent. Only
+    scripts/elo_2v2.py reads it."""
+    path = PROJECT_ROOT / "data" / "external" / "f9_ledger_2v2.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            ledger = json.load(f)
+    except FileNotFoundError:
+        return []
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  WARN: could not read {path.name} ({e}); ignoring F9 2v2 rows")
+        return []
+    duels = ledger.get("duels") if isinstance(ledger, dict) else None
+    return duels if isinstance(duels, list) else []
 
 
 def load_known_players(path=STEAMID_TO_NAME_PATH):
@@ -10674,6 +10693,9 @@ def _extract_contribution(match_data):
         "duration_sec": m["duration_sec"],
         "submitter":    m["submitter"],
         "player_count": m.get("player_count", 0),
+        # Which ladder considers this match ("1v1" / "2v2" / "team" /
+        # "other"); scripts/match_format.py. Display / picker only.
+        "match_format": match_format.classify_format(match_data),
         "has_position_data":    m.get("has_position_data", False),
         "has_target_lock_data": m.get("has_target_lock_data", False),
         "has_pickup_data":      m.get("has_pickup_data", False),
@@ -11446,6 +11468,10 @@ def main():
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
             "active_player_count": active_player_count,
+            # "1v1" / "2v2" / "team" / "other": which ladder considers the
+            # match (scripts/match_format.py). Drives the picker's Format
+            # facet; not a rated flag.
+            "match_format": match_format.classify_format(match_data),
             "submitter": submitter_by_id.get(match_id, ""),
             "team_leaders": match_data["match"].get("team_leaders", {}),
             # Per-team faction codes ({"1": {"code": "i", ...}, "2": {...}})
@@ -11601,6 +11627,35 @@ def main():
               f"{v1_current.get('skipped_cancelled', 0)} cancelled)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-1v1 ({e}); skipping.")
+
+    # ----- VTSR-2v2 (2v2C + 2v2T ladders, separate from every other) -----
+    # Recorded strict 2v2s + F9's 2v2 rows. Reads neither elo_history nor
+    # the 3v3+ F9 ledger's duels (that list only feeds the display-only
+    # activity clock). critique/decisions/vtsr-2v2-ladders.md. Soft-fails.
+    try:
+        import elo_2v2 as elo_2v2_module
+        f9_2v2_duels = _load_f9_ledger_2v2()
+        v2_current, v2_history = elo_2v2_module.compute_2v2_elo(
+            all_match_data,
+            external_duels=f9_2v2_duels,
+            match_names={e["id"]: e["name"] for e in manifest},
+            canonical_names={str(k): v for k, v in known_players.items()},
+            activity_external_duels=list(f9_duels or []) + f9_2v2_duels,
+        )
+        v2_current_path = OUTPUT_DIR / "elo_2v2_current.json"
+        with open(v2_current_path, "w", encoding="utf-8") as f:
+            json.dump(v2_current, f, indent=2, ensure_ascii=False)
+        v2_history_path = OUTPUT_DIR / "elo_2v2_history.json"
+        with open(v2_history_path, "w", encoding="utf-8") as f:
+            json.dump(v2_history, f, indent=2, ensure_ascii=False)
+        print(f"VTSR-2v2: {v2_current_path.name} "
+              f"({v2_current.get('wl_games_rated', 0)} win/loss games · "
+              f"{v2_current.get('wl_games_recorded', 0)} recorded + "
+              f"{v2_current.get('wl_games_f9', 0)} community · "
+              f"{v2_current.get('perf_games_rated', 0)} performance duels · "
+              f"{v2_current.get('skipped_inactive_player', 0)} inactive-player)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-2v2 ({e}); skipping.")
 
     # ----- VTSR-T (unlocked-priors alt mode, Phase 2B) -----
     # Re-runs the rating loop with `exclude_locked_priors=True`. The

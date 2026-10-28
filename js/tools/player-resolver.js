@@ -10,6 +10,7 @@
  *       data/processed/elo_current.json    (VTSR-T + commander stats)
  *       data/processed/elo_commander_current.json  (VTSR-C ladder — the
  *           dominant term in the Balonce Meter's win probability)
+ *       data/processed/elo_2v2_current.json  (VTSR-2v2 ladders, 2v2 mode only)
  *       data/processed/player_slugs.json   (sticky display name + slug)
  *       data/vsrmaplist.json     (used by live-session-card for map images)
  *   - LAZY (on first resolve of an unknown Steam64):
@@ -49,6 +50,7 @@
  *   - getVsrMapByFile()   : Map<lowercased mapFile, vsrmaplist entry>
  *   - getKnownHosts()     : Set<steam64>
  *   - getEloMeta()        : { anchor, rating_floor, ratings_count, computed_at, ... } | null
+ *   - get2v2Meta()        : { anchor, lambda_team_handicap, logistic_scale, wl_games_recorded, computed_at, ... } | null
  *
  * Resolved object shape:
  *   {
@@ -67,6 +69,9 @@
  *     vtsrCProvisional,      // bool — below the ladder's provisional threshold
  *     vtsrCUnrated,          // bool — no entry in the commander ladder at all
  *     vtsrCRecord,           // {w, l, d} or null
+ *     vtsr2v2c / vtsr2v2tWl / vtsr2v2tPerf  // VTSR-2v2 ratings, null when no game on that ladder
+ *     vtsr2v2cEffective / vtsr2v2tWlEffective  // ?? anchor — what 2v2 mode feeds the meter
+ *     vtsr2v2{c,tWl,tPerf}{Games,Provisional}
  *     matchesPlayed,         // number or 0
  *     matchesAsCmdr,         // number or 0
  *     matchesAsThug,         // number or 0
@@ -86,6 +91,7 @@
   const KNOWN_HOSTS_URL_CANDIDATES = ['../data/known-hosts.json', 'data/known-hosts.json'];
   const ELO_CURRENT_URL_CANDIDATES = ['../data/processed/elo_current.json', 'data/processed/elo_current.json'];
   const CMDR_ELO_URL_CANDIDATES = ['../data/processed/elo_commander_current.json', 'data/processed/elo_commander_current.json'];
+  const ELO_2V2_URL_CANDIDATES = ['../data/processed/elo_2v2_current.json', 'data/processed/elo_2v2_current.json'];
   const PLAYER_SLUGS_URL_CANDIDATES = ['../data/processed/player_slugs.json', 'data/processed/player_slugs.json'];
   const STEAM_ROSTER_URL_CANDIDATES = ['../data/steamid_to_name.txt', 'data/steamid_to_name.txt'];
   const VSR_MAP_LIST_URL_CANDIDATES = ['../data/vsrmaplist.json', 'data/vsrmaplist.json'];
@@ -114,6 +120,11 @@
   const cmdrRatings = new Map();
   /** Model constants from elo_commander_current.json (anchor / lambda / scale). */
   let cmdrEloMeta = null;
+
+  /** steam64 -> rating row, one map per elo_2v2_current.json ladder. */
+  const v2Ratings = { commander: new Map(), thug_wl: new Map(), thug_perf: new Map() };
+  /** Model constants from elo_2v2_current.json (anchor / lambda / scale). */
+  let v2EloMeta = null;
 
   /** @type {Map<string,object>} steam64 -> player_slugs entry {slug, name, matches_played} */
   const playerSlugs = new Map();
@@ -221,6 +232,36 @@
     }
   }
 
+  /**
+   * VTSR-2v2 ladders (commander + both thug ratings). Feeds Team Balonce's
+   * 2v2 mode only. 404-safe: without the file every player reads as a
+   * 2v2 debut at the anchor.
+   */
+  async function load2v2EloCurrent() {
+    const data = await fetchWithFallback(ELO_2V2_URL_CANDIDATES, (r) => r.json());
+    if (!data) {
+      console.warn('[player-resolver] failed to load elo_2v2_current.json (2v2 mode reads everyone at the anchor)');
+      return;
+    }
+    v2EloMeta = {
+      schema_version: data.schema_version,
+      anchor: Number.isFinite(data.anchor) ? data.anchor : PROVISIONAL_ANCHOR_VTSR,
+      lambda_team_handicap: data.lambda,
+      logistic_scale: data.logistic_scale,
+      provisional_threshold: data.provisional_threshold,
+      wl_games_rated: data.wl_games_rated || 0,
+      wl_games_recorded: data.wl_games_recorded || 0,
+      computed_at: data.computed_at || null,
+    };
+    const ladders = data.ladders || {};
+    for (const key of Object.keys(v2Ratings)) {
+      const rows = (ladders[key] && Array.isArray(ladders[key].ratings)) ? ladders[key].ratings : [];
+      for (const r of rows) {
+        if (r && typeof r.steam64 === 'string') v2Ratings[key].set(r.steam64, r);
+      }
+    }
+  }
+
   async function loadPlayerSlugs() {
     const data = await fetchWithFallback(PLAYER_SLUGS_URL_CANDIDATES, (r) => r.json());
     if (!data || !data.slugs) {
@@ -314,6 +355,41 @@
     return null;
   }
 
+  // The three VTSR-2v2 ratings for one player. Raw values are null when
+  // the player has no game on that ladder; the *Effective values are the
+  // anchor then, exactly as scripts/elo_2v2.py debuts a player.
+  function v2Fields(ratedId) {
+    const anchor = (v2EloMeta && Number.isFinite(v2EloMeta.anchor))
+      ? v2EloMeta.anchor
+      : PROVISIONAL_ANCHOR_VTSR;
+    const one = (key) => {
+      const r = ratedId ? v2Ratings[key].get(ratedId) || null : null;
+      const rating = (r && Number.isFinite(r.rating)) ? r.rating : null;
+      return {
+        rating,
+        effective: Number.isFinite(rating) ? rating : anchor,
+        games: (r && Number.isFinite(r.games)) ? r.games : 0,
+        provisional: r ? !!r.provisional : true,
+      };
+    };
+    const c = one('commander');
+    const tw = one('thug_wl');
+    const tp = one('thug_perf');
+    return {
+      vtsr2v2c: c.rating,
+      vtsr2v2cEffective: c.effective,
+      vtsr2v2cGames: c.games,
+      vtsr2v2cProvisional: c.provisional,
+      vtsr2v2tWl: tw.rating,
+      vtsr2v2tWlEffective: tw.effective,
+      vtsr2v2tWlGames: tw.games,
+      vtsr2v2tWlProvisional: tw.provisional,
+      vtsr2v2tPerf: tp.rating,
+      vtsr2v2tPerfGames: tp.games,
+      vtsr2v2tPerfProvisional: tp.provisional,
+    };
+  }
+
   /**
    * Resolve a Steam64 to a ResolvedPlayer. Steam64 may be null/undefined,
    * in which case a synthetic Unknown entry is returned (only meaningful
@@ -366,6 +442,8 @@
       ? cmdrEntry.matches_commanded_rated
       : 0;
 
+    const v2 = v2Fields(ratedId);
+
     const matchesPlayed = eloEntry && Number.isFinite(eloEntry.matches_played) ? eloEntry.matches_played : 0;
     const matchesAsCmdr = eloEntry && Number.isFinite(eloEntry.matches_as_commander) ? eloEntry.matches_as_commander : 0;
     const matchesAsThug = eloEntry && Number.isFinite(eloEntry.matches_as_thug) ? eloEntry.matches_as_thug : 0;
@@ -397,6 +475,7 @@
       vtsrCRecord: cmdrEntry
         ? { w: cmdrEntry.wins || 0, l: cmdrEntry.losses || 0, d: cmdrEntry.draws || 0 }
         : null,
+      ...v2,
       matchesPlayed,
       matchesAsCmdr,
       matchesAsThug,
@@ -434,6 +513,7 @@
       vtsrCProvisional: true,
       vtsrCUnrated: true,
       vtsrCRecord: null,
+      ...v2Fields(null),
       matchesPlayed: 0,
       matchesAsCmdr: 0,
       matchesAsThug: 0,
@@ -524,6 +604,7 @@
       loadKnownHosts(),
       loadEloCurrent(),
       loadCmdrEloCurrent(),
+      load2v2EloCurrent(),
       loadPlayerSlugs(),
       loadVsrMapList(),
     ]);
@@ -545,6 +626,7 @@
     getVsrMapByFile: () => vsrMapByFile,
     getEloMeta: () => eloMeta,
     getCmdrEloMeta: () => cmdrEloMeta,
+    get2v2Meta: () => v2EloMeta,
     tierFor: resolveTier,
     PROVISIONAL_ANCHOR_VTSR,
     SITE_URL,

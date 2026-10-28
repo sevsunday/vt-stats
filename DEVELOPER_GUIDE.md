@@ -2921,6 +2921,64 @@ $\bar K$ is the mean of both players' scheduled K (`40 → 20` linear over the f
 
 **Consumers (all 404-safe):** ELO page **1v1** pill (`?tab=1v1`, `#elo-tab-1v1` / `render1v1Ladder()` in `js/elo.js` — Ranked + Unranked tables, expandable game logs with map, factions, Δ and expected); How-it-works section (`oneVOneLadderHtml()` in `js/vtsr-explainers.js`); player page Commander tab 1v1 block (`render1v1BlockHtml()` in `js/player.js` — rating, record, peak, standing, rating chart, head-to-head, game log; self-hides without a rated 1v1); per-match Elo tab card `#section-match-elo-1v1` (`paint1v1()` in `js/match-elo.js`, shown on rated 1v1s alongside the VTSR-T exclusion note).
 
+### 13.16 VTSR-2v2 — the separate 2v2 ladders, and the shared format lines
+
+**Module:** `scripts/elo_2v2.py` (pure, no I/O). `compute_2v2_elo(all_match_data, external_duels=...) -> (current, history)`, wired into `scripts/process_stats.py` right after VTSR-1v1 in its own soft-fail block. **Outputs:** `data/processed/elo_2v2_current.json` + `elo_2v2_history.json` (`ELO_2V2_SCHEMA_VERSION = 1`, both in the `load_cache_index()` skip set). **Corpus-wide, picker-unaware, NOT in the pipeline cache key**; no `PIPELINE_VERSION` / `match.schema_version` / `ELO_SCHEMA_VERSION` / `CMDR_ELO_SCHEMA_VERSION` / `ELO_1V1_SCHEMA_VERSION` interaction. Memo (math frozen there, plus the pre-registered pick-one rule): `critique/decisions/vtsr-2v2-ladders.md`. Experimental posture on every surface.
+
+**The format lines (`scripts/match_format.py`).** One classifier decides which ladder *considers* a match; each ladder still applies its own outcome / duration / void / cancellation gates. Shape = non-campod leaderboard rows per side (slots 1-5 / 6-10), so camera-pod spectators never count, however many there are.
+
+| `match_format` | Shape | Ladder |
+|---|---|---|
+| `1v1` | 1 and 1 | VTSR-1v1 (§13.15) |
+| `2v2` | 2 and 2, each side's commander row among them, all four active (no `is_low_activity` row, no `is_zero_damage` thug) | VTSR-2v2 |
+| `team` | at least 3 per side (`TEAM_MIN_PER_SIDE`) and at least 6 total | VTSR-T, then VTSR-C |
+| `other` | anything else (2v1, 3v1, 3v2, 4v2, 1v0, an inactive 2v2) | none |
+
+The stamp is written onto every `matches.json` entry and every `match_contributions.json` entry as `match_format`. It is a display / filter field only, never a rating input. **Main-ladder rule:** `scripts/elo.py` gained `ELO_MIN_PER_SIDE = match_format.TEAM_MIN_PER_SIDE` (3) and the exclusion reason `short_side`, tested after `low_player_count`; `elo_current.json` reports `min_per_side` and `matches_excluded_short_side`. No rated match had a side below 3 when it landed, so `elo_history.json` stayed byte-identical and `ELO_SCHEMA_VERSION` was not bumped (inert-change precedent).
+
+**Three ratings, three ladders** (`ladders.commander` / `ladders.thug_wl` / `ladders.thug_perf`):
+
+- **VTSR-2v2C** — commander, win/loss.
+- **VTSR-2v2T (win/loss)** — thug, win/loss, in the **same walk** as 2v2C:
+
+$$E_1 = \frac{1}{1 + 10^{-((C_1 - C_2) + \lambda (T_1 - T_2))/400}} \qquad \Delta C = K_c (S - E) \qquad \Delta T = K_t (S - E)$$
+
+  This is VTSR-C's formula with the thug term drawn from the 2v2 thug ladder, `λ = TWO_V_TWO_LAMBDA = 1.0`. Within a side the commander and thug move by the same amount whenever their K matches.
+- **VTSR-2v2T (performance)** — thug vs thug damage duel, **recorded games only**: \(S_A = e_A / (e_A + e_B)\) with \(e\) = `personal.enemy_dealt` (VTSR-T's own axis), \(E_A = 1/(1 + 10^{-(R_A - R_B)/400})\), \(\Delta R_A = K (S_A - E_A)\). It needs no winner, so an undecided game still rates; skipped when both thugs dealt 0.
+
+Both thug ratings are published side by side by operator decision; the memo's pick-one rule opens at 30 recorded determined 2v2s (`TWO_V_TWO_REVIEW_GAMES` in the validator and the Tools footer). Do not retune λ, K or the scale to produce a winner. Every role uses one K per game (the mean of both players' scheduled K, `40 → 20` linear over their first 5 games in that ladder), so each role is exactly zero-sum. Anchor 1500, no floor, no seeding, provisional below 5 games. **All three show numbers** (like VTSR-1v1): the never-a-number rule belongs to the main VTSR-T ladder only.
+
+**Eligible games.** Win/loss walk: a recorded strict 2v2, not void, `duration_sec >= 240`, `winner.decided_by` in `adjudicated / attested / clean_win / contested` with team 1 or 2, or `draw` (0.5 each); **or** a row from `data/external/f9_ledger_2v2.json` (below), applied after same-day recorded games in sheet-row order. A ledger row that matches a recorded strict 2v2 (same commander pair within `F9_OVERLAP_DAY_TOLERANCE` = 1 day) is dropped at runtime. Dual recordings sharing one match id rate once. Each recorded game also stores, recorded but not scored, each commander's `combat_share` of the side's enemy damage.
+
+**F9bomber 2v2 rows.** `scripts/import_f9_ledger.py` gained a 2v2 pass writing `data/external/f9_ledger_2v2.json` (one thug per side, every gate the 3v3+ importer applies — rosters, commander parse, stragglers, winner is a commander, ≥ 240 s, exact-duplicate drop, excluded names — and no dual-recorded game). `data/external/f9_ledger.json` stayed byte-identical. Credit `F9bomber` → `https://f9bomber.com` on every surface that shows these rows.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `TWO_V_TWO_ANCHOR` | 1500.0 | Debut rating, every ladder |
+| `TWO_V_TWO_K_BASE` / `TWO_V_TWO_K_FLOOR` | 40.0 / 20.0 | K schedule endpoints (shared per role per game as the mean) |
+| `TWO_V_TWO_PROVISIONAL_PRIOR` | 5.0 | K decay horizon (games in that ladder) |
+| `TWO_V_TWO_PROVISIONAL_THRESHOLD` | 5 | Provisional badge floor |
+| `TWO_V_TWO_LOGISTIC_SCALE` | 400.0 | Expected-score scale (all three) |
+| `TWO_V_TWO_LAMBDA` | 1.0 | Thug-gap weight in the win/loss walk |
+| `TWO_V_TWO_MIN_DURATION_SEC` | 240 | Duration gate |
+| `F9_OVERLAP_DAY_TOLERANCE` | 1 | Runtime dual-recording guard for ledger rows |
+| `TWO_V_TWO_LADDER_MIN_GAMES` | 5 | Display-only: games in that ladder for a ranked `#` |
+| `INACTIVITY_WINDOW_DAYS` / `COMEBACK_GAMES_REQUIRED` | 90 / 3 | Display-only global activity clock (F9 appearances count) |
+
+**Evidence** (`scripts/study_2v2_transfer.py` → `_validation/2v2_transfer.md`, memo §Evidence): the main VTSR-C gap alone called F9's 2v2 winners 75% of 52 times, while adding the thugs' VTSR-T gap made the call worse as λ grew. Commander skill transfers; the main thug rating does not, which is why the handicap reads the 2v2 thug ladder. Seeding 2v2C from VTSR-C is a follow-up candidate that needs its own memo.
+
+**Separation gate:** `_investigation/check_2v2_separation.py` — VTSR-T, VTSR-C and VTSR-1v1 outputs identical with the 2v2 module stubbed out; forbidden consumers (`scripts/elo.py`, `scripts/elo_commander.py`, `scripts/elo_1v1.py`, `js/all-matches-aggregator.js`, `js/players-tab.js`) never read the 2v2 files or ledger; every rated game a strict 2v2; zero-sum per role; continuous before/after chains; the current file agrees with a replay; F9 dedup. **Validator:** §23 `metric_vtsr_2v2` in `scripts/validate_elo.py` (v1.12, report schema 12 → 13, additive) replays the history: win/loss accuracy on all / recorded / F9 games, performance sign agreement and mean |S − E|, and a replay-integrity diff. Only the win/loss headline reaches `validation_summary.json` (`latest.vtsr_2v2_n` / `vtsr_2v2_accuracy` / `vtsr_2v2_recorded_n`, for the Tools footer).
+
+**Consumers (all 404-safe):**
+
+- **ELO page**: a **2v2** dropdown pill with two children, `?tab=2v2c` (commander ladder) and `?tab=2v2t` (thug ladders with a `Performance | Win/loss | Compare` view, `&view=`, Performance default); `?tab=2v2` is an alias for `2v2c`. Selecting a dropdown item closes the menu on `shown.bs.tab` (Bootstrap leaves it open otherwise). Rows expand to a game log with F9 chips. The How tab carries the 2v2 section (`twoVTwoLaddersHtml()`, a real worked example) and a **Which ladder rates my game?** box (`formatLinesHtml()`) in `js/vtsr-explainers.js`.
+- **Player page** Commander tab: `#vt-player-2v2` block (`render2v2BlockHtml()` in `js/player.js` — the three ratings and a game log with partner, opponents, both deltas and map; self-hides without a 2v2).
+- **Dashboard per-match Elo tab**: `#section-match-elo-2v2` card (`paint2v2()` in `js/match-elo.js`) on rated recorded 2v2s.
+- **Dashboard Outcome card**: a 2v2 branch in `js/balonce-meter.js`. A 2v2 is unavailable to the main join by construction, so `render()` falls back to the shared `ensure2v2HistoryLoaded()` (`window.__vtElo2v2History`, one request shared with `js/match-elo.js`). It shows the gauge + headline + verdict from the stored `wl.expected`, the main-reason line (`mainReason({cmdrLabel: 'VTSR-2v2C', thugNoun: 'thug', validation: {}})` — empty validation, because the corpus record per reason class is a team-game record), the commander and thug win/loss moves, and the thugs' performance duel; an undecided game shows the performance part only, and there is no what-if. `rosterRatings()` returns `{format: '2v2', ...}` so the team panels show `2v2C N` on commanders and `W/L N · Perf N` on thugs. Unlike VTSR-1v1, the meter is allowed to read 2v2 data (the memo records why).
+- **Tools Balonce**: `Team | 2v2` format pills (`#vt-tools-balonce-format`). In 2v2 the meter uses 2v2C + 2v2T (win/loss) with the 2v2 file's own λ / scale; the performance rating shows on thug rows as context. It needs exactly 4 playing players in a 2-2 layout. The lobby API cannot tell a spectator from a player, so the user ignores spectators by right-click; hidden lobby members are auto-ignored while 2v2 is on, can be restored, and come back when leaving 2v2. A Team-mode hint offers 2v2 when 4 are counted. The empty-seat rule is off in 2v2. Suggest keeps commanders that are set. The footer quotes the validator's 2v2 call rate and the review threshold. `?from=` seeding only works for VTSR-T-rated lobbies, so 2v2 numbers are always today's.
+- **Match picker**: a **Format** facet (`1v1 · 2v2 · 3+v3+ · Other` chips with counts) from `manifest[].match_format`, state `pickerState.formats`, URL `?fmt=`, an optional key under `vt.picker.filters.v2` (no storage-key bump). A missing stamp reads as `other`.
+- **All Matches → Experimental** (`js/players-tab.js`): recorded games count only when `match_format === 'team'`; the F9 ledger stays size-based (3v3+). The old `3+ a side / All rated` Schedule toggle was retired, since with the 3-per-side rule both settings gave the same list.
+
 ## 14. Player Profile Pages (`player/`)
 
 The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:

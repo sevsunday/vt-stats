@@ -663,6 +663,15 @@
           </div>
           <div class="card-body" id="match-elo-1v1-body"></div>
         </div>
+        <!-- Rated 2v2 only (elo_2v2_history.json has this match). The
+             separate 2v2 ladders; hidden on every other match. -->
+        <div class="card mb-4 d-none" id="section-match-elo-2v2">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">2v2 ladders this match</h5>
+            <span class="vt-match-elo-why">separate 2v2 ratings, experimental — <a href="elo/?tab=2v2c">full 2v2 ladders</a></span>
+          </div>
+          <div class="card-body" id="match-elo-2v2-body"></div>
+        </div>
         <div class="card mb-4 d-none" id="match-elo-empty">
           <div class="card-body text-muted" id="match-elo-empty-body"></div>
         </div>
@@ -1568,14 +1577,6 @@
                   <button type="button" class="nav-link" data-vt-role="thug" role="radio" aria-checked="false">Thugs</button>
                 </li>
               </ul>
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Schedule format">
-                <li class="nav-item">
-                  <button type="button" class="nav-link active" data-vt-format="full" role="radio" aria-checked="true">3+ a side</button>
-                </li>
-                <li class="nav-item">
-                  <button type="button" class="nav-link" data-vt-format="all" role="radio" aria-checked="false">All rated</button>
-                </li>
-              </ul>
               <div class="form-check form-switch mb-0">
                 <input class="form-check-input" type="checkbox" id="vt-players-show-small">
                 <label class="form-check-label small" for="vt-players-show-small">Show under 8 matches</label>
@@ -1588,7 +1589,7 @@
             </div>
           </div>
           <div class="card-body">
-            <p class="text-muted small">Who has faced stronger or weaker opposition. The default bar is how much the opposing thugs cost in win chance, measured against a typical schedule in this view. Harder schedules sit to the right. Choosing another column header redraws the bar from that column. Thug gap is how much own thugs moved the win chance against opposing thugs, with that player left out of their own side. On the chart, a negative gap points right, because opposing thugs were stronger. VTSR-T shows as win chance or a band, never as a number; VTSR-C keeps its numbers. Recorded games use the rating from that day. Community games use each opponent's rating today. The list starts as the ranked ladder for that pill. This is the full corpus. The match picker does not change it.</p>
+            <p class="text-muted small">Who has faced stronger or weaker opposition. The default bar is how much the opposing thugs cost in win chance, measured against a typical schedule in this view. Harder schedules sit to the right. Choosing another column header redraws the bar from that column. Thug gap is how much own thugs moved the win chance against opposing thugs, with that player left out of their own side. On the chart, a negative gap points right, because opposing thugs were stronger. VTSR-T shows as win chance or a band, never as a number; VTSR-C keeps its numbers. Recorded games use the rating from that day. Community games use each opponent's rating today. Only team games (3 or more a side) count; 1v1s and 2v2s have their own ladders. The list starts as the ranked ladder for that pill. This is the full corpus. The match picker does not change it.</p>
             <div class="vt-players-schedule-scroll">
               <div class="chart-container" id="vt-players-schedule-chart-wrap">
                 <canvas id="vt-players-schedule-chart"></canvas>
@@ -1647,12 +1648,12 @@
               <div class="chart-container chart-container-sm mb-3">
                 <canvas id="vt-players-cmdr-chart"></canvas>
               </div>
-              <p class="text-muted small d-none" id="vt-players-cmdr-empty">No determined commander games in this format.</p>
+              <p class="text-muted small d-none" id="vt-players-cmdr-empty">No determined commander games for this player.</p>
               <h6 class="text-muted">As thug</h6>
               <div class="chart-container chart-container-sm mb-2">
                 <canvas id="vt-players-thug-chart"></canvas>
               </div>
-              <p class="text-muted small d-none" id="vt-players-thug-empty">No determined thug games in this format.</p>
+              <p class="text-muted small d-none" id="vt-players-thug-empty">No determined thug games for this player.</p>
               <p class="text-muted small mb-0 mt-2"><span class="vt-players-thin-mark" aria-hidden="true"></span> A hollow bar is a quarter with one or two games. The line is the rating at the end of that quarter (VTSR-T on a tier axis). VTSR-C moves on community duels. VTSR-T holds through a quarter that is only community games. Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>.</p>
             </div>
           </div>
@@ -2185,6 +2186,13 @@
                     <option value="e">Hadean</option>
                   </select>
                 </div>
+              </div>
+
+              <!-- Format (multi-select chips, populated from manifest[].match_format:
+                   the same classifier that picks a game's ladder). Empty = any. -->
+              <div class="vt-match-picker-filter-row">
+                <span class="vt-match-picker-filter-label">Format</span>
+                <div class="vt-match-picker-chipset" data-facet="formats" id="match-picker-facet-formats" role="group" aria-label="Match format"></div>
               </div>
 
               <!-- Player count (multi-select dropdown). Empty = any count.

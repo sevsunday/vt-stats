@@ -12,12 +12,11 @@
  */
 (function () {
   const SAMPLE_FLOOR = 8;
-  const MIN_SIDE = 3;
   const THIN_QUARTER = 3;
+  const TEAM_LEDGER_SIZES = { '3v3': true, '4v4': true, '5v5': true };
 
   const state = {
     role: 'commander',
-    format: 'full',
     showSmall: false,
     showUnranked: false,
     sortKey: 'oppThug',
@@ -149,17 +148,6 @@
     return p;
   }
 
-  function activeSideCounts(rows) {
-    const n = { 1: 0, 2: 0 };
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (row.is_campod || row.is_low_activity || row.is_zero_damage) continue;
-      const team = Number(row.team);
-      if (team === 1 || team === 2) n[team] += 1;
-    }
-    return n;
-  }
-
   function thugMeanOf(rows, team, beforeBySid, excludeSid) {
     const skip = excludeSid ? String(excludeSid) : '';
     const vals = [];
@@ -270,9 +258,11 @@
       if (!entry || entry.match_excluded || !entry.deltas || !entry.deltas.length) continue;
       const match = contribById[entry.match_id];
       if (!match || match.void) continue;
+      // match_format comes from scripts/match_format.py, the classifier
+      // that decides which ladder rates a game. 1v1 and 2v2 have their
+      // own ladders and never belong in a team schedule.
+      if (match.match_format !== 'team') continue;
       const rows = match.leaderboard || [];
-      const counts = activeSideCounts(rows);
-      const fullScale = counts[1] >= MIN_SIDE && counts[2] >= MIN_SIDE;
       const roster = {};
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
@@ -313,7 +303,6 @@
         if (!p) continue;
         const game = {
           date: date,
-          fullScale: fullScale,
           community: false,
           won: wonFor(match.winner, team),
           oppThug: means[other],
@@ -328,8 +317,9 @@
     let ledgerUsed = ledgerDuels.length > 0;
     for (let i = 0; i < ledgerDuels.length; i++) {
       const duel = ledgerDuels[i];
-      const size = String(duel.size || '');
-      const fullScale = size === '3v3' || size === '4v4' || size === '5v5';
+      // The ledger has no per-player activity, so it stays size-based.
+      // Its import already keeps only even 3v3+ rows.
+      if (!TEAM_LEDGER_SIZES[String(duel.size || '')]) continue;
       const date = duel.date || '';
       const day = dayOf(date);
       if (day > latestDay) latestDay = day;
@@ -359,7 +349,6 @@
           const role = people[p].role;
           player.games[role].push({
             date: date,
-            fullScale: fullScale,
             community: true,
             won: won,
             oppThug: oppThug,
@@ -406,10 +395,6 @@
     return buildPromise;
   }
 
-  function passesFormat(game) {
-    return state.format === 'all' || game.fullScale;
-  }
-
   function scheduleRows() {
     if (!built) return [];
     const rows = [];
@@ -423,7 +408,6 @@
       let community = 0;
       for (let g = 0; g < games.length; g++) {
         const game = games[g];
-        if (!passesFormat(game)) continue;
         if (game.oppThug == null) continue;
         withThug.push(game.oppThug);
         if (game.community) community += 1;
@@ -643,7 +627,7 @@
     const games = player.games[role];
     for (let i = 0; i < games.length; i++) {
       const game = games[i];
-      if (!passesFormat(game) || game.won == null) continue;
+      if (game.won == null) continue;
       const key = quarterKey(game.date);
       if (!key) continue;
       if (!buckets[key]) {
@@ -814,7 +798,7 @@
     let n = 0;
     const games = player.games[role];
     for (let i = 0; i < games.length; i++) {
-      if (passesFormat(games[i]) && games[i].oppThug != null) n += 1;
+      if (games[i].oppThug != null) n += 1;
     }
     return n;
   }
@@ -924,7 +908,7 @@
   }
 
   function climberHtml(list) {
-    if (!list.length) return '<p class="text-muted small mb-0">No one clears the 8-match floor in this format.</p>';
+    if (!list.length) return '<p class="text-muted small mb-0">No one clears the 8-match floor in this role.</p>';
     return '<div class="list-group">' + list.map(function (r) {
       return '<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between" data-vt-pick="' + esc(r.steam64) + '">'
         + '<span>' + esc(r.name) + '</span>'
@@ -1003,11 +987,6 @@
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-checked', on ? 'true' : 'false');
     });
-    document.querySelectorAll('#all-tab-players [data-vt-format]').forEach(function (btn) {
-      const on = btn.getAttribute('data-vt-format') === state.format;
-      btn.classList.toggle('active', on);
-      btn.setAttribute('aria-checked', on ? 'true' : 'false');
-    });
   }
 
   function closeSearch() {
@@ -1050,14 +1029,6 @@
     const roleBtn = e.target.closest('[data-vt-role]');
     if (roleBtn && roleBtn.closest('#all-tab-players')) {
       state.role = roleBtn.getAttribute('data-vt-role');
-      syncPills();
-      paintSchedule();
-      paintForm();
-      return;
-    }
-    const formatBtn = e.target.closest('[data-vt-format]');
-    if (formatBtn && formatBtn.closest('#all-tab-players')) {
-      state.format = formatBtn.getAttribute('data-vt-format');
       syncPills();
       paintSchedule();
       paintForm();

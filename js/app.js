@@ -51,6 +51,7 @@
   const $facetPlayerCounts  = document.getElementById('match-picker-facet-players');
   const $playerCountToggle  = document.getElementById('match-picker-count-toggle');
   const $facetSubmitters    = document.getElementById('match-picker-facet-submitters');
+  const $facetFormats       = document.getElementById('match-picker-facet-formats');
   // New full-roster Players chipset + its search input + Match-mode and
   // Role toggle button groups. Replaces the old Commanders block; see
   // index.html .vt-match-picker-filter-row--players.
@@ -109,7 +110,13 @@
     // unordered — it does not map onto Team 1 / Team 2.
     faction: 'any',                 // 'any' | 'i' | 'f' | 'e'
     factionVs: 'any',               // 'any' | 'i' | 'f' | 'e'
+    // Optional v2 key (no storage-key bump). manifest[].match_format from
+    // scripts/match_format.py — the same classifier that decides which
+    // ladder rates a game. Empty = any.
+    formats: [],                    // subset of MATCH_FORMATS
   });
+  const MATCH_FORMATS = ['1v1', '2v2', 'team', 'other'];
+  const MATCH_FORMAT_LABEL = { '1v1': '1v1', '2v2': '2v2', team: '3+v3+', other: 'Other' };
   // i = ISDF, f = Scion, e = Hadean. Letters on the picker cards are I/S/H.
   const FACTION_CODES = ['any', 'i', 'f', 'e'];
   const FACTION_LETTER = { i: 'I', f: 'S', e: 'H' };
@@ -159,6 +166,7 @@
   //   ?q=<text>            (free-text search; non-empty)
   //   ?dur=short|medium|long
   //   ?cnt=<csv-of-ints>   (active player-count multi-select, e.g. 8,10)
+  //   ?fmt=<csv>           (format multi-select: 1v1,2v2,team,other)
   //   ?sub=<csv>           (submitters multi-select)
   //   ?roster=<csv>        (full-roster nickname multi-select)
   //   ?mode=all            (Match-mode toggle; 'any' is default and omitted)
@@ -191,6 +199,7 @@
         q:      p.get('q'),
         dur:    p.get('dur'),
         cnt:    (p.get('cnt') || '').split(',').map(s => s.trim()).filter(Boolean),
+        fmt:    (p.get('fmt') || '').split(',').map(s => s.trim()).filter(Boolean),
         sub:    (p.get('sub') || '').split(',').map(s => s.trim()).filter(Boolean),
         roster: (p.get('roster') || '').split(',').map(s => s.trim()).filter(Boolean),
         mode:   p.get('mode'),
@@ -330,6 +339,7 @@
     if (ps.query)                                 params.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     params.set('dur', ps.duration);
     if (ps.playerCounts.length)                   params.set('cnt', ps.playerCounts.join(','));
+    if (ps.formats.length)                        params.set('fmt', ps.formats.join(','));
     if (ps.submitters.length)                     params.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        params.set('roster', ps.players.join(','));
     if (ps.matchMode === 'all')                   params.set('mode', 'all');
@@ -392,7 +402,7 @@
   // Picker query keys, in the order buildShareUrl() emits them.
   // `outcome` is retired (the facet was removed) and is deleted on sync
   // so a leftover `?outcome=` from an old link does not stick around.
-  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod', 'fac', 'vs'];
+  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'fmt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod', 'fac', 'vs'];
 
   // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
   // touches the picker keys. Existing non-picker params (match,
@@ -415,6 +425,7 @@
     if (ps.query)                                 cur.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     cur.set('dur', ps.duration);
     if (ps.playerCounts.length)                   cur.set('cnt', ps.playerCounts.join(','));
+    if (ps.formats.length)                        cur.set('fmt', ps.formats.join(','));
     if (ps.submitters.length)                     cur.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        cur.set('roster', ps.players.join(','));
     if (ps.matchMode === 'all')                   cur.set('mode', 'all');
@@ -971,9 +982,12 @@
       const droppedSuffix = (k > 0 && dropped > 0 && minMatches > 0)
         ? ` <small class="text-muted">(${dropped} player${dropped === 1 ? '' : 's'} hidden by ${minMatches}-match minimum.)</small>`
         : '';
+      const formatSuffix = pickerState.formats.length
+        ? ` Format: ${esc(pickerState.formats.map(f => MATCH_FORMAT_LABEL[f] || f).join(', '))}.`
+        : '';
       txt.innerHTML = k === 0
         ? `<strong>No matches</strong> match the current filters.`
-        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.${droppedSuffix}`;
+        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.${formatSuffix}${droppedSuffix}`;
     }
   }
 
@@ -1160,7 +1174,20 @@
         .filter(Boolean)
     )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
-    return { playerCounts, submitters, roster };
+    const formatCounts = {};
+    for (const m of manifest) {
+      const f = pickerMatchFormat(m);
+      formatCounts[f] = (formatCounts[f] || 0) + 1;
+    }
+
+    return { playerCounts, submitters, roster, formatCounts };
+  }
+
+  // manifest[].match_format, stamped by the pipeline. An entry written
+  // before the field existed reads as 'other' rather than guessing.
+  function pickerMatchFormat(entry) {
+    const f = entry && entry.match_format;
+    return MATCH_FORMATS.includes(f) ? f : 'other';
   }
 
   const pickerFacets = deriveFacets();
@@ -1175,6 +1202,21 @@
         `<span>${pc}</span>` +
       `</label></li>`
     ).join('');
+
+    // Format chips (the ladder classifier's buckets), with match counts.
+    if ($facetFormats) {
+      const fc = pickerFacets.formatCounts || {};
+      const titles = {
+        '1v1': 'One active player per side (VTSR-1v1)',
+        '2v2': 'Two active players per side, a commander and a thug each (VTSR-2v2)',
+        team: 'Three or more active players per side (VTSR-T / VTSR-C)',
+        other: 'Uneven or too small for any ladder (3v1, 2v1, solo)',
+      };
+      $facetFormats.innerHTML = MATCH_FORMATS.map(f =>
+        `<button type="button" class="vt-match-picker-chip" data-value="${f}" role="checkbox" aria-checked="false" title="${esc(titles[f])}">` +
+          `${esc(MATCH_FORMAT_LABEL[f])} <span class="vt-mono vt-muted">${fc[f] || 0}</span></button>`
+      ).join('');
+    }
 
     // Submitter chips.
     $facetSubmitters.innerHTML = pickerFacets.submitters.map(s =>
@@ -1213,6 +1255,9 @@
 
     // Player count (multi-select: match any selected active count).
     if (state.playerCounts.length && !state.playerCounts.includes(pickerPlayerCount(entry))) return false;
+
+    // Format (multi-select: match any selected ladder bucket).
+    if (state.formats && state.formats.length && !state.formats.includes(pickerMatchFormat(entry))) return false;
 
     // Submitter (multi-select: match any selected).
     if (state.submitters.length && !state.submitters.includes(entry.submitter)) return false;
@@ -1314,6 +1359,7 @@
     let n = 0;
     if (state.duration && state.duration !== 'any') n++;
     if (state.playerCounts.length) n++;
+    if (state.formats && state.formats.length) n++;
     if (state.submitters.length) n++;
     if (state.players.length) n++;
     if (state.sort && state.sort !== 'date-desc') n++;
@@ -1487,6 +1533,7 @@
       hasVod:       ['any', 'yes', 'no'].includes(saved.hasVod) ? saved.hasVod : d.hasVod,
       faction:      FACTION_CODES.includes(saved.faction) ? saved.faction : d.faction,
       factionVs:    FACTION_CODES.includes(saved.factionVs) ? saved.factionVs : d.factionVs,
+      formats:      Array.isArray(saved.formats) ? saved.formats.filter(f => MATCH_FORMATS.includes(f)) : d.formats,
     };
     if (pickerState.faction === 'any') pickerState.factionVs = 'any';
   }
@@ -1517,6 +1564,9 @@
       pickerState.playerCounts = u.cnt
         .map(Number)
         .filter(n => Number.isFinite(n) && allowed.has(n));
+    }
+    if (Array.isArray(u.fmt) && u.fmt.length) {
+      pickerState.formats = Array.from(new Set(u.fmt.filter(f => MATCH_FORMATS.includes(f))));
     }
     if (Array.isArray(u.sub) && u.sub.length) {
       const allowed = new Set(pickerFacets.submitters);
@@ -1576,6 +1626,13 @@
     if ($playerCountToggle) {
       const counts = pickerState.playerCounts.slice().sort((a, b) => a - b);
       $playerCountToggle.textContent = counts.length ? counts.join(', ') : 'Any';
+    }
+    if ($facetFormats) {
+      $facetFormats.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.formats.includes(c.dataset.value);
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
     }
     if ($facetSubmitters) {
       $facetSubmitters.querySelectorAll('.vt-match-picker-chip').forEach(c => {
@@ -1695,6 +1752,7 @@
       applyPickerFilters();
     });
   }
+  wireMultiChipset($facetFormats, 'formats', null);
   wireMultiChipset($facetSubmitters, 'submitters', null);
   wireMultiChipset($facetPlayers, 'players', null);
 
@@ -6528,8 +6586,27 @@
       if (name && ratings.byName.has(name)) return ratings.byName.get(name).t;
       return null;
     };
+    const v2RecFor = (p) => {
+      const sid = p.steam64 ? String(p.steam64) : '';
+      if (sid && ratings.bySteam.has(sid)) return ratings.bySteam.get(sid);
+      const name = p.name ? String(p.name).toLowerCase() : '';
+      return (name && ratings.byName.get(name)) || null;
+    };
     const eloChipHtml = (p, isCmdr, side) => {
       if (!ratings) return '';
+      // A rated 2v2 carries its own ladders (numbers are not VTSR-T).
+      if (ratings.format === '2v2') {
+        const rec = v2RecFor(p);
+        if (!rec) return '';
+        const chip = (label, v, tip) => isRating(v)
+          ? `<span class="vt-faction-elo vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">${label} ${Math.round(v)}</span>`
+          : '';
+        if (rec.role === 'commander') {
+          return chip('2v2C', rec.c, 'Commander 2v2 rating (VTSR-2v2C) going into this match. Used in the prediction.');
+        }
+        return chip('W/L', rec.tWl, 'Thug 2v2 win/loss rating (VTSR-2v2T) going into this match. Used in the prediction.')
+          + chip('Perf', rec.tPerf, 'Thug 2v2 performance rating (VTSR-2v2T) going into this match. Shown for comparison.');
+      }
       if (isCmdr) {
         const cRaw = ratings.cmdrC[side];
         const rated = isRating(cRaw);
@@ -6766,6 +6843,7 @@
     }
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
+                       : idx.exclusion_reason === 'short_side'       ? 'a side had fewer than 3 players'
                        : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
                        : idx.exclusion_reason === 'void'             ? 'voided — this game does not count'
                        : 'excluded from rating';

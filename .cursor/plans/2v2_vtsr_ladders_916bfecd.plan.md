@@ -4,46 +4,46 @@ overview: "Add a separate VTSR-2v2 family with three ratings: VTSR-2v2C (command
 todos:
   - id: memo-classifier
     content: Write critique/decisions/vtsr-2v2-ladders.md and add scripts/match_format.py (shape + strict 2v2 + team rule); keep elo_1v1 output byte-identical
-    status: pending
+    status: completed
   - id: main-per-side
     content: Add ELO_MIN_PER_SIDE=3 / short_side exclusion in scripts/elo.py, reason copy in js/app.js + js/match-elo.js; verify elo_history.json hash unchanged
-    status: pending
+    status: completed
   - id: f9-2v2-import
     content: Add 2v2 pass to scripts/import_f9_ledger.py writing data/external/f9_ledger_2v2.json; extend f9_name_map.json; prove f9_ledger.json byte-identical
-    status: pending
+    status: completed
   - id: elo-2v2-module
     content: Build scripts/elo_2v2.py (joint C + T win/loss walk, T performance duel), wire into process_stats.py after VTSR-1v1, add outputs to cache skip set
-    status: pending
+    status: completed
   - id: evidence
     content: Write scripts/study_2v2_transfer.py and validator section 23 metric_vtsr_2v2; record findings in the memo
-    status: pending
+    status: completed
   - id: separation-gate
     content: Write _investigation/check_2v2_separation.py (purity, forbidden consumers, strict shape, zero-sum, replay, F9 dedup)
-    status: pending
+    status: completed
   - id: elo-page
     content: Add 2v2 dropdown pill + 2v2c / 2v2t panes (Performance | Win/loss | Compare) in elo/index.html + js/elo.js + css/elo.css; How-tab section + format-lines box in js/vtsr-explainers.js
-    status: pending
+    status: completed
   - id: tools-2v2
     content: "Add Team | 2v2 format pills to the Balonce card: resolver loads elo_2v2_current.json, 2v2 Suggest, 4-player guard + ignore warnings, hidden auto-ignore, footer copy"
-    status: pending
+    status: completed
   - id: player-match
     content: "Add #vt-player-2v2 block in js/player.js and #section-match-elo-2v2 card in js/match-elo.js + index.html"
-    status: pending
+    status: completed
   - id: format-field
     content: Emit match_format (1v1 / 2v2 / team / other) from scripts/match_format.py onto manifest entries and match_contributions.json (rebuilt every run, no PIPELINE_VERSION bump)
-    status: pending
+    status: completed
   - id: picker-format
     content: "Add a Format facet (1v1 / 2v2 / 3+v3+ / Other, multi-select, counts) to #match-picker-modal: pickerState.formats, URL ?fmt=, optional key under vt.picker.filters.v2, clear-all + active-filter count + banner copy"
-    status: pending
+    status: completed
   - id: outcome-2v2
     content: "Outcome card 2v2 branch in js/balonce-meter.js: joinMatch falls back to elo_2v2_history.json (shared ensure2v2HistoryLoaded with match-elo.js), renders gauge/verdict/main reason + commander and both thug 2v2 deltas; roster chips show 2v2 numbers"
-    status: pending
+    status: completed
   - id: players-tab-align
     content: Replace activeSideCounts/MIN_SIDE in js/players-tab.js with contribution match_format; retire the now no-op Schedule format toggle (3+ a side / All rated) in index.html
-    status: pending
+    status: completed
   - id: docs
     content: Update DEVELOPER_GUIDE.md 13.16, DATA_DICTIONARY.md 19, filter-contract.mdc rows (2v2 files, match_format, picker facet, Outcome 2v2 branch), project-overview.mdc
-    status: pending
+    status: completed
 isProject: false
 ---
 

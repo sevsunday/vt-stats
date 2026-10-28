@@ -57,7 +57,7 @@
       wheel:   { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' },
       coin:    { lastResult: null, mode: 'single' },
       mapRoll: { lastResults: [null, null, null], poolFilter: '7', isRolling: false },
-      balonce: { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live' },
+      balonce: { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live', format: 'team' },
     },
   };
 
@@ -812,7 +812,7 @@
     pageState.components.wheel = { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' };
     pageState.components.coin = { lastResult: null, mode: 'single' };
     pageState.components.mapRoll = { lastResults: [null, null, null], poolFilter: '7', isRolling: false };
-    pageState.components.balonce = { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live' };
+    pageState.components.balonce = { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live', format: 'team' };
 
     if (modeAutoRadio) {
       modeAutoRadio.disabled = false;

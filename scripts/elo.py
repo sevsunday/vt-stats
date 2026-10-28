@@ -69,6 +69,7 @@ from typing import Any
 
 import identity_aliases
 import inactivity
+import match_format
 import vtsr_bands
 
 
@@ -95,6 +96,10 @@ ELO_LADDER_MIN_MATCHES = 25
 INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 ELO_MIN_PLAYER_COUNT = 6         # excluded when non-campod leaderboard rows < 6.
+# Excluded (`short_side`) when either side has fewer non-campod rows, so a
+# 4v2 or 5v1 is not a team game. Moved no rating when added; see
+# critique/decisions/vtsr-2v2-ladders.md and scripts/match_format.py.
+ELO_MIN_PER_SIDE = match_format.TEAM_MIN_PER_SIDE
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
 # The ONE exclusion reason that still gets scored in the shadow (a
@@ -1463,6 +1468,7 @@ def _rating_pass(
     canonical_before_out: dict[str, dict[str, float]] = {}
 
     excluded_low_player_count = 0
+    excluded_short_side       = 0
     excluded_short_duration   = 0
     excluded_void             = 0
     excluded_no_winner        = 0  # reserved (alpha-blend slot); always 0 in v1
@@ -1533,6 +1539,9 @@ def _rating_pass(
         elif playing < ELO_MIN_PLAYER_COUNT:
             excluded_low_player_count += 1
             exclusion_reason = "low_player_count"
+        elif min(match_format.side_counts(md)) < ELO_MIN_PER_SIDE:
+            excluded_short_side += 1
+            exclusion_reason = "short_side"
         elif (m.get("duration_sec", 0) or 0) < ELO_MIN_DURATION_SEC:
             excluded_short_duration += 1
             exclusion_reason = "short_duration"
@@ -2010,10 +2019,12 @@ def _rating_pass(
         # Display-only band rules (scripts/vtsr_bands.py). UI reads these.
         "band_config":        vtsr_bands.band_config(),
         "min_player_count":   ELO_MIN_PLAYER_COUNT,
+        "min_per_side":       ELO_MIN_PER_SIDE,
         "min_duration_sec":   ELO_MIN_DURATION_SEC,
         "computed_at":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "match_count":        rated_match_count,
         "matches_excluded_low_player_count": excluded_low_player_count,
+        "matches_excluded_short_side":       excluded_short_side,
         "matches_excluded_short_duration":   excluded_short_duration,
         "matches_excluded_no_winner":        excluded_no_winner,
         # v15: host-attested GAME_CANCELLED matches (see the match-level

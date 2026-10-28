@@ -486,6 +486,45 @@
   }
 
   // ------------------------------------------------------------------
+  // The 2v2 ladders (VTSR-2v2C + VTSR-2v2T) — static How-tab section.
+  // Worked-example digits are real (elo_2v2_history.json,
+  // 2026-10-27T04-00-33 Oasis: mort 1555.76 + HappyOtter 1492.85 vs
+  // VTrider 1483.53 + DraconisMarch 1500.00, expected 0.5926, K 30/30,
+  // delta 17.78; performance expected 0.4861 vs share 0.3845, K 38,
+  // delta 3.86). Re-read that game after any re-rate.
+  // ------------------------------------------------------------------
+  function twoVTwoLaddersHtml() {
+    const eq = renderEq(
+      'E_1 \\;=\\; \\frac{1}{1 + 10^{-\\left(\\left(C_1 - C_2\\right)'
+      + ' + \\lambda\\,\\left(T_1 - T_2\\right)\\right) / 400}}'
+    ) || '';
+    return `<p class="mb-2">A 2v2 is two commanders, each with one thug. It gets its <strong>own ladders</strong>, separate from VTSR-C, VTSR-T and VTSR-1v1: VTSR-T needs at least six players to grade a thug against the lobby, and VTSR-C only rates games VTSR-T rated, so both already leave 2v2s out.</p>
+      <p class="mb-2"><strong>VTSR-2v2C</strong> rates the commanders on wins and losses. The win chance counts all four players: <em>C</em> is each commander&rsquo;s 2v2C, <em>T</em> is each thug&rsquo;s 2v2T (win/loss), and <em>&lambda;</em> is 1, as in VTSR-C.</p>
+      ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
+      <p class="mb-2">Thugs get <strong>two ratings for now</strong>, shown side by side. <strong>Win/loss</strong> moves with the result in the same update as the commanders. <strong>Performance</strong> is a duel between the two thugs: your share of the two thugs&rsquo; damage to the enemy, against the share your ratings predicted. Performance only uses recorded games and moves even when the winner is unknown. Once 30 recorded 2v2s with a verified winner exist, a rule written in advance picks the one that predicts winners better, or keeps both if neither wins.</p>
+      <p class="mb-2">Every rating starts at 1500 with K falling from 40 to 20 over a player&rsquo;s first five games on that ladder. Both players in a role share one K, so each game is zero-sum. The win/loss ladders also include 2v2s from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>&rsquo;s community ledger, which lists every player, so a 2v2 there can be confirmed. Ratings show as numbers, like VTSR-1v1.</p>
+      <p class="mb-0 text-muted small">Real example: on Oasis (2026-10-27), mort (1556) and HappyOtter (1493) faced VTrider (1484) and DraconisMarch in his first 2v2 (1500), so mort&rsquo;s side was a <strong>59% favorite</strong>. VTrider&rsquo;s side won: <strong>+17.8</strong> to VTrider and DraconisMarch, <strong>&minus;17.8</strong> to mort and HappyOtter. On performance, HappyOtter was expected to deal 49% of the two thugs&rsquo; damage and dealt 38%, so he lost <strong>3.9</strong> to DraconisMarch. Players stay <strong>provisional</strong> below 5 games on a ladder; a ranked <code>#</code> needs 5 and a game within 90 days of the newest match.</p>`;
+  }
+
+  // "Which ladder rates my game?" — the format lines, shared by the How
+  // tab. Mirrors scripts/match_format.py.
+  function formatLinesHtml() {
+    return `<div class="vt-elo-format-lines">
+      <p class="mb-2">Count the players on each side, leaving out camera pods (anyone who spent more than a quarter of the game in one):</p>
+      <table class="table table-sm align-middle mb-2" style="font-size: 0.85rem;">
+        <thead><tr><th>Players per side</th><th>Ladder</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>1 and 1</td><td>VTSR-1v1</td><td>Both players command.</td></tr>
+          <tr><td>2 and 2</td><td>VTSR-2v2C + VTSR-2v2T</td><td>A commander and one thug on each side, and all four active: nobody left early, and no thug dealt zero damage.</td></tr>
+          <tr><td>3 or more on each side</td><td>VTSR-T, then VTSR-C</td><td>At least six players in total.</td></tr>
+          <tr><td>Anything else</td><td>None</td><td>2v1, 3v1, 3v2, 4v2, or a 2v2 with an idle or departed player.</td></tr>
+        </tbody>
+      </table>
+      <p class="mb-0 text-muted small">Each ladder still needs at least four minutes of play and its own outcome rules, so a format match is not a guarantee of a rating.</p>
+    </div>`;
+  }
+
+  // ------------------------------------------------------------------
   // Dashboard methodology modal body (quick reference). Preserves the
   // v3 5-section structure but the "How it works" section is now the
   // annotated deltaR stage. Cached after first successful build; null
@@ -543,6 +582,8 @@
     commanderSectionHtml,
     commanderLadderHtml,
     oneVOneLadderHtml,
+    twoVTwoLaddersHtml,
+    formatLinesHtml,
     workedExampleHtml,
     methodologyModal,
   };
