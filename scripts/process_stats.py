@@ -175,7 +175,9 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # Mine entity and they had piloted a carrier of that mine; v1 falls back
 # to mine-only ordnance stems. Kills whose killer_odf is a Mine entity
 # follow the same rule. Ratings move.
-PIPELINE_VERSION = 60
+# 60 -> 61: per-team loose collected in 60s buckets (match.schema_version
+# 36). Display-only series for the Economy tab. Ratings unmoved.
+PIPELINE_VERSION = 61
 
 # Building damage inside this many seconds of the last recorded tick is
 # reported separately as `enemy_structure_dealt_late` (the winners' end-of-
@@ -263,6 +265,38 @@ ECON_OPENING_WINDOW_SEC = 240.0
 # income_unclassified. Tied to the loose size because a sub-piece refund
 # is exactly what cannot be told apart from regen.
 ECON_REFUND_MIN_MATCH = ECON_LOOSE_SIZE
+# Stored grain for loose collected over time. The Economy tab sums these
+# into 1/2/5/10 minute windows. The client reads loose_bucket_sec; it
+# does not hardcode this. Tunable with a PIPELINE_VERSION bump.
+ECON_LOOSE_BUCKET_SEC = 60
+
+
+def _loose_collected_buckets(deltas, min_tick, max_tick, tick_rate, bucket_sec):
+    """Fold sparse (tick, scrap) loose deltas into fixed windows.
+
+    Windows cover the whole match, including minutes with no pickup. A
+    delivery past the last window (the exact end of a match whose length
+    lands on a boundary) clamps into that window. The sum equals the
+    scrap booked to income_loose.
+    """
+    bucket_sec = float(bucket_sec or 0)
+    if bucket_sec <= 0 or not tick_rate or min_tick == float("inf") or max_tick <= min_tick:
+        total = sum(amt for _tick, amt in deltas)
+        return [total] if total else [0]
+    span = (max_tick - min_tick) / float(tick_rate)
+    n = max(1, math.ceil(span / bucket_sec - 1e-9))
+    out = [0] * n
+    last = n - 1
+    for tick, amt in deltas:
+        sec = (tick - min_tick) / float(tick_rate)
+        idx = int(sec // bucket_sec) if sec > 0 else 0
+        if idx < 0:
+            idx = 0
+        elif idx > last:
+            idx = last
+        out[idx] += amt
+    return out
+
 
 # --- Positioning (player movement) constants ---
 # Axis convention: +X East, +Y Up, +Z North (developer-confirmed for Z).
@@ -7214,6 +7248,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Loose scrap the storage cap withheld, waiting on headroom.
             # See the cap-clamp rule in the income classifier below.
             "pending_overflow": 0,
+            # v36: sparse (tick, scrap) loose deliveries. Folded into
+            # loose_buckets at emit time, once min_tick is final. Not emitted.
+            "loose_deltas": [],
             # v20: scrap DESTROYED when a pool dies and max_scrap drops
             # below the current bank. Real gross outflow with no order
             # behind it -- named so the residual stops absorbing it.
@@ -8277,6 +8314,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                                 if _in_opening:
                                     st["income_opening"] += _d
                                     st["loose_opening"] += st["loose"] - _loose_before
+                                _added = st["loose"] - _loose_before
+                                if _added:
+                                    st["loose_deltas"].append((tick, _added))
                             elif _d < 0:
                                 st["outflow_gross"] += -_d
                         # v20 storage-cap clamp: a dying pool drops max_scrap,
@@ -9809,6 +9849,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         for (_side, _lane), _lq in build_lane_queue.items():
             if _lq:
                 _pending_costs[_side] += _lq[0][1]
+        # v36: 60s loose collected, both teams the same length so a quiet
+        # minute on one side is an explicit 0 next to the other side's haul.
+        _loose_by_side = {
+            _side: _loose_collected_buckets(
+                econ_state[_side]["loose_deltas"],
+                min_tick, max_tick, tick_rate, ECON_LOOSE_BUCKET_SEC,
+            )
+            for _side in (1, 2)
+        }
+        _loose_len = max(len(_loose_by_side[1]), len(_loose_by_side[2]))
+        for _side in (1, 2):
+            _row = _loose_by_side[_side]
+            if len(_row) < _loose_len:
+                _row.extend([0] * (_loose_len - len(_row)))
         _econ_teams = {}
         for _side in (1, 2):
             st = econ_state[_side]
@@ -9839,6 +9893,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "income_refund": st["refund"],
                 "income_unclassified": st["unclassified"],
                 "loose_collections": st["loose_collections"],
+                # v36: scrap of loose collected in each ECON_LOOSE_BUCKET_SEC
+                # window from match start. Sums to income_loose. Display-only.
+                "loose_buckets": _loose_by_side[_side],
                 "scrap_outflow_gross": st["outflow_gross"],
                 "outflow_built_cost": _led["built"],
                 "outflow_cancelled_cost": _led["cancelled"],
@@ -9892,6 +9949,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "has_resource_data": True,
             "sample_rate_hz": ECON_SAMPLE_RATE_HZ,
             "ticks": econ_ticks,
+            # v36: grain of teams{n}.loose_buckets. The page reads this.
+            "loose_bucket_sec": ECON_LOOSE_BUCKET_SEC,
             "teams": _econ_teams,
         }
 
@@ -10299,11 +10358,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # gains base-pool instances, upgrade swaps, census deaths and
             # pool_census when the recording has plants. Constructor
             # *bscup rows gain site + kind on every match. Display-only.
-            # v35 (this version): player-laid mine damage and kills.
+            # v35: player-laid mine damage and kills.
             # Mine-entity blasts (v1: mine-only ordnance) move from
             # asset_dealt to the layer when that player had piloted a
             # carrier of the mine. match.mine_attribution audits the move.
-            "schema_version": 35,
+            # v36 (this version): economy.loose_bucket_sec and
+            # economy.teams{n}.loose_buckets -- 60s loose collected,
+            # display-only. Sums to income_loose. Not in contributions.
+            "schema_version": 36,
             "event_calibration": {
                 "r_by_weapon": event_calibration["r_by_weapon"],
                 "r_lobby": event_calibration["r_lobby"],

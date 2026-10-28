@@ -533,12 +533,28 @@
       <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
            unfiltered — same passthrough contract as highlights/kill-feed
            winner. Sections self-hide when their half of the data is absent:
-           scrap chart + pools chart + production economy rows need has_resource_data,
+           scrap chart + loose chart + pools chart + production economy rows need has_resource_data,
            build log + production build rows need has_build_data.) -->
       <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
         <div class="row g-4 mb-4 d-none" id="section-economy-production">
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
+        </div>
+        <div class="card mb-4 d-none" id="section-economy-loose">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">Loose Collected Over Time</h5>
+            <div class="d-flex align-items-center gap-2">
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-loose-windows"
+                  role="radiogroup" aria-label="Loose collected window"></ul>
+              <button class="btn btn-sm" data-expand="section-economy-loose" title="Fullscreen">
+                <i class="bi bi-arrows-fullscreen"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-2" id="economy-loose-caption"></p>
+            <div class="vt-econ-loose-chart"><canvas id="economy-loose-chart"></canvas></div>
+          </div>
         </div>
         <div class="card mb-4 d-none" id="section-economy-pools">
           <div class="card-header d-flex align-items-center justify-content-between">

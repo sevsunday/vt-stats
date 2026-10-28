@@ -641,6 +641,153 @@ function renderEconomyPoolsChart(canvasId, economy, matchMeta, opts) {
   return chart;
 }
 
+// --- Bars: Loose collected over time (Economy tab) ---
+// The pipeline stores 60s scrap amounts. The page sums adjacent buckets
+// into the window the match length calls for. Match-global, always
+// unfiltered. Bar height is the scrap amount, not a rate.
+
+const LOOSE_WINDOW_LABELS = { 60: '1 min', 120: '2 min', 300: '5 min', 600: '10 min' };
+
+function looseWindowChoices(durationSec) {
+  const dur = Math.max(0, durationSec || 0);
+  let options;
+  if (dur < 20 * 60) options = [60, 120];
+  else if (dur < 40 * 60) options = [120, 300];
+  else options = [300, 600];
+  // Default is the window whose bar count sits nearest 10. An equal
+  // distance keeps the finer window (it is listed first).
+  const target = 10;
+  let best = options[0];
+  let bestDist = Infinity;
+  for (let i = 0; i < options.length; i++) {
+    const bars = Math.max(1, Math.ceil(dur / options[i]));
+    const dist = Math.abs(bars - target);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = options[i];
+    }
+  }
+  return { options, defaultSec: best };
+}
+
+function looseWindowLabel(sec) {
+  return LOOSE_WINDOW_LABELS[sec] || (Math.round(sec / 60) + ' min');
+}
+
+function looseHasCollected(economy) {
+  const teams = (economy && economy.teams) || {};
+  let present = false;
+  let total = 0;
+  for (const side of ['1', '2']) {
+    const buckets = teams[side] && teams[side].loose_buckets;
+    if (!Array.isArray(buckets)) continue;
+    present = true;
+    for (let i = 0; i < buckets.length; i++) total += buckets[i] || 0;
+  }
+  return present && total > 0;
+}
+
+function looseCollectedWindows(economy, matchMeta, windowSec) {
+  const grain = (economy && economy.loose_bucket_sec) || 60;
+  const duration = (matchMeta && matchMeta.duration_sec) || 0;
+  const step = Math.max(1, Math.round((windowSec || grain) / grain));
+  const teams = (economy && economy.teams) || {};
+  const len = Math.max(
+    ((teams['1'] && teams['1'].loose_buckets) || []).length,
+    ((teams['2'] && teams['2'].loose_buckets) || []).length,
+  );
+  const windows = [];
+  for (let i = 0; i < len; i += step) {
+    const n = Math.min(step, len - i);
+    const start = i * grain;
+    let end = (i + n) * grain;
+    if (duration > 0) end = Math.min(end, duration);
+    const values = {};
+    for (const side of ['1', '2']) {
+      const src = (teams[side] && teams[side].loose_buckets) || [];
+      let sum = 0;
+      for (let k = 0; k < n; k++) sum += src[i + k] || 0;
+      values[side] = sum;
+    }
+    windows.push({ start, end, values });
+  }
+  return windows;
+}
+
+function looseHottestCaption(windows, economy) {
+  let best = null;
+  for (let i = 0; i < windows.length; i++) {
+    const w = windows[i];
+    for (const side of ['1', '2']) {
+      const v = (w.values && w.values[side]) || 0;
+      if (v > 0 && (!best || v > best.value)) {
+        best = { side, value: v, start: w.start, end: w.end };
+      }
+    }
+  }
+  if (!best) return '';
+  return 'Most collected: Team ' + best.side + ', '
+    + fmtMatchClock(best.start) + '\u2013' + fmtMatchClock(best.end) + ', '
+    + Math.round(best.value).toLocaleString() + ' loose';
+}
+
+function renderEconomyLooseChart(canvasId, economy, matchMeta, windowSec) {
+  applyThemeDefaults();
+  const t = getThemeColors();
+  const el = document.getElementById(canvasId);
+  if (!el) return null;
+  const ctx = el.getContext('2d');
+  const windows = looseCollectedWindows(economy, matchMeta, windowSec);
+  const labels = windows.map(w => fmtMatchClock(w.start));
+  const teamColors = { '1': t.primary, '2': t.success };
+  const datasets = [];
+  for (const side of ['1', '2']) {
+    const team = ((economy && economy.teams) || {})[side] || {};
+    const cmdr = (team.commander && team.commander.name) ? ` (${team.commander.name})` : '';
+    datasets.push({
+      label: `Team ${side}${cmdr}`,
+      data: windows.map(w => (w.values && w.values[side]) || 0),
+      backgroundColor: teamColors[side] + 'cc',
+      borderColor: teamColors[side],
+      borderWidth: 1,
+    });
+  }
+
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            title: (items) => {
+              const w = items && items[0] && windows[items[0].dataIndex];
+              if (!w) return '';
+              return fmtMatchClock(w.start) + '\u2013' + fmtMatchClock(w.end);
+            },
+            label: (item) => {
+              const v = item.raw;
+              if (v === null || v === undefined) return null;
+              return `${item.dataset.label}: ${Math.round(v).toLocaleString()} loose`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: 'Match Time' }, ticks: { maxTicksLimit: 16 } },
+        y: { title: { display: true, text: 'Loose collected' }, beginAtZero: true },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
 // --- Horizontal Bar: Weapon Meta ---
 
 function renderWeaponMeta(canvasId, weaponMeta, limit) {

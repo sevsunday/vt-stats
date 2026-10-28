@@ -4025,14 +4025,71 @@
     activeCharts = activeCharts.filter(c => c !== existing);
   }
 
+  // Window pill for Loose Collected. Resets when the match changes so a
+  // 1-minute choice on a short game does not stick onto a long one.
+  let looseWindowSec = null;
+  let looseWindowMatchId = null;
+  let looseWindowWired = false;
+
+  function syncLooseWindow(match) {
+    const id = (match && match.id) || '';
+    const choices = looseWindowChoices((match && match.duration_sec) || 0);
+    if (looseWindowMatchId !== id || choices.options.indexOf(looseWindowSec) < 0) {
+      looseWindowMatchId = id;
+      looseWindowSec = choices.defaultSec;
+    }
+    return choices;
+  }
+
+  function renderLooseWindowPills(choices) {
+    const ul = document.getElementById('economy-loose-windows');
+    if (!ul) return;
+    ul.innerHTML = choices.options.map(sec => {
+      const on = sec === looseWindowSec;
+      return '<li class="nav-item"><button type="button" class="nav-link'
+        + (on ? ' active' : '') + '" data-loose-window="' + sec
+        + '" role="radio" aria-checked="' + (on ? 'true' : 'false') + '">'
+        + looseWindowLabel(sec) + '</button></li>';
+    }).join('');
+  }
+
+  function paintEconomyLooseChart() {
+    const econ = currentData && currentData.economy;
+    const match = currentData && currentData.match;
+    if (!econ || !match || !looseHasCollected(econ)) return;
+    const choices = syncLooseWindow(match);
+    renderLooseWindowPills(choices);
+    destroyChartOnCanvas('economy-loose-chart');
+    const windows = looseCollectedWindows(econ, match, looseWindowSec);
+    const cap = document.getElementById('economy-loose-caption');
+    if (cap) cap.textContent = looseHottestCaption(windows, econ);
+    renderEconomyLooseChart('economy-loose-chart', econ, match, looseWindowSec);
+  }
+
+  function wireLooseWindowPills() {
+    if (looseWindowWired) return;
+    looseWindowWired = true;
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('#economy-loose-windows [data-loose-window]');
+      if (!btn) return;
+      const sec = Number(btn.getAttribute('data-loose-window'));
+      if (!sec || sec === looseWindowSec) return;
+      looseWindowSec = sec;
+      paintEconomyLooseChart();
+    });
+  }
+
   function renderEconomyTab() {
     const econ = currentData && currentData.economy;
     const builds = currentData && currentData.builds;
     const scrapCard = document.getElementById('section-economy-scrap');
+    const looseCard = document.getElementById('section-economy-loose');
     const poolsCard = document.getElementById('section-economy-pools');
     const prodRow = document.getElementById('section-economy-production');
     const logCard = document.getElementById('section-economy-buildlog');
+    const showLoose = !!(econ && looseHasCollected(econ));
     if (scrapCard) scrapCard.classList.toggle('d-none', !econ || !ECONOMY_SCRAP_CHART_ENABLED);
+    if (looseCard) looseCard.classList.toggle('d-none', !showLoose);
     if (poolsCard) poolsCard.classList.toggle('d-none', !econ);
     if (prodRow) prodRow.classList.toggle('d-none', !econ && !builds);
     if (logCard) logCard.classList.toggle('d-none', !builds);
@@ -4040,6 +4097,10 @@
     if (econ && ECONOMY_SCRAP_CHART_ENABLED) {
       destroyChartOnCanvas('economy-scrap-chart');
       renderEconomyScrapChart('economy-scrap-chart', econ, currentData.match);
+    }
+    if (showLoose) {
+      wireLooseWindowPills();
+      paintEconomyLooseChart();
     }
     if (econ) {
       destroyChartOnCanvas('economy-pools-t1');
@@ -9520,6 +9581,33 @@
             activeCharts = activeCharts.filter(x => x !== c);
             try { c.destroy(); } catch (_) { /* already torn down */ }
           }
+        },
+      };
+    });
+    registerDomRenderer('section-economy-loose', (body) => {
+      const econ = currentData && currentData.economy;
+      const match = currentData && currentData.match;
+      if (!econ || !match || !looseHasCollected(econ)) return { destroy() {} };
+      const windowSec = looseWindowSec
+        || looseWindowChoices(match.duration_sec || 0).defaultSec;
+      const cap = document.createElement('p');
+      cap.className = 'text-muted small mb-2';
+      cap.textContent = looseHottestCaption(
+        looseCollectedWindows(econ, match, windowSec), econ);
+      const wrap = document.createElement('div');
+      wrap.className = 'vt-econ-loose-chart';
+      const canvas = document.createElement('canvas');
+      canvas.id = 'modal-economy-loose-chart';
+      wrap.appendChild(canvas);
+      body.appendChild(cap);
+      body.appendChild(wrap);
+      const chart = renderEconomyLooseChart(
+        'modal-economy-loose-chart', econ, match, windowSec);
+      return {
+        destroy() {
+          if (!chart) return;
+          activeCharts = activeCharts.filter(x => x !== chart);
+          try { chart.destroy(); } catch (_) { /* already torn down */ }
         },
       };
     });
