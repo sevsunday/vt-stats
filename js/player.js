@@ -3555,9 +3555,9 @@
       const delta = x.role === 'thug' && perfDelta != null
         ? `${v2Delta(wlDelta)} <span class="text-secondary small">W/L</span> ${v2Delta(perfDelta)} <span class="text-secondary small">perf</span>`
         : v2Delta(wlDelta);
-      const src = g.source === 'f9'
-        ? ' <span class="vt-cmdr-riv-tag" title="From F9bomber\u2019s community ledger">F9</span>'
-        : (g.match_id ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(g.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>` : '');
+      const src = g.match_id
+        ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(g.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+        : '';
       return `<tr>
         <td class="vt-matchlog-num">${cmdrDateLabel(g.date)}${src}</td>
         <td>${x.role === 'commander' ? 'Cmdr' : 'Thug'}</td>
@@ -3573,8 +3573,7 @@
       <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
         <i class="bi bi-people-fill me-1"></i>2v2 (VTSR-2v2)
       </h2>
-      <p class="text-secondary small mb-3">Separate 2v2 ladders: a commander and one thug per side, recorded games plus
-        <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>&rsquo;s ledger. Thugs carry two ratings for now.
+      <p class="text-secondary small mb-3">Separate 2v2 ladders: a commander and one thug per side, recorded games only. Thugs carry two ratings for now.
         None of this affects VTSR-C, VTSR-T or VTSR-1v1. <a href="${state.dataPrefix}elo/?tab=2v2c">Full 2v2 ladders</a>.</p>
       <div class="d-flex flex-wrap gap-4 mb-3">
         ${stat('Commander (2v2C)', rows.commander, 'Win/loss Elo for 2v2 commanders.')}

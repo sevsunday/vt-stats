@@ -3743,23 +3743,6 @@ def _load_f9_ledger():
     return ledger
 
 
-def _load_f9_ledger_2v2():
-    """data/external/f9_ledger_2v2.json `duels[]` (F9 2v2 rows, written by
-    `scripts/import_f9_ledger.py`), or [] when absent. Only
-    scripts/elo_2v2.py reads it."""
-    path = PROJECT_ROOT / "data" / "external" / "f9_ledger_2v2.json"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            ledger = json.load(f)
-    except FileNotFoundError:
-        return []
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"  WARN: could not read {path.name} ({e}); ignoring F9 2v2 rows")
-        return []
-    duels = ledger.get("duels") if isinstance(ledger, dict) else None
-    return duels if isinstance(duels, list) else []
-
-
 def load_known_players(path=STEAMID_TO_NAME_PATH):
     """Load canonical player names from the known-players registry.
 
@@ -11629,18 +11612,14 @@ def main():
         print(f"WARN: failed to compute VTSR-1v1 ({e}); skipping.")
 
     # ----- VTSR-2v2 (2v2C + 2v2T ladders, separate from every other) -----
-    # Recorded strict 2v2s + F9's 2v2 rows. Reads neither elo_history nor
-    # the 3v3+ F9 ledger's duels (that list only feeds the display-only
-    # activity clock). critique/decisions/vtsr-2v2-ladders.md. Soft-fails.
+    # Recorded strict 2v2s only. Reads neither elo_history nor
+    # data/external/. critique/decisions/vtsr-2v2-ladders.md. Soft-fails.
     try:
         import elo_2v2 as elo_2v2_module
-        f9_2v2_duels = _load_f9_ledger_2v2()
         v2_current, v2_history = elo_2v2_module.compute_2v2_elo(
             all_match_data,
-            external_duels=f9_2v2_duels,
             match_names={e["id"]: e["name"] for e in manifest},
             canonical_names={str(k): v for k, v in known_players.items()},
-            activity_external_duels=list(f9_duels or []) + f9_2v2_duels,
         )
         v2_current_path = OUTPUT_DIR / "elo_2v2_current.json"
         with open(v2_current_path, "w", encoding="utf-8") as f:
@@ -11650,8 +11629,6 @@ def main():
             json.dump(v2_history, f, indent=2, ensure_ascii=False)
         print(f"VTSR-2v2: {v2_current_path.name} "
               f"({v2_current.get('wl_games_rated', 0)} win/loss games · "
-              f"{v2_current.get('wl_games_recorded', 0)} recorded + "
-              f"{v2_current.get('wl_games_f9', 0)} community · "
               f"{v2_current.get('perf_games_rated', 0)} performance duels · "
               f"{v2_current.get('skipped_inactive_player', 0)} inactive-player)")
     except Exception as e:

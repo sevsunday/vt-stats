@@ -801,7 +801,7 @@
   function find2v2Game(matchId) {
     const hist = window.__vtElo2v2History;
     if (!hist || !Array.isArray(hist.games) || !matchId) return null;
-    return hist.games.find((g) => g.source !== 'f9' && g.match_id === matchId) || null;
+    return hist.games.find((g) => g.match_id === matchId) || null;
   }
 
   function hide2v2() {

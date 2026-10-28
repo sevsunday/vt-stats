@@ -1566,12 +1566,6 @@
     return out.reverse();
   }
 
-  function v2SourceChip(g) {
-    return g.source === 'f9'
-      ? '<span class="vt-elo-2v2-src" data-bs-toggle="tooltip" data-bs-placement="top" title="From F9bomber&#39;s community ledger (result only).">F9</span>'
-      : '<span class="vt-elo-2v2-src vt-elo-2v2-src--rec" data-bs-toggle="tooltip" data-bs-placement="top" title="Recorded on VT Stats.">Rec</span>';
-  }
-
   function renderV2Detail(r, ladder) {
     const entries = v2GamesFor(r, ladder);
     if (!entries.length) {
@@ -1608,7 +1602,7 @@
               title="Open this match on the dashboard" aria-label="Open this match on the dashboard"><i class="bi bi-box-arrow-up-right"></i></a>`
         : '';
       return `<tr>
-        <td class="text-muted">${esc(String(g.date || '').slice(0, 10))} ${v2SourceChip(g)}</td>
+        <td class="text-muted">${esc(String(g.date || '').slice(0, 10))}</td>
         <td>${playerLinkHtml(partner.name || '?', partner.steam64)}</td>
         <td>${playerLinkHtml(oc.name || '?', oc.steam64)} + ${playerLinkHtml(ot.name || '?', ot.steam64)}</td>
         <td>${esc(g.map || '')}</td>
@@ -1621,8 +1615,7 @@
     const statsHtml = perf
       ? `<div><span class="vt-stat-label">Beat expectation</span><span class="vt-stat-value">${r.beat_expected || 0} / ${r.games}</span></div>
          <div><span class="vt-stat-label">Avg damage share</span><span class="vt-stat-value">${r.mean_score != null ? Math.round(r.mean_score * 100) + '%' : '\u2014'}</span></div>`
-      : `<div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>
-         <div><span class="vt-stat-label">Recorded / F9</span><span class="vt-stat-value">${r.games_recorded} / ${r.games_f9}</span></div>`;
+      : `<div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>`;
     return `<div class="vt-vtsr-detail-body">
       <section class="vt-vtsr-detail-section">
         <h6>2v2 summary</h6>
@@ -1704,8 +1697,6 @@
       : '';
     const chip = rank == null ? v2ProgressChipHtml(r, c) : '';
     const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
-    const gamesTip = ladder === 'thug_perf' ? 'Recorded games only.'
-      : `${r.games_recorded} recorded, ${r.games_f9} from F9bomber's ledger.`;
     const mid = ladder === 'thug_perf'
       ? `<td class="text-end">${r.beat_expected || 0} / ${r.games}</td>
          <td class="text-end">${r.mean_score != null ? Math.round(r.mean_score * 100) + '%' : '\u2014'}</td>`
@@ -1724,7 +1715,7 @@
       <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${chip}</td>
       <td class="text-end vt-vtsr-rating">${Math.round(r.rating)}</td>
       ${mid}
-      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(gamesTip)}">${r.games}</td>
+      <td class="text-end">${r.games}</td>
       <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak || r.rating)}</td>
       <td class="text-end text-muted">${esc(r.last_2v2_date || '\u2014')}</td>
     </tr>
@@ -1831,7 +1822,7 @@
     }).join('');
     return `<p class="small text-muted mb-2">Every thug on either 2v2 thug ladder. The two ratings answer different questions:
       <strong>Performance</strong> asks whether you out-damaged the other thug more than expected (recorded games only);
-      <strong>Win/loss</strong> asks whether your team won more than expected (recorded games plus F9bomber&rsquo;s ledger).
+      <strong>Win/loss</strong> asks whether your team won more than expected (recorded games with a verified winner).
       Both run side by side until enough recorded 2v2s exist to test which one predicts winners better.</p>
       <div class="table-responsive">
         <table class="table table-hover align-middle mb-2" data-v2-ladder="compare" style="font-size: 0.85rem;">
@@ -1847,17 +1838,14 @@
   }
 
   function v2Banner(c, kind) {
-    const rec = c.wl_games_recorded || 0;
-    const f9 = c.wl_games_f9 || 0;
-    const credit = '<a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>';
+    const rec = (kind === 'commander' ? c.wl_games_rated : c.games_rated) || 0;
     const lead = kind === 'commander'
       ? 'Two commanders, each with one thug. Win/loss Elo for the commander; the win chance counts both commanders and both thugs.'
       : 'Two commanders, each with one thug. Two thug ratings run side by side for now.';
     return `<div class="alert alert-secondary py-2 px-3 mb-3 small">
       ${lead} Separate from VTSR-C, VTSR-T and VTSR-1v1. Camera-pod spectators don&rsquo;t count as players;
-      a 2v2 where someone was idle or left early isn&rsquo;t rated. Built from ${fmt(rec)} recorded 2v2s
-      and ${fmt(f9)} games from ${credit}&rsquo;s community ledger. Experimental: everyone started at 1500
-      and most players have only a few games.
+      a 2v2 where someone was idle or left early isn&rsquo;t rated. Built from ${fmt(rec)} recorded
+      2v2${rec === 1 ? '' : 's'}. Experimental: everyone started at 1500 and most players have only a few games.
     </div>`;
   }
 

@@ -50,7 +50,7 @@
  *   - getVsrMapByFile()   : Map<lowercased mapFile, vsrmaplist entry>
  *   - getKnownHosts()     : Set<steam64>
  *   - getEloMeta()        : { anchor, rating_floor, ratings_count, computed_at, ... } | null
- *   - get2v2Meta()        : { anchor, lambda_team_handicap, logistic_scale, wl_games_recorded, computed_at, ... } | null
+ *   - get2v2Meta()        : { anchor, lambda_team_handicap, logistic_scale, wl_games_rated, computed_at, ... } | null
  *
  * Resolved object shape:
  *   {
@@ -250,7 +250,6 @@
       logistic_scale: data.logistic_scale,
       provisional_threshold: data.provisional_threshold,
       wl_games_rated: data.wl_games_rated || 0,
-      wl_games_recorded: data.wl_games_recorded || 0,
       computed_at: data.computed_at || null,
     };
     const ladders = data.ladders || {};

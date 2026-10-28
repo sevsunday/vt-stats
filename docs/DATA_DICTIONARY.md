@@ -3899,9 +3899,9 @@ Pipeline-emitted by [scripts/elo_2v2.py](../scripts/elo_2v2.py) after VTSR-1v1 o
 
 - **VTSR-2v2C**: the commanders, rated on win/loss.
 - **VTSR-2v2T (win/loss)**: the thugs, rated on win/loss in the same walk as 2v2C.
-- **VTSR-2v2T (performance)**: thug against thug on `enemy_dealt` share. Recorded games only.
+- **VTSR-2v2T (performance)**: thug against thug on `enemy_dealt` share.
 
-The win/loss walk also reads F9bomber's 2v2 rows from `data/external/f9_ledger_2v2.json`. Nothing in VTSR-T, VTSR-C, VTSR-1v1, the aggregator or the Experimental tab reads these files. **Corpus-wide, picker-unaware**, not in the cache key. Algorithm: [DEVELOPER_GUIDE.md §13.16](../DEVELOPER_GUIDE.md). Memo: `critique/decisions/vtsr-2v2-ladders.md`.
+All three use **recorded games only**. F9bomber's 2v2 rows were removed by operator decision (memo amendment, 2026-10-27), and the module reads neither `elo_history.json` nor `data/external/`. Nothing in VTSR-T, VTSR-C, VTSR-1v1, the aggregator or the Experimental tab reads these files. **Corpus-wide, picker-unaware**, not in the cache key. Algorithm: [DEVELOPER_GUIDE.md §13.16](../DEVELOPER_GUIDE.md). Memo: `critique/decisions/vtsr-2v2-ladders.md`.
 
 ### 19.1 `match_format` (manifest + contributions)
 
@@ -3922,19 +3922,18 @@ Both files carry this header:
 
 | Field | Description |
 |---|---|
-| `schema_version` | `ELO_2V2_SCHEMA_VERSION` (1). |
+| `schema_version` | `ELO_2V2_SCHEMA_VERSION` (2; schema 1 also carried F9 rows, and its ratings are not comparable). |
 | `computed_at` | UTC stamp of the run. |
 | `anchor` / `k_base` / `k_floor` / `provisional_prior` / `provisional_threshold` / `logistic_scale` | Elo constants (1500 / 40 / 20 / 5 / 5 / 400), shared by all three ladders. Each role uses one K per game: the mean of both players' scheduled values. |
 | `lambda` | Thug-gap weight in the win/loss walk (1.0). |
 | `min_duration_sec` | Duration gate (240). |
 | `leaderboard_min_games` | Display-only: games in that ladder needed for a ranked `#` (5). |
-| `inactivity_window_days` / `comeback_games_required` / `corpus_latest_date` | Shared global activity clock (90 / 3). F9 appearances count as activity. |
+| `inactivity_window_days` / `comeback_games_required` / `corpus_latest_date` | Shared global activity clock (90 / 3), recorded corpus only. |
 | `two_v_two_shape_seen` | Recorded matches whose `match_format` is `2v2`. |
 | `games_rated` | Games in `games[]`: rated by the win/loss walk, the performance duel, or both. |
-| `wl_games_rated` / `wl_games_recorded` / `wl_games_f9` | Win/loss walk games, total and split by source. |
+| `wl_games_rated` | Win/loss walk games. |
 | `perf_games_rated` | Performance duels rated. |
 | `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_inactive_player` / `skipped_duplicate_recording` / `skipped_identity_collision` | Why a recorded 2v2-shaped match was not rated. `identity_collision` means the four seats did not resolve to four distinct players. |
-| `skipped_f9_overlap_runtime` / `skipped_f9_malformed` | Ledger rows dropped at runtime, either because they duplicate a recorded strict 2v2 (same commander pair within 1 day) or because they are unusable. |
 | `wl_skipped_undetermined` | Recorded games rated only by the performance duel, because no verified winner exists. |
 | `perf_skipped_no_damage` | Recorded games where both thugs dealt 0, so no performance duel. |
 
@@ -3944,9 +3943,9 @@ Both files carry this header:
 
 | Field | Description |
 |---|---|
-| `name` / `steam64` | Identity. Recorded games are keyed by Steam64; F9 rows by name map. `steam64` is `null` for a name-only ledger player. |
+| `name` / `steam64` | Identity, keyed by Steam64 (alias-pinned names). |
 | `rating` | Current rating in that ladder. |
-| `games` / `games_recorded` / `games_f9` | Games rated in that ladder, total and by source (`games_f9` is always 0 on `thug_perf`). |
+| `games` | Games rated in that ladder. |
 | `wins` / `losses` / `draws` / `win_pct` | The player's **team** record on determined games. On `thug_perf` this is shown as context only; it does not drive that rating. |
 | `peak` / `peak_at` / `peak_date` | Highest rating, the game id where it was set, and its date. |
 | `last_game_id` / `last_2v2_date` / `last_delta` | Most recent game in that ladder and its change. |
@@ -3958,29 +3957,16 @@ Both files carry this header:
 
 ### 19.4 `elo_2v2_history.json`: `games[]`
 
-Chronological. Recorded games come before same-day F9 rows; F9 rows keep sheet-row order.
+Chronological.
 
 | Field | Description |
 |---|---|
-| `game_id` | The match id, or `f9:<row>` for a ledger row. |
-| `source` / `match_id` / `f9_row` | `recorded` (`match_id` set) or `f9` (`f9_row` set). |
-| `date` | ISO timestamp for a recorded game; `YYYY-MM-DD` for an F9 row. |
-| `decided_by` / `outcome` / `adjudicated` | Winner provenance (`f9` on ledger rows). `outcome` is `team1`, `team2`, `draw`, or `null` when undecided. |
+| `game_id` / `match_id` | The match id (both fields carry it). |
+| `source` | Always `"recorded"`. |
+| `date` | ISO timestamp of the match. |
+| `decided_by` / `outcome` / `adjudicated` | Winner provenance. `outcome` is `team1`, `team2`, `draw`, or `null` when undecided. |
 | `wl` | Win/loss walk: `{expected {"1","2"}, score {"1","2"}, k_commander, k_thug, lambda}`. `null` when the game had no verified winner. |
-| `perf` | Performance duel: `{expected {"1","2"}, score {"1","2"}, k}`, where `score` is each thug's `enemy_dealt` share. `null` on F9 rows and when both thugs dealt 0. |
+| `perf` | Performance duel: `{expected {"1","2"}, score {"1","2"}, k}`, where `score` is each thug's `enemy_dealt` share. `null` when both thugs dealt 0. |
 | `map` / `map_file` / `duration_sec` / `factions` | Display context (no faction term). |
-| `sides` | `{"1": {commander, thug}, "2": {...}}`. Each `commander` is `{steam64, name, wl {before, after, delta}, enemy_dealt, combat_share}`. Each `thug` is `{steam64, name, wl {...}, enemy_dealt, perf {before, after, delta}}`. `wl` / `perf` are absent when that part did not rate. `enemy_dealt` and `combat_share` (the commander's share of the side's enemy damage, recorded but not scored) are present on recorded games only. Within each role the two sides' deltas sum to 0. |
-
-### 19.5 `data/external/f9_ledger_2v2.json`
-
-Written by the standalone `scripts/import_f9_ledger.py` (2v2 pass) from F9bomber's spreadsheet. It applies the same gates as `f9_ledger.json`, but keeps rows with one thug per side. `f9_ledger.json` is untouched. Credit F9bomber (`https://f9bomber.com`) wherever these rows show.
-
-| Field | Description |
-|---|---|
-| `schema_version` | 1. |
-| `provenance` | `{provider, url, source_file, sheet_sha256, imported_at, importer}`. |
-| `funnel` | Row counts through each gate (`rows_total`, `x_size`, `x_uneven`, `x_no_rosters`, `x_nodur`, `x_excluded_name`, `g6_pre_overlap`, `g7_overlap`, `FINAL`, plus `note_*` data-quality counters). |
-| `overlaps[]` | Rows dropped at import because our corpus recorded the same game. |
-| `excluded.by_name` | Rows dropped per excluded name. |
-| `duels[]` | `{row, date, map_title, map_key, size ("2v2"), duration_sec, commanders {"1","2": {name, steam64}}, thugs {"1","2": [{name, steam64}]}, winner_side, factions}`. |
+| `sides` | `{"1": {commander, thug}, "2": {...}}`. Each `commander` is `{steam64, name, wl {before, after, delta}, enemy_dealt, combat_share}`. Each `thug` is `{steam64, name, wl {...}, enemy_dealt, perf {before, after, delta}}`. `wl` / `perf` are absent when that part did not rate. `combat_share` is the commander's share of the side's enemy damage, recorded but not scored. Within each role the two sides' deltas sum to 0. |
 

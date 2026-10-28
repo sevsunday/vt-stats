@@ -1790,8 +1790,8 @@ def metric_vtsr_2v2(history_2v2: dict[str, Any] | None) -> dict[str, Any]:
     elo_2v2_history.json alone.
 
     Win/loss walk: predicts each game's winner from PRE-match 2v2C +
-    2v2T(win/loss) ratings (lambda from the file), scored on every game,
-    on recorded games only, and on F9 rows only. Performance duel:
+    2v2T(win/loss) ratings (lambda from the file). Every game is a
+    recorded game (F9bomber's 2v2 rows were removed). Performance duel:
     sign agreement between the pre-match expectation and the realized
     damage share (E > 0.5 vs S > 0.5) plus mean |S - E|. Re-derives every
     rating from the file's constants and cross-checks the emitted `after`
@@ -1827,8 +1827,7 @@ def metric_vtsr_2v2(history_2v2: dict[str, Any] | None) -> dict[str, Any]:
 
     rating = {"c": {}, "t": {}, "p": {}}
     played = {"c": {}, "t": {}, "p": {}}
-    buckets = {b: {"correct": 0.0, "scored": 0, "draws": 0, "coin": 0, "ll": 0.0}
-               for b in ("all", "recorded", "f9")}
+    bk = {"correct": 0.0, "scored": 0, "draws": 0, "coin": 0, "ll": 0.0}
     perf_n = 0
     perf_agree = 0.0
     perf_abs = 0.0
@@ -1852,23 +1851,19 @@ def metric_vtsr_2v2(history_2v2: dict[str, Any] | None) -> dict[str, Any]:
             rt2 = rating["t"].get(t2, anchor)
             e1 = logistic((rc1 - rc2) + lam * (rt1 - rt2))
             outcome = g.get("outcome")
-            src = "f9" if g.get("source") == "f9" else "recorded"
             if outcome == "draw":
                 sc = 0.5
-                for b in ("all", src):
-                    buckets[b]["draws"] += 1
+                bk["draws"] += 1
             else:
                 sc = 1.0 if outcome == "team1" else 0.0
                 e_real = e1 if sc == 1.0 else 1.0 - e1
-                for b in ("all", src):
-                    bk = buckets[b]
-                    bk["scored"] += 1
-                    if e1 == 0.5:
-                        bk["correct"] += 0.5
-                        bk["coin"] += 1
-                    elif (e1 > 0.5) == (sc == 1.0):
-                        bk["correct"] += 1.0
-                    bk["ll"] += -math.log(max(1e-9, e_real))
+                bk["scored"] += 1
+                if e1 == 0.5:
+                    bk["correct"] += 0.5
+                    bk["coin"] += 1
+                elif (e1 > 0.5) == (sc == 1.0):
+                    bk["correct"] += 1.0
+                bk["ll"] += -math.log(max(1e-9, e_real))
             kc = (kf(played["c"].get(c1, 0)) + kf(played["c"].get(c2, 0))) / 2.0
             kt = (kf(played["t"].get(t1, 0)) + kf(played["t"].get(t2, 0))) / 2.0
             rating["c"][c1], rating["c"][c2] = rc1 + kc * (sc - e1), rc2 - kc * (sc - e1)
@@ -1899,32 +1894,27 @@ def metric_vtsr_2v2(history_2v2: dict[str, Any] | None) -> dict[str, Any]:
             check("p", t1, ((s1.get("thug") or {}).get("perf") or {}).get("after"))
             check("p", t2, ((s2.get("thug") or {}).get("perf") or {}).get("after"))
 
-    def summarize(bk: dict[str, Any]) -> dict[str, Any]:
-        n = bk["scored"]
-        return {
-            "n_scored": n,
-            "n_draws": bk["draws"],
-            "n_coin_flip": bk["coin"],
-            "accuracy": (bk["correct"] / n) if n else None,
-            "accuracy_ci": list(wilson_ci(int(round(bk["correct"])), n)) if n else None,
-            "log_loss": (bk["ll"] / n) if n else None,
-        }
-
-    recorded = summarize(buckets["recorded"])
+    n = bk["scored"]
+    win_loss = {
+        "n_scored": n,
+        "n_draws": bk["draws"],
+        "n_coin_flip": bk["coin"],
+        "accuracy": (bk["correct"] / n) if n else None,
+        "accuracy_ci": list(wilson_ci(int(round(bk["correct"])), n)) if n else None,
+        "log_loss": (bk["ll"] / n) if n else None,
+    }
     return {
         "available": True,
         "n_games": len(games),
         "lambda": lam,
-        "win_loss": summarize(buckets["all"]),
-        "win_loss_recorded": recorded,
-        "win_loss_f9": summarize(buckets["f9"]),
+        "win_loss": win_loss,
         "performance": {
             "n_duels": perf_n,
             "sign_agreement": (perf_agree / perf_n) if perf_n else None,
             "mean_abs_error": (perf_abs / perf_n) if perf_n else None,
         },
         "review_games_required": TWO_V_TWO_REVIEW_GAMES,
-        "review_open": recorded["n_scored"] >= TWO_V_TWO_REVIEW_GAMES,
+        "review_open": n >= TWO_V_TWO_REVIEW_GAMES,
         "replay_max_abs_diff": round(max_abs_diff, 4),
     }
 
@@ -5700,9 +5690,12 @@ def render_json_report(
     schema_version 13 (v1.12, VTSR-2v2): adds top-level ``vtsr_2v2``
     (#23 -- 2v2 win/loss + performance replay). Strictly additive; not
     in validation_summary.json.
+    schema_version 14: ``vtsr_2v2`` drops ``win_loss_recorded`` /
+    ``win_loss_f9`` (the 2v2 ladders became recorded-only, so
+    ``win_loss`` is the recorded figure).
     """
     return {
-        "schema_version":   13,
+        "schema_version":   14,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -5792,7 +5785,6 @@ def _summary_history_entry(results: dict) -> dict:
         # v1.12: VTSR-2v2 win/loss calls for the Tools footer.
         "vtsr_2v2_n":                 ((results.get("vtsr_2v2") or {}).get("win_loss") or {}).get("n_scored"),
         "vtsr_2v2_accuracy":          ((results.get("vtsr_2v2") or {}).get("win_loss") or {}).get("accuracy"),
-        "vtsr_2v2_recorded_n":        ((results.get("vtsr_2v2") or {}).get("win_loss_recorded") or {}).get("n_scored"),
     }
 
 
@@ -6402,10 +6394,8 @@ def main(argv: list[str] | None = None) -> int:
               f"replay {_fmt_num(vtsr_1v1.get('replay_max_abs_diff'), decimals=4)}")
     if vtsr_2v2.get("available"):
         wl2 = vtsr_2v2.get("win_loss") or {}
-        rec2 = vtsr_2v2.get("win_loss_recorded") or {}
         pf2 = vtsr_2v2.get("performance") or {}
-        print(f"  VTSR-2v2 win/loss (sec 23):   {_fmt_pct(wl2.get('accuracy'))} n={wl2.get('n_scored')} "
-              f"(recorded {_fmt_pct(rec2.get('accuracy'))} n={rec2.get('n_scored')}); "
+        print(f"  VTSR-2v2 win/loss (sec 23):   {_fmt_pct(wl2.get('accuracy'))} n={wl2.get('n_scored')}; "
               f"perf sign agreement {_fmt_pct(pf2.get('sign_agreement'))} n={pf2.get('n_duels')}  "
               f"replay {_fmt_num(vtsr_2v2.get('replay_max_abs_diff'), decimals=4)}")
     print("==================================================")

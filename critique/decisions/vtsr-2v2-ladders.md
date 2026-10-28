@@ -1,8 +1,9 @@
 # VTSR-2v2: separate 2v2 ladders (decision memo)
 
-Status: **RATIFIED** (2026-10-27). New ladder family, own module
+Status: **RATIFIED** (2026-10-27), **amended the same day** (below).
+New ladder family, own module
 (`scripts/elo_2v2.py`), own files (`data/processed/elo_2v2_current.json`
-+ `elo_2v2_history.json`), own `ELO_2V2_SCHEMA_VERSION = 1`. VTSR-T,
++ `elo_2v2_history.json`), own `ELO_2V2_SCHEMA_VERSION` (now 2). VTSR-T,
 VTSR-C and VTSR-1v1 are untouched and must stay byte-identical (gate:
 `_investigation/check_2v2_separation.py`).
 
@@ -17,6 +18,21 @@ Three ratings:
 Both thug ratings are published side by side for a comparison period
 (operator decision, 2026-10-27). The rule for picking one is
 pre-registered below.
+
+## Amendment (2026-10-27): recorded games only
+
+Operator decision: F9bomber's 2v2 rows are removed from every 2v2
+ladder. `data/external/f9_ledger_2v2.json`, the importer's 2v2 pass and
+`scripts/study_2v2_transfer.py` are deleted; `scripts/import_f9_ledger.py`
+is back to its pre-2v2 form, so `f9_ledger.json` and the VTSR-C ladder
+are unaffected. The win/loss walk drops from 71 games (8 recorded + 63
+F9) to the 8 recorded ones, and the activity clock reads the recorded
+corpus only, as VTSR-1v1 does. `ELO_2V2_SCHEMA_VERSION` 1 -> 2 (fields
+removed: `games_recorded` / `games_f9` per row, `wl_games_recorded` /
+`wl_games_f9` / `skipped_f9_*` in the header, `f9_row` per game);
+ratings are not comparable with schema 1. The math, the pick-one rule
+and its 30-game threshold are unchanged. Struck text below is kept for
+the record.
 
 ## Why separate ladders
 
@@ -59,11 +75,11 @@ recorded, it is unrated by every ladder.
 1. a recorded strict 2v2 (above), not void, `duration_sec >= 240`,
    `winner.decided_by` in `adjudicated / attested / clean_win /
    contested` with `winner.team` in (1, 2), or `draw` (0.5 each);
-2. or a row from `data/external/f9_ledger_2v2.json`: F9bomber's sheet
+2. ~~or a row from `data/external/f9_ledger_2v2.json`: F9bomber's sheet
    rows with one thug per side, passing every gate the 3v3+ importer
    applies (rosters, commander parse, stragglers, winner is a
    commander, duration >= 240 s, exact-duplicate drop, excluded names)
-   and not dual-recorded in our corpus.
+   and not dual-recorded in our corpus.~~ Removed by the amendment.
 
 **Performance duel (2v2T performance):** a recorded strict 2v2, not
 void, not cancelled, `duration_sec >= 240`. It needs no winner, so an
@@ -94,7 +110,7 @@ VTSR-C's formula with the thug term drawn from the 2v2 thug ladder.
 | Floor | none |
 | Seeding | none; everyone starts at the anchor |
 | Provisional | fewer than 5 games in that ladder |
-| Order | chronological; F9 rows after same-day recorded games, sheet-row order |
+| Order | chronological (~~F9 rows after same-day recorded games, sheet-row order~~) |
 
 Each recorded game also stores, recorded but not scored, each
 commander's share of the side's enemy damage (2v2 commanders fight
@@ -104,7 +120,8 @@ heavily) and both thugs' performance score, for later study.
 that VTSR-T is never a number belongs to the main thug ladder; these are
 separate experimental ladders and comparing two thug ratings needs the
 numbers. Ranked `#` = at least 5 games in that ladder AND active on the
-90-day global clock (`scripts/inactivity.py`, F9 appearances included).
+90-day global clock (`scripts/inactivity.py`, recorded corpus only since
+the amendment; ~~F9 appearances included~~).
 Do not lower the bar to fill the table.
 
 ## Consumers
@@ -136,10 +153,13 @@ A variant wins if it improves log-loss by at least 0.01 AND its
 split-half ρ is not lower by more than 0.05. If neither wins, keep
 both. Do not retune λ, K or the scale to produce a winner.
 
-## Evidence (2026-10-27)
+## Evidence (2026-10-27, historical)
 
-From `scripts/study_2v2_transfer.py` (writes `_validation/2v2_transfer.md`)
-and validator §23. Main-ladder ratings are each player's last rating
+Measured before the amendment, from `scripts/study_2v2_transfer.py`
+(since deleted with the F9 2v2 ledger, so these figures can no longer
+be rerun) and validator §23. The "2v2 ladders' own call" row describes
+the F9-seeded ladders that no longer exist; on the recorded-only
+ladders §23 now reports 56% of 8 games. Main-ladder ratings are each player's last rating
 strictly before the game; a formula is unscored when a rating is
 missing. Samples are small and every interval is wide.
 

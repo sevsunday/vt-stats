@@ -343,7 +343,7 @@
   function find2v2Game(matchId) {
     const hist = window.__vtElo2v2History;
     if (!hist || !Array.isArray(hist.games) || !matchId) return null;
-    return hist.games.find((g) => g.source !== 'f9' && g.match_id === matchId) || null;
+    return hist.games.find((g) => g.match_id === matchId) || null;
   }
 
   /** Model constants as emitted by elo_commander.py (never hardcoded). */
@@ -1395,7 +1395,7 @@
     const name = esc(commanderName(joined, win) || `Team ${win}`);
     const reason = matchReason(joined);
     let line;
-    if (!fav.team) {
+    if (!fav.team || fmtPct(fav.prob) === '50%') {
       line = `${name} won a game the ratings called even`;
     } else if (fav.team === win) {
       line = `${name} was favored (${fmtPct(fav.prob)}) and won`;
@@ -1602,7 +1602,7 @@
       const pair = (s) => esc(`${(j.commanders[s] || {}).name || '?'} and ${(j.thugs[s] || {}).name || '?'}`);
       let line;
       if (j.isDraw) line = 'The teams drew; every win/loss rating scored half a point.';
-      else if (!fav.team) line = `${pair(win)} won a game the ratings called even.`;
+      else if (!fav.team || fmtPct(fav.prob) === '50%') line = `${pair(win)} won a game the ratings called even.`;
       else if (fav.team === win) line = `${pair(win)} were favored (${fmtPct(fav.prob)}) and won.`;
       else line = `${pair(win)} won as the underdog (${fmtPct(1 - fav.prob)}).`;
       const chips = [];

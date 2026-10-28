@@ -1561,14 +1561,12 @@
       ? window.VTToolsResolver.get2v2Meta()
       : null;
     const latest = validationSummary && validationSummary.latest;
-    const recorded = (latest && Number.isFinite(latest.vtsr_2v2_recorded_n))
-      ? latest.vtsr_2v2_recorded_n
-      : (meta ? meta.wl_games_recorded : null);
+    const recorded = (latest && Number.isFinite(latest.vtsr_2v2_n))
+      ? latest.vtsr_2v2_n
+      : (meta ? meta.wl_games_rated : null);
     const pieces = ['Model: VTSR-2v2 ladders (experimental)'];
     if (latest && Number.isFinite(latest.vtsr_2v2_accuracy) && Number.isFinite(latest.vtsr_2v2_n)) {
-      pieces.push(`called ${Math.round(latest.vtsr_2v2_accuracy * 100)}% of ${latest.vtsr_2v2_n} 2v2 winners, most from F9bomber\u2019s ledger`);
-    } else if (meta && Number.isFinite(meta.wl_games_rated)) {
-      pieces.push(`${meta.wl_games_rated} rated 2v2s`);
+      pieces.push(`called ${Math.round(latest.vtsr_2v2_accuracy * 100)}% of ${latest.vtsr_2v2_n} 2v2 winners`);
     }
     if (Number.isFinite(recorded)) {
       pieces.push(`not validated yet: ${recorded} recorded 2v2${recorded === 1 ? '' : 's'} (review at ${TWO_V_TWO_REVIEW_GAMES})`);
