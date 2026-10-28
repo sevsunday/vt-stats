@@ -3994,6 +3994,10 @@
   let buildlogQuery = '';
   let buildlogScope = 'both';          // 'both' | '1' | '2'
   let buildlogSearchTimer = null;
+  // Presentation lens, same lifetime as buildlogFilters: Sum stays on when
+  // the match changes. It is a way of reading the log, not a query about
+  // the match that just left the screen.
+  let buildlogSum = false;
   let econHoverWired = false;          // delegated cross-card row highlight
   // Combat-ship stem set for the Combat ships pill. Lazy-fetched from
   // data/combat_ship_odfs.json (same set as ships_built / Conveyor Belt).
@@ -4780,6 +4784,54 @@
     return known ? sum : null;
   }
 
+  // One line per displayed unit name and event type, over the rows the
+  // pills and the find bar already kept. dedup_folded queue duplicates are
+  // skipped, same as buildlogScrapSum, so a folded wire copy is not a
+  // second unit. Queue and build stay separate lines: both carry the
+  // order's cost, and merging them would double the count. Sorted by
+  // count, then scrap, then name. The whole list renders — a match's
+  // distinct units fit without Show more.
+  function buildlogSumGroups(rows) {
+    const groups = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || r.dedup_folded) continue;
+      const name = econRowDisplayName(r.odf, r.name);
+      const type = r.type || '';
+      const key = name.toLowerCase() + '\0' + type;
+      let g = groups.get(key);
+      if (!g) {
+        g = { name: name || '\u2014', type: type, rows: [], odfs: new Set() };
+        groups.set(key, g);
+      }
+      g.rows.push(r);
+      const stem = (r.odf || '').toLowerCase();
+      if (stem) g.odfs.add(stem);
+    }
+    const list = [];
+    groups.forEach(g => {
+      g.count = g.rows.length;
+      g.scrap = buildlogScrapSum(g.rows);
+      list.push(g);
+    });
+    list.sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      const as = (a.scrap === null || a.scrap === undefined) ? -1 : a.scrap;
+      const bs = (b.scrap === null || b.scrap === undefined) ? -1 : b.scrap;
+      if (bs !== as) return bs - as;
+      const byName = a.name.localeCompare(b.name);
+      return byName || a.type.localeCompare(b.type);
+    });
+    return list;
+  }
+
+  function syncBuildLogSumPill() {
+    const btn = document.querySelector('#economy-buildlog-sum [data-buildlog-sum]');
+    if (!btn) return;
+    btn.classList.toggle('active', buildlogSum);
+    btn.setAttribute('aria-pressed', buildlogSum ? 'true' : 'false');
+  }
+
   // Four plain cells: cost, bank, cap, pools, all read at the row's own
   // tick (match.schema_version 21). The three context fields are null on
   // build-data-only sessions and on events preceding the first resource
@@ -4889,6 +4941,49 @@
       return `<table class="table table-sm vt-econ-log-table mb-0">${logHead}<tbody>${body}</tbody></table>${empty}${moreBtn}`;
     };
 
+    // Same filtered rows as renderCol, collapsed to one line per unit.
+    // The event column appears only when this team's groups span more than
+    // one type, so the default Builds view stays a name / count / scrap list.
+    const renderSumCol = (side) => {
+      const groups = buildlogSumGroups(byTeam[side]);
+      const multiType = groups.some(g => g.type !== groups[0].type);
+      const typeHead = multiType
+        ? '<th scope="col" title="Queue, build, or cancel">Ev</th>'
+        : '';
+      const sumHead = `<thead><tr>
+        ${typeHead}
+        <th scope="col" class="vt-econ-log-unit" title="Unit">Unit</th>
+        <th scope="col" class="text-end" title="How many of these rows">Count</th>
+        <th scope="col" class="text-end" title="Scrap cost of these rows">Scrap</th>
+        <th scope="col" title="ODF stem">ODF</th>
+      </tr></thead>`;
+      let body = '';
+      groups.forEach(g => {
+        const struck = g.type === 'cancel' ? ' vt-econ-row-cancel' : '';
+        const ev = multiType
+          ? `<td class="vt-econ-log-ev">${typeIcon[g.type] || ''}</td>`
+          : '';
+        let odf = '<span class="text-muted">\u2014</span>';
+        if (g.odfs.size === 1) {
+          odf = econOdfLink(g.odfs.values().next().value, g.name) || odf;
+        } else if (g.odfs.size > 1) {
+          odf = '<span class="text-muted" title="These rows use more than one ODF">\u2014</span>';
+        }
+        const scrapTip = g.scrap === null ? 'Cost unknown' : 'Scrap cost of these rows';
+        body += `<tr class="vt-econ-log-row${struck}">
+          ${ev}
+          <td class="vt-econ-log-unit"><span class="fw-semibold vt-econ-log-name">${esc(g.name)}</span></td>
+          <td class="vt-econ-log-num">${g.count}</td>
+          <td class="vt-econ-log-num" title="${scrapTip}">${fmtScrap(g.scrap)}</td>
+          <td class="vt-econ-log-odf-cell">${odf}</td>
+        </tr>`;
+      });
+      const empty = groups.length
+        ? ''
+        : '<p class="text-muted vt-econ-log-empty">No matching events.</p>';
+      return `<table class="table table-sm vt-econ-log-table vt-econ-log-table--sum mb-0">${sumHead}<tbody>${body}</tbody></table>${empty}`;
+    };
+
     const teamHead = (side) => {
       const bt = ((currentData.builds || {}).teams || {})[String(side)] || {};
       const c = bt.commander;
@@ -4904,9 +4999,11 @@
     // room for the log you care about.
     const sides = buildlogScope === 'both' ? [1, 2] : [Number(buildlogScope)];
     const colClass = sides.length === 2 ? 'col-md-6' : 'col-12';
+    const renderSide = buildlogSum ? renderSumCol : renderCol;
     container.innerHTML = `<div class="row g-3">${sides.map(side =>
-      `<div class="${colClass}">${teamHead(side)}<div class="vt-econ-log-col">${renderCol(side)}</div></div>`
+      `<div class="${colClass}">${teamHead(side)}<div class="vt-econ-log-col">${renderSide(side)}</div></div>`
     ).join('')}</div>`;
+    syncBuildLogSumPill();
   }
 
   // Label the scope buttons with the actual commanders. Runs on every render
@@ -4954,6 +5051,16 @@
         renderBuildLog();
       });
     }
+    const sumGroup = document.getElementById('economy-buildlog-sum');
+    if (sumGroup) {
+      sumGroup.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-buildlog-sum]');
+        if (!btn) return;
+        buildlogSum = !buildlogSum;
+        syncBuildLogSumPill();
+        renderBuildLog();
+      });
+    }
     const search = document.getElementById('economy-buildlog-search');
     if (search) {
       // The input lives in the card HEADER, not in #economy-buildlog-content,
@@ -4987,6 +5094,7 @@
 
   // Match switch: drop the typed query and the commander scope (both are
   // about the match that just left the screen) and re-sync the two controls.
+  // Sum mode is left alone, same as the type/kind pills.
   function resetBuildLogFindState() {
     buildlogQuery = '';
     buildlogScope = 'both';

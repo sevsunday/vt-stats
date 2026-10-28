@@ -7707,6 +7707,19 @@ html.vt-cursor-active * {
     width: 0.1%;
 }
 
+/* Sum mode has its own columns (Unit is not always the 4th), so the
+   chronological nth-child rule would stretch ODF or Scrap. Unit takes the
+   leftover; every other column shrinks to its content. */
+.vt-econ-log-table.vt-econ-log-table--sum > thead > tr > th,
+.vt-econ-log-table.vt-econ-log-table--sum > tbody > tr > td {
+    width: 0.1%;
+}
+
+.vt-econ-log-table.vt-econ-log-table--sum > thead > tr > th.vt-econ-log-unit,
+.vt-econ-log-table.vt-econ-log-table--sum > tbody > tr > td.vt-econ-log-unit {
+    width: auto;
+}
+
 .vt-econ-log-row.vt-econ-row-cancel .vt-econ-log-name {
     text-decoration: line-through;
     opacity: 0.65;

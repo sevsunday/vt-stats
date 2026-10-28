@@ -627,6 +627,15 @@
                   <button class="nav-link" data-buildlog-filter="all" type="button" aria-pressed="false">All events</button>
                 </li>
               </ul>
+              <!-- Presentation. Sum totals the filtered rows by unit; off
+                   keeps chronological order. Persists across match switches
+                   like the type pills. No data-bs-toggle. -->
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-sum" role="group" aria-label="Build log presentation">
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-sum type="button" aria-pressed="false"
+                          title="Total each unit instead of listing every order">Sum</button>
+                </li>
+              </ul>
               <input type="search" id="economy-buildlog-search"
                      class="form-control form-control-sm vt-econ-log-search"
                      placeholder="scav, spire" aria-label="Filter build log by unit or producer. Commas show each term's matches."
@@ -1951,6 +1960,7 @@
             The box matches the unit name, the ODF stem, or the producer.
             A comma joins separate searches, so <span class="vt-mono">scav, spire</span> lists both.
             The figure beside each team's count is the scrap cost of the rows in that list, including ones still behind Show more.
+            Sum totals those same rows by unit, one line per name with its count and scrap; when more than one event type is showing, that unit is a line per type, and the heading scrap is still the full list.
           </p>
 
           <h6 class="mb-2">The colored dots</h6>
