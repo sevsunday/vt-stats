@@ -342,6 +342,11 @@ INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 
+# v12: player-laid mine damage enters the thug-mean handicap through
+# VTSR-T enemy_dealt (match.schema_version 35). Commander duel math is
+# unchanged. Pre-v12 peak_vtsr_c is not comparable where that duel was
+# the peak. Measured on the v35 reprocess: max |d| 0.43, mean |d| 0.13,
+# top-10 order unchanged, 17 peaks moved.
 # v11: whole-game economy axes (pool_lead, non_green_share,
 # starter-free combat_conversion, upgrade_time; replacement ratios and
 # loose_share at weight 0). Audit keys changed meaning; ratings remain
@@ -357,7 +362,7 @@ CMDR_STALE_WINDOW_DAYS = 90
 # comparable with schema 7 (alpha_c stays 1; the axis does not enter P).
 # v7: weight-0 loose_share audit axis. v6: opening-decision axes.
 # v5: display inactivity. v3 ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 11
+CMDR_ELO_SCHEMA_VERSION = 12
 
 
 # ---------------------------------------------------------------------------

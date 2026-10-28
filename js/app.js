@@ -7540,6 +7540,7 @@
       ts,
     ];
     if (entry.is_pilot_victim) bits.push('pilot');
+    if (entry.killer_via_mine) bits.push('mine');
     if (Array.isArray(entry.assists)) {
       entry.assists.forEach(a => { if (a && a.name) bits.push(a.name); });
     }
@@ -7660,9 +7661,12 @@
       const pilotBadge = entry.is_pilot_victim
         ? ` <span class="vt-pilot-badge" data-bs-toggle="tooltip" title="On-foot pilot kill \u2014 not counted in kills/deaths or VTSR-T">pilot</span>`
         : '';
+      const mineBadge = entry.killer_via_mine
+        ? ` <span class="vt-mine-badge" data-bs-toggle="tooltip" title="Laid mine \u2014 credited to the player who had flown a mine-laying ship">mine</span>`
+        : '';
       html += `<div class="d-flex align-items-center gap-2 py-1 flex-wrap" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
-      html += `<span class="fw-semibold">${killerHtml}</span>${killerNick}${killerOdf}`;
+      html += `<span class="fw-semibold">${killerHtml}</span>${killerNick}${killerOdf}${mineBadge}`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
       html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}${pilotBadge}`;
       html += assistHtml;

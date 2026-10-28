@@ -168,7 +168,14 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # *bscup BUILD is within UPGRADE_OBJECT_SEC and POOL_SITE_M; a replant
 # after a kill is a base pool. Plants and pool-stem kills run in tick
 # order (kills first). Display-only. Ratings unmoved.
-PIPELINE_VERSION = 59
+# 59 -> 60: player-laid mine damage and kills (match.schema_version 35).
+# A mine detonates as its own entity (shooter 0, owner only in
+# shooter_team), so the blast was booked to asset_dealt and never reached
+# enemy_damage_share. v2+ credits the slot's human when shooter_odf is a
+# Mine entity and they had piloted a carrier of that mine; v1 falls back
+# to mine-only ordnance stems. Kills whose killer_odf is a Mine entity
+# follow the same rule. Ratings move.
+PIPELINE_VERSION = 60
 
 # Building damage inside this many seconds of the last recorded tick is
 # reported separately as `enemy_structure_dealt_late` (the winners' end-of-
@@ -1959,6 +1966,217 @@ def build_child_odf_reverse_map(odf_db):
     for stem, (name, _ord) in weapons.items():
         resolved[stem] = mine_owners.get(stem) or name
     return resolved
+
+
+# A weapon that DISPENSES something (mine, flare, trip mine) rather than
+# firing a projectile directly. The dispensed object becomes its own entity,
+# so when it detonates the engine reports the MINE as the shooter -- the
+# player who laid it survives only as `DamageDealt.shooter_team`.
+MINE_DISPENSER_CLASSES = re.compile(
+    r"(MineClass|FlareMineClass|TripMineClass|DispenserClass)", re.IGNORECASE
+)
+MINE_CHAIN_MAX_HOPS = 4
+# weaponNameN hops from a dispenser up to the ship a player actually flies.
+# The Flame Mine's fireball sits on the dispenser, and the dispenser sits
+# on the scout, so one hop is not enough.
+MINE_MOUNT_HOPS = 4
+
+
+def _ref_closure(seeds, refs, max_hops=MINE_CHAIN_MAX_HOPS):
+    """Transitive closure over the parent -> child ODF reference graph."""
+    seen = set()
+    frontier = set(seeds)
+    for _ in range(max_hops):
+        nxt = set()
+        for stem in frontier:
+            if stem in seen:
+                continue
+            seen.add(stem)
+            nxt |= refs.get(stem, set())
+        frontier = nxt - seen
+        if not frontier:
+            break
+    return seen
+
+
+def build_mine_ordnance_odfs_v1(odf_db):
+    """Damage-ordnance stems reachable ONLY from a mine dispenser.
+
+    v1 ``DamageDealt`` has no event-time ``shooter_odf``, so the ordnance
+    stem is the only signal that a blast was a mine. v2+ does not use this
+    set: the shooter entity is precise, and the closure also contains
+    mine-bucket stems a vehicle fires directly (``hfire2``, ``kamiordxpl``).
+
+    Derived, never a hand-maintained stem list (same contract as
+    ``build_extractor_odfs`` / ``build_turret_odfs``): the child-reference
+    closure of every mine-dispensing weapon PLUS the ``Mine`` bucket keys,
+    minus the same closure over every direct-fire weapon. That subtraction
+    keeps shared assets out -- ``xmortxpl`` comes from both the Spore Mine
+    chain and direct-fire ``gmortar``.
+    """
+    weapons = odf_db.get("Weapon") or {}
+    if not weapons:
+        return set()
+
+    refs = {}
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            if isinstance(entry, dict):
+                refs.setdefault(_odf_stem(odf_key), set()).update(_child_refs(entry))
+
+    mine_w, direct_w = set(), set()
+    for odf_key, entry in weapons.items():
+        blocks = " ".join((entry or {}).keys())
+        target = mine_w if MINE_DISPENSER_CLASSES.search(blocks) else direct_w
+        target.add(_odf_stem(odf_key))
+
+    mine_seeds = {c for w in mine_w for c in refs.get(w, set())}
+    mine_seeds |= {_odf_stem(k) for k in (odf_db.get("Mine") or {})}
+    direct_seeds = {c for w in direct_w for c in refs.get(w, set())}
+
+    return (
+        _ref_closure(mine_seeds, refs)
+        - _ref_closure(direct_seeds, refs)
+        - {_odf_stem(k) for k in weapons}
+    )
+
+
+def _mine_mounted_by(odf_db):
+    """weapon stem -> stems whose ``weaponNameN`` mounts it."""
+    mounted_by = defaultdict(set)
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            if not isinstance(entry, dict):
+                continue
+            carrier = _odf_stem(odf_key)
+            for props in entry.values():
+                if not isinstance(props, dict):
+                    continue
+                for field, val in props.items():
+                    if (WEAPON_SLOT_FIELD.match(field) and isinstance(val, str)
+                            and val.strip()):
+                        mounted_by[_odf_stem(val)].add(carrier)
+    return mounted_by
+
+
+def _mine_carriers(seeds, mounted_by, hops=MINE_MOUNT_HOPS):
+    """Stems that mount any seed, walking ``weaponNameN`` up ``hops`` times."""
+    seen = set()
+    frontier = set(seeds)
+    carriers = set()
+    for _ in range(hops):
+        nxt = set()
+        for stem in frontier:
+            if stem in seen:
+                continue
+            seen.add(stem)
+            parents = mounted_by.get(stem) or set()
+            carriers |= parents
+            nxt |= parents
+        frontier = nxt - seen
+        if not frontier:
+            break
+    return carriers
+
+
+def build_mine_attribution_tables(odf_db):
+    """Carrier ships for mine entities, and for the v1 ordnance fallback.
+
+    Returns ``{"entities": {mine_stem: set}, "v1_ordnance": {ord_stem: set}}``.
+    A set is the ship stems (plus intermediate weapons) that can put that
+    mine down. Derived, never a hand-maintained list.
+
+    ``entities`` is every ``Mine``-bucket stem. v2+ damage and every
+    schema's kills key on the event's ``shooter_odf`` / ``killer_odf``.
+    Credit requires the slot's human to have piloted one of these carriers
+    at or before the event, which is what keeps an AI-laid mine on a ship
+    the human never flew in ``asset_dealt``.
+
+    Dispensers are weapons declaring ``MINE_DISPENSER_CLASSES`` that name
+    the mine in a string prop. Carriers walk ``weaponNameN`` up from those
+    dispensers (the scout mounts the dispenser, the dispenser mounts the
+    fireball).
+
+    ``v1_ordnance`` is ``build_mine_ordnance_odfs_v1``. Each stem's carriers
+    come from the mine entities and dispenser weapons in its reverse
+    child-reference walk. v1 has no ``shooter_odf``.
+    """
+    empty = {"entities": {}, "v1_ordnance": {}}
+    weapons = (odf_db or {}).get("Weapon") or {}
+    mine_stems = {_odf_stem(k) for k in ((odf_db or {}).get("Mine") or {})}
+    if not weapons or not mine_stems:
+        return empty
+
+    mounted_by = _mine_mounted_by(odf_db)
+    dispenser_mines = defaultdict(set)
+    for odf_key, entry in weapons.items():
+        if not isinstance(entry, dict):
+            continue
+        if not MINE_DISPENSER_CLASSES.search(" ".join(entry.keys())):
+            continue
+        named = set()
+        for props in entry.values():
+            if not isinstance(props, dict):
+                continue
+            for val in props.values():
+                if isinstance(val, str) and val.strip():
+                    stem = _odf_stem(val)
+                    if stem in mine_stems:
+                        named.add(stem)
+        if named:
+            dispenser_mines[_odf_stem(odf_key)] = named
+
+    mine_dispensers = defaultdict(set)
+    for weapon, mines in dispenser_mines.items():
+        for mine in mines:
+            mine_dispensers[mine].add(weapon)
+
+    entities = {
+        mine: _mine_carriers(mine_dispensers.get(mine, ()), mounted_by)
+        for mine in mine_stems
+    }
+
+    refs = defaultdict(set)
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            if isinstance(entry, dict):
+                refs[_odf_stem(odf_key)] |= _child_refs(entry)
+    rev = defaultdict(set)
+    for parent, children in refs.items():
+        for child in children:
+            rev[child].add(parent)
+
+    v1 = {}
+    for ord_stem in build_mine_ordnance_odfs_v1(odf_db):
+        seen = set()
+        frontier = {ord_stem}
+        seeds = set()
+        if ord_stem in mine_stems:
+            seeds |= mine_dispensers.get(ord_stem, set())
+        for _ in range(MINE_CHAIN_MAX_HOPS):
+            nxt = set()
+            for stem in frontier:
+                if stem in seen:
+                    continue
+                seen.add(stem)
+                for parent in rev.get(stem, ()):
+                    if parent in mine_stems:
+                        seeds |= mine_dispensers.get(parent, set())
+                    if parent in dispenser_mines:
+                        seeds.add(parent)
+                    if parent not in seen:
+                        nxt.add(parent)
+            frontier = nxt - seen
+            if not frontier:
+                break
+        v1[ord_stem] = _mine_carriers(seeds, mounted_by)
+    return {"entities": entities, "v1_ordnance": v1}
 
 
 def build_weapon_name_resolver(odf_db):
@@ -6298,7 +6516,7 @@ def _estimate_weapon_hits(calib, s64, odf, shots, pvp_hits, self_hits):
     return pve_est, pvp_est
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, turret_odfs=None, no_prompt=False):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, turret_odfs=None, mine_attribution=None, no_prompt=False):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -6736,6 +6954,30 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # guard compare against the origin twice and match everything.
     last_known_pos = {}
 
+    # match.schema_version 35: player-laid mine damage reclaimed from
+    # asset_dealt. v2+ keys on the shooter entity (a Mine-bucket ODF);
+    # v1 has no shooter_odf and falls back to mine-only ordnance stems.
+    # Credit requires the slot's human to have piloted a carrier of that
+    # mine at or before the event. Surfaced on match.mine_attribution.
+    _mine_tables = mine_attribution or {}
+    mine_entities = _mine_tables.get("entities") or {}
+    mine_v1_ordnance = _mine_tables.get("v1_ordnance") or {}
+    mine_attr_events = 0
+    mine_attr_damage = 0.0
+    mine_attr_kills = 0
+    mine_attr_odfs = set()
+    mine_guard_events = 0
+    mine_guard_damage = 0.0
+    mine_guard_kills = 0
+    mine_by_player = defaultdict(lambda: {
+        "dealt": 0.0, "pvp_dealt": 0.0, "self_dealt": 0.0,
+        "kills": 0, "self_kills": 0,
+    })
+    # event-stream index of a reattributed DamageDealt -> owner Steam64.
+    # The timeline recompute walks the raw events and would otherwise
+    # leave the blast on the asset (shooter 0) row.
+    mine_timeline_owner = {}
+
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
     # Collect all non-ordnance ODFs seen in this match (vehicle/unit ODFs from
@@ -6824,6 +7066,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # per_ship_combat.
     s64_to_current_odf = {}
 
+    # match.schema_version 35: ship stem -> last tick this player was in
+    # it, plus the wire ODF string so per_ship_combat joins the loadout
+    # key. Updated on every UpdateTick. The mine carrier guard reads the
+    # ticks seen so far, which is "at or before this event" while the
+    # stream is in tick order.
+    ships_piloted = defaultdict(dict)
+    ships_piloted_wire = defaultdict(dict)
+
     # v25: full-rate ship ODF transitions for the 3D replay. Append
     # (tick, odf) whenever a player's non-empty PlayerState.odf differs
     # from the last recorded one. Typically tens of entries per player.
@@ -6855,6 +7105,36 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         if not cur:
             return "unknown"
         return cur.lower()
+
+    def _mine_layer(slot, key, tick, table):
+        """Owner of a mine blast, or ``(0, None)`` when it stays an asset.
+
+        ``table`` maps a mine-entity stem (v2+) or a v1 ordnance stem to
+        the ships that can lay it. The slot's human must already have
+        piloted one of those ships. The wire ODF of the most recently
+        piloted carrier is the laying ship for per_ship_combat.
+        """
+        carriers = table.get(key)
+        if not carriers:
+            return 0, None
+        owner = slot_to_s64.get(slot, 0) or slot_to_s64.get(int(slot or 0), 0)
+        if not owner:
+            return 0, None
+        flown = ships_piloted.get(owner)
+        if not flown:
+            return 0, None
+        best_stem = None
+        best_tick = -1
+        for ship in carriers:
+            seen = flown.get(ship)
+            if seen is not None and seen <= tick and seen >= best_tick:
+                best_stem = ship
+                best_tick = seen
+        if best_stem is None:
+            return 0, None
+        wire = ships_piloted_wire[owner].get(best_stem) or (best_stem + ".odf")
+        return owner, wire
+
     # Target-lock availability for this match. Any observed has_target=True sample
     # flips this to True. Stays False for pre-schema matches (field defaults to
     # False) and new-schema matches where no player ever activated target mode.
@@ -7226,6 +7506,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             #     "paired DR" view from the unified event so the
             #     receiving/rivalry/asset code below works unchanged.
             dd = evt.damage_dealt
+            de_event_idx = i
             if schema != PROTO_SCHEMA_V1:
                 de_tick = dd.tick
                 de_shooter = dd.shooter
@@ -7337,6 +7618,41 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
             if not skip_shooter:
                 shooter = de_shooter
+                # Player-laid mine (match.schema_version 35). A laid mine
+                # detonates as its own entity, so the wire reports no
+                # shooter and the person who laid it survives only in
+                # shooter_team. v2+ requires the shooter ODF to be a Mine
+                # entity; v1 has no shooter_odf and falls back to ordnance
+                # stems only a mine dispenser can produce. Either way the
+                # slot's human must already have piloted a carrier of that
+                # mine, which is what keeps an AI-laid mine an asset.
+                # Engagements (above) stay on the raw shooter: a replay
+                # attack line from the layer to the victim would be a lie.
+                mine_ship_key = None
+                mine_reattrib = False
+                if shooter == 0 and (mine_entities or mine_v1_ordnance):
+                    if schema == PROTO_SCHEMA_V1:
+                        _mine_key = _norm_build_odf(odf) if odf else ""
+                        _mine_table = mine_v1_ordnance
+                    else:
+                        _mine_key = _norm_build_odf(de_shooter_odf_event) if de_shooter_odf_event else ""
+                        _mine_table = mine_entities
+                    if _mine_key and _mine_key in _mine_table:
+                        _owner, _wire = _mine_layer(
+                            de_shooter_team, _mine_key, de_tick, _mine_table,
+                        )
+                        if _owner:
+                            shooter = _owner
+                            mine_reattrib = True
+                            mine_ship_key = _wire
+                            mine_attr_events += 1
+                            mine_attr_damage += de_amount
+                            mine_attr_odfs.add(_mine_key)
+                            mine_timeline_owner[de_event_idx] = _owner
+                            mine_by_player[_owner]["dealt"] += de_amount
+                        else:
+                            mine_guard_events += 1
+                            mine_guard_damage += de_amount
                 shooter_faction = slot_to_faction(de_shooter_team)
 
                 if shooter > 0:
@@ -7362,7 +7678,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # ship-switch moments. v1 has no event-time
                     # shooter_odf, so `de_shooter_odf_event` is "" and
                     # the existing fallback applies unchanged.
-                    _ship = (de_shooter_odf_event.lower() if de_shooter_odf_event else "") or _ship_key(shooter)
+                    # A reattributed mine has no player shooter_odf (the
+                    # entity is the mine). File it under the laying ship,
+                    # the carrier the owner was most recently in.
+                    if mine_ship_key:
+                        _ship = mine_ship_key
+                    else:
+                        _ship = (de_shooter_odf_event.lower() if de_shooter_odf_event else "") or _ship_key(shooter)
                     per_ship_combat[shooter][_ship]["dealt"] += de_amount
 
                     # Structure-damage attribution for VTSR-T `structure_share`.
@@ -7426,7 +7748,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 if victim_faction:
                     faction_received[victim_faction] += de_victim_amount
 
-                if not skip_shooter and de_shooter > 0 and victim > 0:
+                if not skip_shooter and shooter > 0 and victim > 0:
                     # match.schema_version 8: self-damage carve-out. Self
                     # events (shooter == victim, e.g. Blink AOE splash on
                     # the firing ship) are routed to player_self_dealt
@@ -7434,17 +7756,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # inflate `personal.pvp_dealt`. `personal.dealt` /
                     # `received` continue to include self damage upstream
                     # (they sum the unguarded `de_amount`); only the PvP
-                    # attribution ledger gates self.
-                    if de_shooter == victim:
-                        player_self_dealt[de_shooter] += de_amount
-                        bench_self_log.append((de_tick, de_shooter, de_amount))
+                    # attribution ledger gates self. Mine reattribution
+                    # uses the substituted shooter: the wire shooter is 0,
+                    # and keying on it dropped the blast out of pvp_dealt
+                    # and out of effective-kill credit.
+                    if shooter == victim:
+                        player_self_dealt[shooter] += de_amount
+                        bench_self_log.append((de_tick, shooter, de_amount))
+                        if mine_reattrib:
+                            mine_by_player[shooter]["self_dealt"] += de_amount
                     else:
-                        rivalry[de_shooter][victim] += de_amount
+                        rivalry[shooter][victim] += de_amount
                         # match.schema_version 13: per-victim PvP damage log
                         # feeding the post-loop assist-aware effective-kill
                         # credit. Logs only real PvP damage (shooter > 0,
                         # victim > 0, shooter != victim).
-                        dmg_by_victim[victim].append((de_tick, de_shooter, de_amount))
+                        dmg_by_victim[victim].append((de_tick, shooter, de_amount))
+                        if mine_reattrib:
+                            mine_by_player[shooter]["pvp_dealt"] += de_amount
 
         elif event_type == "unit_destroyed":
             ud = evt.unit_destroyed
@@ -7535,7 +7864,29 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 i += 1
                 continue
 
-            killer_is_player = ud.killer > 0
+            # match.schema_version 35: a mine detonation is its own entity,
+            # so killer is 0 and killer_odf is the Mine. Credit the slot's
+            # human when they had piloted a carrier of that mine. Faction
+            # votes and _touch stay on the raw event (the mine's ODF and
+            # the slot, not a rewritten Steam64).
+            killer = ud.killer
+            killer_ship_key = None
+            killer_via_mine = False
+            if killer == 0 and ud.killer_odf and mine_entities:
+                _mine_key = _norm_build_odf(ud.killer_odf)
+                if _mine_key in mine_entities:
+                    _owner, _wire = _mine_layer(
+                        ud.killer_team, _mine_key, ud.tick, mine_entities,
+                    )
+                    if _owner:
+                        killer = _owner
+                        killer_via_mine = True
+                        killer_ship_key = _wire
+                        mine_attr_odfs.add(_mine_key)
+                    else:
+                        mine_guard_kills += 1
+
+            killer_is_player = killer > 0
             victim_is_player = ud.victim > 0
             # v2.9 (match.schema_version 14): pilot-victim kill/death
             # exclusion. When the destroyed unit is an on-foot pilot ODF
@@ -7558,25 +7909,32 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # the engine did report the kill -- so the totals stay wire-
             # accurate. `kill_rivalry` and the two `per_ship_combat` PvP
             # counters below are auto-corrected by this single tightening.
-            is_pvp_kill = killer_is_player and victim_is_player and ud.killer != ud.victim
+            is_pvp_kill = killer_is_player and victim_is_player and killer != ud.victim
             # v2.9: pure omission for pilot victims -- no kill, no death,
             # no rivalry, no per-ship credit, no by-vehicle tally, no
             # effective-kill log entry. ODF registration / faction votes /
             # the (flagged) kill_feed row below are unaffected.
             if not victim_is_pilot:
-                if killer_is_player and victim_is_player and ud.killer == ud.victim:
-                    player_self_kills[ud.killer] += 1
+                _self_kill = killer_is_player and victim_is_player and killer == ud.victim
+                if _self_kill:
+                    player_self_kills[killer] += 1
+                    if killer_via_mine:
+                        mine_by_player[killer]["self_kills"] += 1
                 if killer_is_player:
-                    player_kills[ud.killer] += 1
+                    player_kills[killer] += 1
+                    if killer_via_mine:
+                        mine_attr_kills += 1
+                        mine_by_player[killer]["kills"] += 1
                     bench_kill_log.append((
-                        ud.tick, ud.killer, bool(is_pvp_kill),
-                        bool(victim_is_player and ud.killer == ud.victim),
+                        ud.tick, killer, bool(is_pvp_kill),
+                        bool(_self_kill),
                     ))
-                    # Per-ship combat: attribute kill to killer's active ship.
-                    kc_ship = _ship_key(ud.killer)
-                    per_ship_combat[ud.killer][kc_ship]["kills"] += 1
+                    # Per-ship combat: a mine kill files under the laying
+                    # ship, not under the mine ODF as if it were a hull.
+                    kc_ship = killer_ship_key or _ship_key(killer)
+                    per_ship_combat[killer][kc_ship]["kills"] += 1
                     if is_pvp_kill:
-                        per_ship_combat[ud.killer][kc_ship]["pvp_kills"] += 1
+                        per_ship_combat[killer][kc_ship]["pvp_kills"] += 1
                 if victim_is_player:
                     player_deaths[ud.victim] += 1
                     # Death attributed to victim's active ship at time of death.
@@ -7585,7 +7943,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if is_pvp_kill:
                         per_ship_combat[ud.victim][vc_ship]["pvp_deaths"] += 1
                 if is_pvp_kill:
-                    kill_rivalry[ud.killer][ud.victim] += 1
+                    kill_rivalry[killer][ud.victim] += 1
                 if ud.victim_odf:
                     vehicle_destruction_count[ud.victim_odf] += 1
             # ODF registration is unconditional so pilot ODFs still resolve
@@ -7616,8 +7974,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # (typical for pilot suicide / fall / drown / off-map),
             # otherwise "World" (env damage / unattributed). Reuses the
             # `victim_is_pilot` computed above for the v2.9 exclusion gate.
-            if ud.killer > 0:
-                killer_name = nick_for_s64(ud.killer)
+            if killer > 0:
+                killer_name = nick_for_s64(killer)
             else:
                 killer_faction = slot_to_faction(ud.killer_team)
                 if killer_faction in (1, 2):
@@ -7641,7 +7999,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # `assists` list to the matching entry. Recorded BEFORE the
             # append so it points at the row about to be added.
             feed_idx = len(kill_feed)
-            kill_feed.append({
+            _feed_row = {
                 "tick": ud.tick,
                 "killer": killer_name,
                 # killer_team / victim_team carry the raw slot (1-10) so
@@ -7654,7 +8012,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # null when killer/victim is not a Steam64 (a "Team N"
                 # placeholder), or when the in-game nick matches the
                 # resolved name. UI uses the same suppression rule.
-                "killer_in_game_nick": in_game_nick_for(ud.killer, killer_name) if ud.killer > 0 else None,
+                "killer_in_game_nick": in_game_nick_for(killer, killer_name) if killer > 0 else None,
                 "killer_odf": ud.killer_odf,
                 "victim": victim_name,
                 "victim_team": int(ud.victim_team),
@@ -7667,11 +8025,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # `pilot` badge. Always present on v14+; pre-v14 consumers
                 # default to False.
                 "is_pilot_victim": bool(victim_is_pilot),
-            })
+            }
+            # Omitted unless this kill was reattributed from a mine entity.
+            if killer_via_mine:
+                _feed_row["killer_via_mine"] = True
+            kill_feed.append(_feed_row)
             # match.schema_version 13: log PvP kills for assist-aware credit.
             # v2.9: pilot-victim kills are excluded (no effective-kill credit).
             if is_pvp_kill and not victim_is_pilot:
-                pvp_kill_log.append((ud.tick, ud.killer, ud.victim, feed_idx))
+                pvp_kill_log.append((ud.tick, killer, ud.victim, feed_idx))
             i += 1
 
         elif event_type == "unit_sniped":
@@ -8001,6 +8363,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # ship at event time (not their starting ship).
                     last_odf = s64_to_current_odf.get(s64)
                     s64_to_current_odf[s64] = ps.odf
+                    _flown = _norm_build_odf(ps.odf)
+                    if _flown:
+                        ships_piloted[s64][_flown] = tick
+                        ships_piloted_wire[s64][_flown] = ps.odf.lower()
                     # v25: record every ODF change at full tick rate so
                     # the replay can label the ship the player is
                     # actually in (the sparse kill/pickup/snipe
@@ -8405,7 +8771,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     bucket_size = TIMELINE_BUCKET_SECONDS * tick_rate
 
     if bucket_size > 0 and min_tick < float("inf"):
-        for evt in events:
+        for evt_idx, evt in enumerate(events):
             et = evt.WhichOneof("event_type")
             if et != "damage_dealt":
                 continue
@@ -8419,7 +8785,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             dd_amount_scaled = dd.amount * damage_scale
             if dd_shooter_team == 0 or dd_amount_scaled == 0.0:
                 continue
-            shooter = dd.shooter
+            # A reattributed mine still has shooter 0 on the wire. The
+            # damage loop recorded the owner under this event's index.
+            shooter = mine_timeline_owner.get(evt_idx) or dd.shooter
             bucket_idx = (dd.tick - min_tick) // bucket_size
             shooter_faction = slot_to_faction(dd_shooter_team)
 
@@ -9927,11 +10295,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # that undoes the pre-2026-08-30 per-world damage duplication.
             # v33: enemy-side damage split on
             # leaderboard[].personal (and bench_prefix.personal).
-            # v34 (this version): PoolPlanted extractors. structures[]
+            # v34: PoolPlanted extractors. structures[]
             # gains base-pool instances, upgrade swaps, census deaths and
             # pool_census when the recording has plants. Constructor
             # *bscup rows gain site + kind on every match. Display-only.
-            "schema_version": 34,
+            # v35 (this version): player-laid mine damage and kills.
+            # Mine-entity blasts (v1: mine-only ordnance) move from
+            # asset_dealt to the layer when that player had piloted a
+            # carrier of the mine. match.mine_attribution audits the move.
+            "schema_version": 35,
             "event_calibration": {
                 "r_by_weapon": event_calibration["r_by_weapon"],
                 "r_lobby": event_calibration["r_lobby"],
@@ -10007,6 +10379,40 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     round(bullet_hit_distance_max, 3)
                     if bullet_hit_distance_with > 0 else None
                 ),
+            },
+            # match.schema_version 35: damage and kills reclaimed from the
+            # asset pool and credited to the player who laid the mine.
+            # by_player sums to the totals (kills include self-kills;
+            # self_kills is that subset, omitted at 0). guard_rejected is
+            # the carrier-guard tripwire: a mine event whose slot owner
+            # had not piloted a carrier. A jump means AI is laying mines
+            # or the carrier set is too narrow.
+            "mine_attribution": {
+                "events": int(mine_attr_events),
+                "damage": round(mine_attr_damage, 1),
+                "kills": int(mine_attr_kills),
+                "odfs": sorted(mine_attr_odfs),
+                "by_player": {
+                    str(_s64): {
+                        "dealt": round(_rec["dealt"], 1),
+                        "pvp_dealt": round(_rec["pvp_dealt"], 1),
+                        "self_dealt": round(_rec["self_dealt"], 1),
+                        "kills": int(_rec["kills"]),
+                        **(
+                            {"self_kills": int(_rec["self_kills"])}
+                            if _rec["self_kills"] else {}
+                        ),
+                    }
+                    for _s64, _rec in sorted(
+                        mine_by_player.items(), key=lambda kv: str(kv[0]),
+                    )
+                    if _rec["dealt"] or _rec["kills"] or _rec["self_kills"]
+                },
+                "guard_rejected": {
+                    "events": int(mine_guard_events),
+                    "damage": round(mine_guard_damage, 1),
+                    "kills": int(mine_guard_kills),
+                },
             },
             # match.schema_version 11: shared bin layout for the per-weapon
             # `range_hist` arrays and per-player `distance_buckets`. Emitted
@@ -11157,6 +11563,17 @@ def main():
     print(f"  Extractor set: {len(extractor_odfs)} ODF stems (storyline extractor-war classification)")
     turret_odfs = build_turret_odfs(odf_db)
     print(f"  Turret set: {len(turret_odfs)} ODF stems (structures[] turret-class; deaths untracked)")
+    # v35: mine entities (v2+ shooter/killer ODF) and the v1 ordnance
+    # fallback, each mapped to the ships that can lay that mine.
+    mine_attribution = build_mine_attribution_tables(odf_db)
+    _mine_with_carrier = sum(1 for c in mine_attribution["entities"].values() if c)
+    _v1_with_carrier = sum(1 for c in mine_attribution["v1_ordnance"].values() if c)
+    print(
+        f"  Mine entities: {len(mine_attribution['entities'])} "
+        f"({_mine_with_carrier} with a carrier); "
+        f"v1 ordnance: {len(mine_attribution['v1_ordnance'])} "
+        f"({_v1_with_carrier} with a carrier)"
+    )
 
     # Load canonical player names
     known_players = load_known_players()
@@ -11208,6 +11625,7 @@ def main():
                 extractor_odfs=extractor_odfs,
                 scavenger_odfs=scavenger_odfs,
                 turret_odfs=turret_odfs,
+                mine_attribution=mine_attribution,
                 no_prompt=args.no_prompt,
             )
             match_id = match_data["match"]["id"]

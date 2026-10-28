@@ -1641,6 +1641,20 @@ The `%`-of-max view is **weapon-fair** (normalizes away weapon-choice difference
 
 Guard A rejects `distance > book_max * DIST_SANITY_BOOK_FACTOR` (1.5) — `shotSpeed * lifeSpan` is a hard physical ceiling, legitimate overshoot tops out near +33% while artifacts run 3-8x, and it covers 99.8% of corpus hits. Guard B rejects a distance matching `dist(shooter, origin)` within `DIST_ORIGIN_REL_TOL` / `DIST_ORIGIN_ABS_TOL` **and** already outside the book envelope, which makes a false positive impossible for book-covered ordnance. Full mechanism, evidence chain and the positioning / `hp_efficiency` siblings: `.cursor/rules/data-schema.mdc` "Death-tick (0,0,0) position placeholder".
 
+**Player-laid mine attribution (`match.schema_version` 35).** A laid mine detonates as its own entity, so its `DamageDealt` carries `shooter = 0` with the layer only in `shooter_team`. That damage used to book to `assets.dealt`, which `enemy_damage_share` does not read. v2+ credits it when `shooter_odf` is a `Mine`-bucket stem and the slot's human had piloted a carrier of that mine; v1, which has no `shooter_odf`, uses mine-only ordnance stems (`build_mine_ordnance_odfs_v1`). The same rule credits a `UnitDestroyed` whose `killer_odf` is a Mine entity. On the 312-match reprocess this moved 346,964.5 damage and 20 kills; 4,832.8 damage stayed an asset because no eligible owner had flown a carrier.
+
+| Field | Type | Description |
+|---|---|---|
+| `match.mine_attribution.events` | `number` | Damage events moved from the asset pool to the layer. |
+| `match.mine_attribution.damage` | `number` | Damage moved. **Invariant: `Σ personal.dealt + Σ assets.dealt` per match is unchanged.** |
+| `match.mine_attribution.kills` | `number` | Kills credited to layers. Sums `by_player[].kills`, including a mine that killed the layer's own ship. Pilot victims are not counted. |
+| `match.mine_attribution.odfs` | `string[]` | Sorted mine stems seen in this match (the entity on v2+, the ordnance stem on v1). |
+| `match.mine_attribution.by_player` | `object` | Steam64 → `{dealt, pvp_dealt, self_dealt, kills}`, plus `self_kills` when non-zero. Sums to `damage` and `kills` within rounding. The raw-browser Reconcile view adds these because the wire shooter is still 0. |
+| `match.mine_attribution.guard_rejected` | `object` | `{events, damage, kills}` left as assets: a mine whose slot had no human, or one who had not flown a carrier. A jump means AI is laying mines or the carrier set is too narrow. |
+| `kills.feed[].killer_via_mine` | `bool` | Present and true only when this kill was reattributed from a mine entity. The dashboard draws a `mine` chip. Omitted otherwise. |
+
+Direct-fire weapons, turrets and wreck explosions stay in `asset_dealt`. Full derivation: `.cursor/rules/data-schema.mdc` "Player-laid mine damage and kills".
+
 #### Aggregate shape (built in-memory by `VTAggregate.build()`)
 
 After summation, the aggregator drops any `career_stats[]` row whose `matches_played < MIN_CAREER_MATCHES` (currently `5`) and cascade-filters `global_rivalries[]` to the kept names. `global_weapon_meta` and `meta.*` totals are unaffected — the threshold is exclusively about cross-match player identity. Per-match views (`<match_id>.json` → Player Leaderboard, kill feed, per-match rivalries) are unaffected.
@@ -2120,11 +2134,13 @@ Categorical effect on per-match output:
 
 | Bucket | `kills.*` | New JSON block | Notes |
 |---|---|---|---|
-| Real vehicle | full passthrough | none | Existing accumulators untouched |
+| Real vehicle | full passthrough | none | Kill credit can be reassigned from a mine entity to its layer (schema 35); accumulators otherwise unchanged |
 | Pilot victim (v2.9) | suppressed for kills/deaths; kept in `kills.feed[]` flagged `is_pilot_victim: true` | none | On-foot pilot ODF (`is_pilot_odf`). Victim-only gate -- a pilot who destroys a *ship* still scores normally. See [§8.1](#81-pilot-victim-exclusion-v29) |
 | Powerup pickup | suppressed | `pickups.feed[]` (new-schema only, populated from real `pickup_powerup` events) | Synthetic `unit_destroyed` companion is silently dropped |
 | Powerup/crate destruction | suppressed | `powerup_destructions.{feed,by_player,by_odf,totals}` | Real player shot the powerup before someone picked it up, effectively denying the enemy economy |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player,by_odf,totals}` | No `feed` (too noisy) |
+
+**Laid-mine kills (schema 35).** Inside the real-vehicle bucket, a `UnitDestroyed` with `killer == 0` whose `killer_odf` is a Mine entity is credited to the slot's human when they had piloted a carrier of that mine. The feed row sets `killer_via_mine: true` (omitted otherwise). Pilot victims stay excluded from kill totals. Damage from the same mine is the `match.mine_attribution` block.
 
 ### 8.1 Pilot-victim exclusion (v2.9)
 
@@ -3255,7 +3271,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
-| `weights` | object | Snapshot of `THUG_WEIGHTS` for transparency. **v2.14 (current)**: 1 key, `enemy_damage_share` 1.0 = `personal.enemy_dealt` / lobby total (`match.schema_version` 33), every enemy target paid the same per point. `axis_means` and `axis_contributions` carry the same single key. Through v2.13 the composite was `net_damage_share` 0.20, `thug_kill_rate` 0.20, `pve_share` 0.12, `mobility` 0.08 (raw sum 0.60, renormalized at runtime). **v2.11** removed `snipe_bonus` and `target_lock_pct`. **v2.12** removed `thug_accuracy`. **v2.13** removed `thug_efficiency`. Snipes, T-key usage, kills and the accuracy column are display stats, not rating inputs. `ELO_SCHEMA_VERSION` 18; pre-v18 `peak_vtsr` is not comparable. Decision: `critique/decisions/vtsr-t-enemy-damage.md`. |
+| `weights` | object | Snapshot of `THUG_WEIGHTS` for transparency. **v2.14 (current)**: 1 key, `enemy_damage_share` 1.0 = `personal.enemy_dealt` / lobby total (`match.schema_version` 33), every enemy target paid the same per point. `axis_means` and `axis_contributions` carry the same single key. Through v2.13 the composite was `net_damage_share` 0.20, `thug_kill_rate` 0.20, `pve_share` 0.12, `mobility` 0.08 (raw sum 0.60, renormalized at runtime). **v2.11** removed `snipe_bonus` and `target_lock_pct`. **v2.12** removed `thug_accuracy`. **v2.13** removed `thug_efficiency`. Snipes, T-key usage, kills and the accuracy column are display stats, not rating inputs. `ELO_SCHEMA_VERSION` 19; pre-v19 `peak_vtsr` is not comparable (laid-mine damage now counts in `enemy_dealt`). Decision: `critique/decisions/vtsr-t-enemy-damage.md`. |
 | `commander_axis_prior` | object | **v2.4** — snapshot of `COMMANDER_AXIS_PRIOR` for transparency. **v2.14**: 1 key, `enemy_damage_share` −0.171 (the observed commander running mean when v2.14 shipped, shrinkage 30). Values are in **post-clip space** (i.e. measured in the same units as `clip(z, -2, +2) / 2`). For commander rows on each listed axis, the per-match shift applied is `-baseline[axis]`, where `baseline` comes from `commander_shrunk_baseline()` (audit-derived axes blend with the running mean; locked axes equal the prior exactly). |
 | `commander_baseline_shrinkage` | float | **v2.4** — shrinkage strength (in pseudo-observations) used for audit-derived axes. Live data takes over the seed prior smoothly as the corpus grows. Default `30.0`. Locked axes ignore this constant. |
 | `commander_baseline_locked_axes` | array<string> | **v2.4** — sorted list of axis names whose baselines are locked at the seed prior (no shrinkage). **v2.14** default `[]`; the locked `pve_share` prior left with its axis. |

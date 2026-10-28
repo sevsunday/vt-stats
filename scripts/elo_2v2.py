@@ -72,7 +72,11 @@ DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
 LADDERS = ("commander", "thug_wl", "thug_perf")
 
-ELO_2V2_SCHEMA_VERSION = 2
+# v3: VTSR-2v2T performance reads personal.enemy_dealt, which now includes
+# player-laid mine damage (match.schema_version 35). Pre-v3 peaks are not
+# comparable where that game was the peak. Measured max |d| 0.05, mean
+# |d| 0.02, 4 performance peaks moved, ladder order unchanged.
+ELO_2V2_SCHEMA_VERSION = 3
 
 
 # ---------------------------------------------------------------------------

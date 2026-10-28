@@ -244,7 +244,7 @@ Downstream aggregators read the normalized event uniformly; no consumer should b
 - `dd.team == 0` or `dd.amount == 0.0` → skip **shooter attribution only**; victim received damage from paired DR is still processed
 - `dr.team == 0` → skip victim attribution (world prop victim)
 - `shooter > 0` → **personal** dealt credit to that player
-- `shooter == 0` → **asset** dealt credit to the owning slot (from `team` field)
+- `shooter == 0` → **asset** dealt credit to the owning slot (from `team` field), except a player-laid mine reattributed under "Player-laid mine damage and kills"
 - `victim > 0` → **personal** received credit to that player
 - `victim == 0` → **asset** received credit to the owning slot (from `team` field)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → **rivalry matrix**
@@ -361,6 +361,23 @@ New telemetry `match.bullet_hit_distance.rejected_implausible` (1,976 corpus-wid
 The positioning skip sits **before** the 1 Hz downsample gate so `position_last_kept_tick` does not advance — otherwise the next real sample is lost too. Post-fix the corpus has **zero** `(0,0)` trail samples and **zero** samples beyond 1.5x book max; Burst Gun's highest non-empty bin fell from `[600,800)` to `[100,150)`.
 
 Values MOVE on existing matches, so this is not additive: `range_hist` / `range_pct_hist`, `personal.distance_buckets`, `bullet_hit_distance.{with_distance,mean,max}`, `positioning.players[].trail` and `personal.hp_efficiency` all shed the artifact. Dropping trail samples shifts `time_in_base_pct` → `activity_score` → the VTSR-T `mobility` axis, so `ELO_SCHEMA_VERSION` bumps 10 → 11 and **pre-v11 `peak_vtsr` is no longer comparable** (measured drift: max 1.00 ELO, mean 0.20, leaderboard order unchanged). Upstream fix would be computing `distance_to_target` before the victim is zeroed, and omitting a dead unit's `PlayerState` rather than emitting a placeholder.
+
+### Player-laid mine damage and kills (match.schema_version 35, PIPELINE_VERSION 60)
+
+**A laid mine detonates as its own entity, so `DamageDealt` / `UnitDestroyed` carry `shooter` / `killer` = 0 and the player who laid it survives only in `shooter_team` / `killer_team`.** That booked the damage to `asset_dealt`. VTSR-T's only axis, `enemy_damage_share`, reads `personal.enemy_dealt`, so the layer got nothing.
+
+On 312 sessions Flame Mine (`xfbseek`) and Solar Flare (`flare_s`) were **100% orphaned**. AI weapons, turrets and wreck explosions are also shooter-less and **stay in `asset_dealt`**. An ordnance-stem rule mis-credits those: on v2+ the shooter ODF of a false positive is the vehicle (`ivtank_vsr`, `evkami_vsr`, `fvsent_vsr`), not the mine.
+
+`build_mine_attribution_tables(odf_db)` derives the rule, never a hand-maintained stem list:
+
+- **v2+:** `shooter_odf` / `killer_odf` is a `Mine`-bucket stem (`fball2a`, `flaremine_s_vsr`, `snarefield`). Kills use this test on every schema, because `killer_odf` is present on v1 too.
+- **v1 damage** has no `shooter_odf`. `build_mine_ordnance_odfs_v1` is the child-reference closure of mine dispensers minus the same closure over direct-fire weapons. That is what still catches `flare_s` / `xfbseek` there, and what keeps a shared blast like `xmortxpl` (Spore Mine and `gmortar`) out.
+- **Carrier guard.** The slot's human must have piloted, at or before the event, a ship that mounts a dispenser of that mine (`weaponNameN`, walked up `MINE_MOUNT_HOPS`). An AI mine on a ship the human never flew stays an asset. `per_ship_combat` files the credit under that laying ship, not under the mine ODF.
+- The substituted shooter is what the rivalry matrix, the PvP/self split, the effective-kill window and the damage timeline use. `engagements` stays on the raw shooter: a replay attack line from the layer to the victim would be a lie. Pilot-victim kills stay excluded from kill totals. The feed row gains `killer_via_mine: true` only when the kill was reattributed.
+
+`match.mine_attribution = {events, damage, kills, odfs, by_player, guard_rejected}`. `by_player` is keyed by Steam64 with `{dealt, pvp_dealt, self_dealt, kills}` and `self_kills` when a mine killed the layer's own ship. `guard_rejected` counts mine events with no eligible owner. **Invariant: `Σ personal.dealt + Σ assets.dealt` per match is unchanged.** The gate on the 312-match reprocess moved **346,964.5** damage and **20** kills, and left 4,832.8 damage (355 events, 1 kill) uncredited.
+
+`ELO_SCHEMA_VERSION` 18 → 19, so **pre-v19 `peak_vtsr` is not comparable**. Measured VTSR-T drift: max 7.40, mean 1.40, top-10 order unchanged. The thug-mean handicap moves VTSR-C (`CMDR_ELO_SCHEMA_VERSION` 11 → 12; max 0.43, mean 0.13, 17 peaks) and VTSR-2v2T performance (`ELO_2V2_SCHEMA_VERSION` 2 → 3; max 0.05, mean 0.02, 4 peaks). Both top-10 orders were unchanged.
 
 ### Loadout Profile + Per-Ship Combat (v2.3 addition)
 

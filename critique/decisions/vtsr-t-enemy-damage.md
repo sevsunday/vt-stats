@@ -99,3 +99,7 @@ Paying every point of enemy damage the same already credits these kills about in
 ### Shipped 2026-10-24
 
 `ELO_SCHEMA_VERSION` 18. The module-default replay matches the published ratings (max |d| 0.0). Forward window: decided matches dated 2026-10-25 or later, `python scripts/vtsr_t_variants.py --since 2026-10-25`. Matches from 2026-10-24 were in the decision corpus and stay out of it.
+
+### Amendment 2026-10-27 — laid mines count
+
+Before match schema 35, a mine detonating as its own entity booked its damage to `asset_dealt`, so `enemy_dealt` missed it. The pipeline now credits that damage, and the kill, to the player who had flown a carrier of the mine. Both arms of the forward check read the corrected per-match JSON, so the comparison stays like-for-like. `ELO_SCHEMA_VERSION` 19. Measured drift against the v18 ratings, 48 players: max |Δ| 7.40, mean |Δ| 1.40, top-10 order unchanged.

@@ -16,6 +16,8 @@
  *     -> vendored protobufjs-light (vendor/protobufjs/protobuf.min.js)
  *     -> Root.fromJSON(descriptor) + ClientStatSession.decode(bytes)
  *     -> ClientStatSession.toObject(..., { longs: String, defaults: false, oneofs: true })
+ *        (installSteam64Long() first: the light build has no Long library,
+ *        so uint64 would round past 2^53 and Reconcile would miss every player)
  *
  * Domain-aware resolvers augment the tree at render time (never mutating the
  * decoded object): uint64 values present in `header.s64_to_nick` render with
@@ -528,7 +530,99 @@
 
   // --- Decode pipeline ---
 
+  // protobufjs-light reads uint64 as a JS number unless util.Long exists
+  // before configure(). Steam64 is 17 digits, past 2^53, so that number
+  // rounds and Reconcile cannot match the pipeline's id strings. This
+  // stand-in only has to turn the two 32-bit halves back into a decimal.
+  function decMul(a, b) {
+    const res = new Array(a.length + b.length).fill(0);
+    for (let i = a.length - 1; i >= 0; --i) {
+      let carry = 0;
+      for (let j = b.length - 1; j >= 0; --j) {
+        const k = i + j + 1;
+        const t = res[k] + (a.charCodeAt(i) - 48) * (b.charCodeAt(j) - 48) + carry;
+        res[k] = t % 10;
+        carry = (t / 10) | 0;
+      }
+      res[i] += carry;
+    }
+    return res.join('').replace(/^0+/, '') || '0';
+  }
+
+  function decAdd(a, b) {
+    let i = a.length - 1;
+    let j = b.length - 1;
+    let carry = 0;
+    let out = '';
+    while (i >= 0 || j >= 0 || carry) {
+      const t = (i >= 0 ? a.charCodeAt(i--) - 48 : 0)
+        + (j >= 0 ? b.charCodeAt(j--) - 48 : 0)
+        + carry;
+      out = String(t % 10) + out;
+      carry = (t / 10) | 0;
+    }
+    return out.replace(/^0+/, '') || '0';
+  }
+
+  function installSteam64Long() {
+    const pb = window.protobuf;
+    if (!pb || !pb.util || (pb.util.Long && pb.util.Long.__vtSteam64)) return;
+    function Long(low, high, unsigned) {
+      this.low = low | 0;
+      this.high = high | 0;
+      this.unsigned = !!unsigned;
+    }
+    Long.__vtSteam64 = true;
+    Long.isLong = function(v) { return !!(v && v.__vtSteam64); };
+    Long.fromBits = function(low, high, unsigned) {
+      return new Long(low, high, unsigned);
+    };
+    Long.fromNumber = function(value, unsigned) {
+      if (!value) return new Long(0, 0, unsigned);
+      var neg = value < 0;
+      if (neg) value = -value;
+      var lo = value >>> 0;
+      var hi = Math.floor(value / 4294967296) >>> 0;
+      if (neg) {
+        lo = (~lo + 1) >>> 0;
+        hi = (~hi + (lo ? 0 : 1)) >>> 0;
+      }
+      return new Long(lo, hi, unsigned);
+    };
+    Long.fromString = function(str, unsigned) {
+      str = String(str);
+      var neg = str.charAt(0) === '-';
+      if (neg) str = str.slice(1);
+      var lo = 0;
+      var hi = 0;
+      for (var i = 0; i < str.length; i++) {
+        var d = str.charCodeAt(i) - 48;
+        var lo10 = lo * 10 + d;
+        lo = lo10 >>> 0;
+        hi = (hi * 10 + Math.floor(lo10 / 4294967296)) >>> 0;
+      }
+      if (neg) {
+        lo = (~lo + 1) >>> 0;
+        hi = (~hi + (lo ? 0 : 1)) >>> 0;
+      }
+      return new Long(lo, hi, unsigned !== false);
+    };
+    Long.prototype.__vtSteam64 = true;
+    Long.prototype.toString = function() {
+      const lo = this.low >>> 0;
+      const hi = this.high >>> 0;
+      if (!hi) return String(lo);
+      return decAdd(decMul(String(hi), '4294967296'), String(lo));
+    };
+    Long.prototype.toNumber = function() {
+      return (this.high >>> 0) * 4294967296 + (this.low >>> 0);
+    };
+    pb.util.Long = Long;
+    pb.configure();
+  }
+
   async function fetchAndDecodeBinpb(rawUrl) {
+    installSteam64Long();
     await loadProtoRoot();
     const typeV3 = state.rootMessageType;
 
@@ -612,7 +706,7 @@
       : schema === PROTO_SCHEMA_V2 ? state.rootMessageTypeV2
       : state.rootMessageTypeV1;
     // toObject flattens protobufjs runtime wrappers to plain JS. `longs:
-    // String` preserves 64-bit values losslessly (Steam64 IDs, etc).
+    // String` is lossless only because installSteam64Long() ran first.
     // `defaults: false` omits zero-valued scalars (implicit presence in
     // Edition 2023 treats 0 == unset for scalar fields, which matches the
     // wire format and our schema comments like "undefined if not a player").
@@ -3120,6 +3214,16 @@
     return (typeof s === 'number' && isFinite(s) && s > 0) ? s : 1;
   }
 
+  // Laid-mine credit. The wire shooter/killer is 0; the pipeline moved the
+  // amount onto this player. Already scaled, so do not apply damage_scale
+  // again. Absent on a player who laid nothing.
+  function mineCredit(s64, field) {
+    const block = state.processed && state.processed.match
+      && state.processed.match.mine_attribution;
+    const row = block && block.by_player && block.by_player[String(s64)];
+    return row ? Number(row[field] || 0) : 0;
+  }
+
   function renderReconcileScalePill() {
     const badge = document.getElementById('reconcile-sentinel-badge');
     if (!badge || !badge.parentNode) return;
@@ -3156,11 +3260,12 @@
       if (isSentinelDamage(r.amount)) continue; // sentinel filter — match processed tier
       sum += r.amount * reconcileDamageScale();
     }
+    const laid = mineCredit(s64, 'dealt');
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.dealt`,
       processed: entry && entry.personal ? Number(entry.personal.dealt) : 0,
-      computed: sum,
-      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6',
+      computed: sum + laid,
+      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 + mine_attribution.by_player dealt (laid mine; wire shooter is 0)',
       kind: 'float',
     };
   }
@@ -3234,13 +3339,15 @@
       }
       sum += r.amount * reconcileDamageScale();
     }
+    const laid = mineCredit(s64, 'pvp_dealt');
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_dealt`,
       processed: entry && entry.personal ? Number(entry.personal.pvp_dealt) : 0,
-      computed: sum,
-      rule: isV2
+      computed: sum + laid,
+      rule: (isV2
         ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim > 0 ∧ victim != shooter (v2 unified)'
-        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0 ∧ dr.victim != dr.shooter (v1)',
+        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0 ∧ dr.victim != dr.shooter (v1)')
+        + ' + mine_attribution.by_player pvp_dealt (laid mine; wire shooter is 0)',
       kind: 'float',
     };
   }
@@ -3277,13 +3384,15 @@
       }
       sum += r.amount * reconcileDamageScale();
     }
+    const laid = mineCredit(s64, 'self_dealt');
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.self_dealt`,
       processed: entry && entry.personal ? Number(entry.personal.self_dealt || 0) : 0,
-      computed: sum,
-      rule: isV2
+      computed: sum + laid,
+      rule: (isV2
         ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim == shooter (v2 unified)'
-        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim == dr.shooter (v1)',
+        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim == dr.shooter (v1)')
+        + ' + mine_attribution.by_player self_dealt (laid mine; wire shooter is 0)',
       kind: 'float',
     };
   }
@@ -3298,11 +3407,12 @@
       if (r.killer !== r.victim) continue;
       count += 1;
     }
+    const laid = mineCredit(s64, 'self_kills');
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.self_kills`,
       processed: entry && entry.personal ? Number(entry.personal.self_kills || 0) : 0,
-      computed: count,
-      rule: 'count(unitDestroyed) where killer == s64 ∧ victim == s64',
+      computed: count + laid,
+      rule: 'count(unitDestroyed) where killer == s64 ∧ victim == s64 + mine_attribution.by_player self_kills (laid mine; wire killer is 0)',
       kind: 'int',
     };
   }
@@ -3357,6 +3467,7 @@
       if (isPilotOdf(victimOdf)) continue;
       count++;
     }
+    const laid = mineCredit(s64, 'kills') - mineCredit(s64, 'self_kills');
     const pvp = entry && entry.personal ? Number(entry.personal.pvp_kills || 0) : 0;
     const pve = entry && entry.personal ? Number(entry.personal.pve_kills || 0) : 0;
     const processed = entry && entry.personal
@@ -3365,8 +3476,8 @@
     return {
       label: 'Counted kills',
       processed,
-      computed: count,
-      rule: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_kills + pve_kills ↔ count(unitDestroyed where killer == s64, excluding self-kills and pilot victims (user_m in victim ODF)). Powerup and deployable exclusions need the ODF category DB, which this page does not load — remaining gap vs dashboard kills.`,
+      computed: count + laid,
+      rule: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_kills + pve_kills ↔ count(unitDestroyed where killer == s64, excluding self-kills and pilot victims (user_m in victim ODF)) + laid-mine kills (mine_attribution.by_player kills minus self_kills; wire killer is 0). Powerup and deployable exclusions need the ODF category DB, which this page does not load — remaining gap vs dashboard kills.`,
       kind: 'int',
     };
   }

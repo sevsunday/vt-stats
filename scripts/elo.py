@@ -377,7 +377,12 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # critique/decisions/vtsr-t-enemy-damage.md. Output shape: `weights`,
 # `axis_means`, and `axis_contributions` carry 1 key. Ratings move, so
 # **pre-v18 `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 18
+# v19 (current) = v18 plus player-laid mine damage inside
+# `personal.enemy_dealt` (match.schema_version 35). A mine that detonates
+# as its own entity used to book to asset_dealt, which this axis never
+# read. Output shape is unchanged. Ratings move, so **pre-v19
+# `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 19
 
 
 # ---------------------------------------------------------------------------
