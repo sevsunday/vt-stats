@@ -3,7 +3,7 @@ name: VSR .v Archive Analysis
 overview: "Preserve and reconstruct the VSR mission DLLs of Battlezone: Combat Commander into one self-contained repo (`VSR_DLL_Source`), archive full repo histories inside `.v/preservation/`, and document the `.v` archive for VT Stats (`.v/analysis/`). Method: three-way port — public ancestor source (GBD's own 1.3 pack + the 2015 BZ1Helper family) + the PDB-symbolized decompile as diff oracle + GBD's Lua port as cross-check — under mechanical QA gates toward lockstep-verified parity. Every dependency is pinned to a verified URL/commit/local path."
 todos:
   - id: t01-repo
-    content: "Create c:\\Users\\dhira\\Documents\\Github\\VSR_DLL_Source as its own git repo with the fixed tree, .gitignore (SDK, Build/, tools/_local/), README, PROVENANCE (trust tiers), QA.md (gates + checklist), DEPENDENCIES.md (pinned sources), LICENSE-NOTES, CREDITS, STATUS"
+    content: Create c:\Users\dhira\Documents\Github\VSR_DLL_Source as its own git repo with the fixed tree, .gitignore (SDK, Build/, tools/_local/), README, PROVENANCE (trust tiers), QA.md (gates + checklist), DEPENDENCIES.md (pinned sources), LICENSE-NOTES, CREDITS, STATUS
     status: pending
   - id: t02-originals
     content: "original/: copy the 4 DLLs + 4 PDBs byte-exact + SHA256SUMS; export GBD's Lua port (ea4173f) and Test_Variant (644e79f) files verbatim with full commit metadata; copy VSR Documents/, Workshop item ini/cfg/des, the RE-attempt TSVs"
@@ -15,7 +15,7 @@ todos:
     content: "Fetch pinned dependencies: 1.3 pack folder from BlackDragonN001/LuaMission@353698f -> reference/ancestor-1.3/; BZ1Helper family from Nielk1/BZ2-LuaMission@6fda4f5 -> reference/ancestor-bz1helper-2015/; Lua 5.2.4 tarball -> third_party/lua-5.2.4/ (sha256 recorded); verify commits/hashes; write DEPENDENCIES.md"
     status: pending
   - id: t04-toolchain
-    content: "Confirm a Windows SDK is installed (none found under Windows Kits\\10\\Include on 2026-10-28); build/build.cmd mirroring GBD's structure (lua52.lib + VSRCore.lib + LuaMissionLib.lib -> 4 DLLs; MSVC x86 /MT /W4 /Zi; SDK from %BZCC_DIR%) + minimal Strategy02 stub exporting GetMisnAPI with version magic; verify export table and that a VSR map starts with it in place"
+    content: Confirm a Windows SDK is installed (none found under Windows Kits\10\Include on 2026-10-28); build/build.cmd mirroring GBD's structure (lua52.lib + VSRCore.lib + LuaMissionLib.lib -> 4 DLLs; MSVC x86 /MT /W4 /Zi; SDK from %BZCC_DIR%) + minimal Strategy02 stub exporting GetMisnAPI with version magic; verify export table and that a VSR map starts with it in place
     status: pending
   - id: t05-reference
     content: "reference/: existing Strategy02 decompile + TSVs (Tier B, pending regeneration), PDB manifest with verbatim paths + line counts + BUILD_ENVIRONMENT.md, engine docs (Tier C) with SOURCES.md; ancestor-vs-PDB file map (which ancestor file seeds which VSR file)"
@@ -27,28 +27,28 @@ todos:
     content: "tools/: ghidra headless runbook + script (portable Ghidra 11 + JDK 21 under tools/_local/, pinned URLs); parity runbook; gate scripts check_symbol_parity.py, check_strings.py, check_no_thirdparty.py (VRV/BZ_REA identifiers forbidden), check_status.py"
     status: pending
   - id: t08-regen-decompile
-    content: "Regenerate the Strategy02 decompile with Ghidra+PDB; diff against .v/VSR_dll_RE_attempt2; record differences; promote to Tier B-verified"
+    content: Regenerate the Strategy02 decompile with Ghidra+PDB; diff against .v/VSR_dll_RE_attempt2; record differences; promote to Tier B-verified
     status: pending
   - id: t09-docs-v
-    content: "Write .v/analysis/SUMMARY.md, ANALYSIS.md, ANALYSIS_PLAIN.md, DLL_RECOVERY.md, VSR_NETVARS.md from RESEARCH_NOTES.md, every borrowed claim labelled by trust tier; resolve the ivar81 and ally-slot discrepancies from the decompile first"
+    content: Write .v/analysis/SUMMARY.md, ANALYSIS.md, ANALYSIS_PLAIN.md, DLL_RECOVERY.md, VSR_NETVARS.md from RESEARCH_NOTES.md, every borrowed claim labelled by trust tier; resolve the ivar81 and ally-slot discrepancies from the decompile first
     status: pending
   - id: t10-docs-repo
-    content: "Mirror community-facing docs into the repo as docs/BACKGROUND.md, docs/RECOVERY.md, docs/NETVARS.md with repo-relative citations and tier labels"
+    content: Mirror community-facing docs into the repo as docs/BACKGROUND.md, docs/RECOVERY.md, docs/NETVARS.md with repo-relative citations and tier labels
     status: pending
   - id: t11-port-1
     content: "Port tier 1 (mathutils, bzcscriptutils, shared/*): ancestor -> decompile diff -> VSR; per-function checklist; independent review; gates green before STATUS flips"
     status: pending
   - id: t12-port-2
-    content: "Port tier 2 (scrap, power, powerup, undeploy, aiweapon from ancestors; utilityship, gravity, objecthelper, vehiclehelper, ambientsound written from decompile)"
+    content: Port tier 2 (scrap, power, powerup, undeploy, aiweapon from ancestors; utilityship, gravity, objecthelper, vehiclehelper, ambientsound written from decompile)
     status: pending
   - id: t13-decompile-3
-    content: "Run Ghidra+PDB on LuaMission, Instant, deathmatch01 -> reference/decompiled/; regenerate manifest tables and layout asserts for their unique files"
+    content: Run Ghidra+PDB on LuaMission, Instant, deathmatch01 -> reference/decompiled/; regenerate manifest tables and layout asserts for their unique files
     status: pending
   - id: t14-port-3
-    content: "Port tier 3 (bz1helper, buildinghelper, productionclasshelper, attacherhelper, carrierhelper, morphobjecthelper, portalhelper, dispatchhelper) from the 2015 ancestors against the decompile; resolve class-hash constants via recovered Hash()"
+    content: Port tier 3 (bz1helper, buildinghelper, productionclasshelper, attacherhelper, carrierhelper, morphobjecthelper, portalhelper, dispatchhelper) from the 2015 ancestors against the decompile; resolve class-hash constants via recovered Hash()
     status: pending
   - id: t15-port-4
-    content: "Port tier 4 (luamission + luabindings from the 2017 ancestor against the 486-entry table; strategy02, instantmission, deathmatch01 from the 1.3 pack against decompile + GBD's Lua port)"
+    content: Port tier 4 (luamission + luabindings from the 2017 ancestor against the 486-entry table; strategy02, instantmission, deathmatch01 from the 1.3 pack against decompile + GBD's Lua port)
     status: pending
   - id: t16-parity
     content: "Parity: symbol parity, string parity, export table, save-record sizes, lockstep CRC A/B vs original DLLs on VSR maps, log-string parity; iterate until clean; record per-DLL in STATUS.md"
