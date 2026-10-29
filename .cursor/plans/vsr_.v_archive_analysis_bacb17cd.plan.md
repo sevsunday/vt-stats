@@ -15,7 +15,7 @@ todos:
     content: "Fetch pinned dependencies: 1.3 pack folder from BlackDragonN001/LuaMission@353698f -> reference/ancestor-1.3/; BZ1Helper family from Nielk1/BZ2-LuaMission@6fda4f5 -> reference/ancestor-bz1helper-2015/; Lua 5.2.4 tarball -> third_party/lua-5.2.4/ (sha256 recorded); verify commits/hashes; write DEPENDENCIES.md"
     status: pending
   - id: t04-toolchain
-    content: "build/build.cmd mirroring GBD's structure (lua52.lib + VSRCore.lib + LuaMissionLib.lib -> 4 DLLs; MSVC x86 /MT /W4 /Zi; SDK from %BZCC_DIR%) + minimal Strategy02 stub exporting GetMisnAPI with version magic; verify export table and that a VSR map starts with it in place"
+    content: "Confirm a Windows SDK is installed (none found under Windows Kits\\10\\Include on 2026-10-28); build/build.cmd mirroring GBD's structure (lua52.lib + VSRCore.lib + LuaMissionLib.lib -> 4 DLLs; MSVC x86 /MT /W4 /Zi; SDK from %BZCC_DIR%) + minimal Strategy02 stub exporting GetMisnAPI with version magic; verify export table and that a VSR map starts with it in place"
     status: pending
   - id: t05-reference
     content: "reference/: existing Strategy02 decompile + TSVs (Tier B, pending regeneration), PDB manifest with verbatim paths + line counts + BUILD_ENVIRONMENT.md, engine docs (Tier C) with SOURCES.md; ancestor-vs-PDB file map (which ancestor file seeds which VSR file)"
@@ -30,7 +30,7 @@ todos:
     content: "Regenerate the Strategy02 decompile with Ghidra+PDB; diff against .v/VSR_dll_RE_attempt2; record differences; promote to Tier B-verified"
     status: pending
   - id: t09-docs-v
-    content: "Write .v/analysis/SUMMARY.md, ANALYSIS.md, ANALYSIS_PLAIN.md, DLL_RECOVERY.md, VSR_NETVARS.md with every borrowed claim labelled by trust tier"
+    content: "Write .v/analysis/SUMMARY.md, ANALYSIS.md, ANALYSIS_PLAIN.md, DLL_RECOVERY.md, VSR_NETVARS.md from RESEARCH_NOTES.md, every borrowed claim labelled by trust tier; resolve the ivar81 and ally-slot discrepancies from the decompile first"
     status: pending
   - id: t10-docs-repo
     content: "Mirror community-facing docs into the repo as docs/BACKGROUND.md, docs/RECOVERY.md, docs/NETVARS.md with repo-relative citations and tier labels"
@@ -60,6 +60,8 @@ isProject: false
 ---
 
 # VSR DLL Preservation + `.v` Archive Analysis
+
+> **Entry instruction for a fresh agent:** read `.v/analysis/RESEARCH_NOTES.md` first. It is the raw handoff from the planning session — folder inventory, PDB source manifest with per-file line counts, build environment, decompile line references for every rule quoted below, the Lua-port verification, git history, verified remotes, Tier C digests, the netvar reconciliation seed, and the open questions. The plan says *what*; the notes hold the *evidence*. Tasks 5, 6 and 9 in particular are written against it.
 
 ## Summary (read this first)
 
@@ -150,12 +152,12 @@ Every `source/` file carries `// PROVENANCE: ancestor <D3|D4 path @commit> + dec
 2. **Preserve originals** — D2 + `SHA256SUMS.txt`; Lua port and Test_Variant verbatim with `COMMITS.txt` (`git log --format=fuller`); `VSR Documents/`, Workshop `.ini/.cfg/.des`, the two `lua_api_*.tsv`.
    2b. **Preservation mirrors** — fetch D1, then `git clone --mirror` D1, D3, D4 into `.v/preservation/`; all refs + hashes → `reference/manifest/REPO_REFS.txt`.
 3. **Fetch pinned dependencies** — D3 folder → `reference/ancestor-1.3/`, D4 `Shared/` → `reference/ancestor-bz1helper-2015/` (via `git archive` at the pinned commits; verify `git rev-parse`), D6 tarball → `third_party/lua-5.2.4/` (SHA-256 recorded); write `DEPENDENCIES.md`.
-4. **Prove the toolchain** — `build.cmd` with the lib structure; minimal `Strategy02.dll` whose `GetMisnAPI` fills `MisnExport` (version magic, no-op callbacks); export-table check; start a VSR map with it in place without crash.
+4. **Prove the toolchain** — first confirm a Windows SDK is installed (`Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include"` returned nothing on 2026-10-28; check `vcvars32` output and install the "Windows 11 SDK" VS component if `cl` cannot find `windows.h`); then `build.cmd` with the lib structure; minimal `Strategy02.dll` whose `GetMisnAPI` fills `MisnExport` (version magic, no-op callbacks); export-table check; start a VSR map with it in place without crash.
 5. **Reference inputs** — D8 copied (Tier B pending); `reference/manifest/` (verbatim PDB paths, per-file line counts, function + global tables, `BUILD_ENVIRONMENT.md`, `FILE_MAP.md` = which ancestor file seeds which VSR file, with size deltas); six engine docs → `reference/engine/` with `SOURCES.md` (Tier C).
 6. **Scaffold** — `scaffold_from_manifest.py` seeds `source/` from the ancestors per `FILE_MAP.md`, overlays PDB-true declarations from `user_functions.tsv` + `vsr_types.h`, stubs only ancestor-less functions; `layout_asserts.py` emits the static asserts; all four targets compile, link, asserts pass.
 7. **Runbooks + gate scripts** — `tools/ghidra/` (pinned portable install, headless script exporting decompile + TSVs in the archive's shape); `tools/parity/RUNBOOK.md`; `check_symbol_parity.py`, `check_strings.py`, `check_no_thirdparty.py`, `check_status.py`; `build.cmd check` runs them all.
 8. **Regenerate the Strategy02 decompile** — Ghidra+PDB; diff against D8; record differences; promote to Tier B-verified.
-9. **`.v/analysis/` documents** — `SUMMARY.md`; `ANALYSIS.md` (verdict; pipeline confirmations with our code locations → Tier A/B evidence; corrections/hypotheses to verify on the wire — DLL-side scavenger deposit credit, `ivar117`, `ivar26`, `ivar25`, `ivar81` collision; Tier C claims labelled — 15-char ODF truncation, `GameObjectClass` defaults, fog mode enum; vt-stats backlog; preservation checklist with hashes); `ANALYSIS_PLAIN.md`; `DLL_RECOVERY.md` (= `STATUS.md` + plan + dependencies); `VSR_NETVARS.md` (netvars-line / decompile `file:line` / 1.3 `vars.txt` / VRV-line citations with tiers, scope, conflicts, `.trn` keys).
+9. **`.v/analysis/` documents** — `SUMMARY.md`; `ANALYSIS.md` (verdict; pipeline confirmations with our code locations → Tier A/B evidence; corrections/hypotheses to verify on the wire — DLL-side scavenger deposit credit, `ivar117`, `ivar26`, `ivar25`, `ivar81` collision; Tier C claims labelled — 15-char ODF truncation, `GameObjectClass` defaults, fog mode enum; vt-stats backlog; preservation checklist with hashes); `ANALYSIS_PLAIN.md`; `DLL_RECOVERY.md` (= `STATUS.md` + plan + dependencies); `VSR_NETVARS.md` (netvars-line / decompile `file:line` / 1.3 `vars.txt` / VRV-line citations with tiers, scope, conflicts, `.trn` keys; seed table in `RESEARCH_NOTES.md` §8). Two discrepancies must be resolved from the decompile before they are written as fact: the `ivar81` double read (`BZ1Helper::Init` scrap multiplier vs `Strategy02::Init` thug-flag loop at `strategy02.cpp.decomp.c:2030-2039`) and the ally-team slot range (decompile loop `ivar35+k` at `:2024-2029` vs netvars.txt ivar23/60/67-80).
 10. **Docs mirror** — `docs/BACKGROUND.md`, `docs/RECOVERY.md`, `docs/NETVARS.md`, repo-relative citations, tier labels.
 11. **Port tier 1** — `mathutils`, `bzcscriptutils`, `shared/*`; gates 1–6 before `STATUS` flips; build green at every commit.
 12. **Port tier 2** — `scraphelper`, `powerhelper`, `poweruphelper`, `undeployhelper`, `aiweaponhelper` from D4 against the decompile; `utilityshiphelper`, `gravityhelper`, `objecthelper`, `vehiclehelper`, `ambientsoundhelper` from the decompile.
