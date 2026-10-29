@@ -265,32 +265,12 @@
   // thug-only toggle (`vt.elo_mode`) is likewise retired — drop it so a
   // returning user never carries a stale pref that nothing reads.
   // removeItem on a missing key is a no-op so this is idempotent.
+  // `vt-record-stats-dismissed` belonged to the first-visit Record modal,
+  // which is now the /record/ page. Drop it so a returning visitor is not
+  // stuck on a flag nothing reads.
   try { localStorage.removeItem('vt-landing-pref'); } catch { /* private mode / storage blocked — silently ignore */ }
   try { localStorage.removeItem('vt.elo_mode'); } catch { /* private mode / storage blocked — silently ignore */ }
-
-  // --- Record-Your-Own-Stats Modal Dismissal ---
-  // Instructional popup that walks users through running the statsgate
-  // collector. The "Don't show on page load" checkbox is wired as a
-  // bidirectional toggle on the persisted flag (see the show.bs.modal /
-  // hidden.bs.modal listeners near the boot block): opening the modal
-  // always syncs the checkbox FROM the flag, and closing always persists
-  // the current checkbox state TO the flag. This means changes made via
-  // the navbar re-open path are honored just like changes made on the
-  // first-visit auto-open.
-  const RECORD_STATS_DISMISSED_KEY = 'vt-record-stats-dismissed';
-
-  function readRecordStatsDismissed() {
-    try { return localStorage.getItem(RECORD_STATS_DISMISSED_KEY) === '1'; }
-    catch { return false; }
-  }
-  function writeRecordStatsDismissed() {
-    try { localStorage.setItem(RECORD_STATS_DISMISSED_KEY, '1'); }
-    catch { /* private mode / storage blocked — silently ignore */ }
-  }
-  function clearRecordStatsDismissed() {
-    try { localStorage.removeItem(RECORD_STATS_DISMISSED_KEY); }
-    catch { /* private mode / storage blocked — silently ignore */ }
-  }
+  try { localStorage.removeItem('vt-record-stats-dismissed'); } catch { /* private mode / storage blocked — silently ignore */ }
 
   // URLSearchParams.toString() percent-encodes a long list of characters
   // that are technically valid unencoded inside a query string (RFC 3986
@@ -10041,43 +10021,6 @@
     }
   }
 
-  // Wire permanent two-way sync between the modal's "Don't show on page
-  // load" checkbox and the persisted dismissal flag. Runs unconditionally
-  // (regardless of current flag state) so navbar-triggered re-opens
-  // (#record-stats-btn) honor the same contract as the
-  // first-visit auto-open: opening always reflects the persisted state,
-  // and closing always persists the current checkbox state — including
-  // *un*checking, which clears the flag and re-enables the auto-open.
-  const $recordStatsModal = document.getElementById('record-stats-modal');
-  const $recordStatsCheckbox = document.getElementById('record-stats-dont-show');
-  if ($recordStatsModal && $recordStatsCheckbox) {
-    $recordStatsModal.addEventListener('show.bs.modal', () => {
-      $recordStatsCheckbox.checked = readRecordStatsDismissed();
-    });
-    $recordStatsModal.addEventListener('hidden.bs.modal', () => {
-      if ($recordStatsCheckbox.checked) writeRecordStatsDismissed();
-      else clearRecordStatsDismissed();
-    });
-  }
-
   initWhenPlayedTimezone();
-
-  // Gate the boot sequence behind the "How to record your stats" modal
-  // until the user dismisses it. The dismissal flag is independent of
-  // any URL intent, so shared links still resolve correctly — the modal
-  // just defers the resolution until it closes. The {once:true} listener
-  // here only handles boot resumption; persistence is owned by the
-  // permanent listener pair attached above (which also fires for navbar
-  // re-opens). Bootstrap fires hidden.bs.modal listeners in registration
-  // order, so persistence runs before runInitialBoot().
-  if (!readRecordStatsDismissed() && $recordStatsModal && window.bootstrap) {
-    const recordInst = bootstrap.Modal.getOrCreateInstance($recordStatsModal);
-    $recordStatsModal.addEventListener('hidden.bs.modal', runInitialBoot, { once: true });
-    // Hide the preloader behind the modal so the welcome screen reads
-    // cleanly. Loaders re-show #loading themselves when they actually run.
-    $loading.classList.add('d-none');
-    recordInst.show();
-  } else {
-    runInitialBoot();
-  }
+  runInitialBoot();
 })();

@@ -940,6 +940,13 @@ body::before {
     box-shadow: 0 1px 6px var(--kb-primary-muted);
 }
 
+/* The generic current-page rule paints --kb-primary text. On the filled
+   Record button that would sit on a primary background, so keep the
+   foreground token when this control is the current page. */
+.vt-nav-icon-btn--primary[aria-current="page"] {
+    color: var(--kb-primary-fg);
+}
+
 /* Secondary-background variant of .vt-nav-icon-btn — uses --kb-bg-muted as a
    clear surface tint without competing with the primary CTA. Used by the
    match-info banner's Raw / Map / VOD action chips. */

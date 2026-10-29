@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Record your own stats — VT Stats</title>
+  <meta name="description" content="Run the statsgate collector alongside Battlezone and share the resulting .binpb files.">
+
+  <link rel="canonical" href="https://vtstats.bz/record/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Record your own stats — VT Stats">
+  <meta property="og:description" content="Run the statsgate collector alongside Battlezone and share the resulting .binpb files.">
+  <meta property="og:url" content="https://vtstats.bz/record/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Record is current here and stays first, matching the dashboard button. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="./" class="vt-nav-icon-btn vt-nav-icon-btn--primary" id="record-stats-btn"
+             aria-current="page"
+             title="How to record your own stats" aria-label="How to record your own stats">
+            <i class="bi bi-record-circle me-1"></i>Record
+          </a>
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../weapons/"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
+            </ul>
+          </div>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4 py-md-5 flex-grow-1">
+    <div class="row justify-content-center">
+      <div class="col-12 col-lg-10 col-xl-8">
+        <article class="card">
+          <div class="card-header">
+            <h1 class="h5 mb-0">
+              <i class="bi bi-record-circle me-2"></i>Record your own stats
+            </h1>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Want your matches to show up here? Run the statsgate collector alongside Battlezone
+              and share the resulting <code>.binpb</code> files.
+            </p>
+            <div class="row g-3 mt-1">
+              <div class="col-12 col-md-6">
+                <h2 class="text-uppercase small fw-semibold text-muted mb-2">Prerequisites</h2>
+                <ol class="mb-3 ps-4">
+                  <li class="mb-2">
+                    Subscribe to
+                    <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3515140097"
+                       target="_blank" rel="noopener noreferrer">
+                      Extra Utilities 2<i class="bi bi-box-arrow-up-right ms-1 small"></i>
+                    </a> on Steam.
+                  </li>
+                  <li class="mb-2">
+                    Download the
+                    <a href="https://nightly.link/VTrider/statsgate/workflows/build/main/statsgate-nightly.zip"
+                       target="_blank" rel="noopener noreferrer">
+                      statsgate binaries<i class="bi bi-box-arrow-up-right ms-1 small"></i>
+                    </a>.
+                  </li>
+                  <li class="mb-0">Unzip the contents anywhere you like.</li>
+                </ol>
+                <div class="alert alert-info small mb-0 py-2 px-3" role="note">
+                  <h3 class="text-uppercase fw-semibold mb-2 small">Additional info</h3>
+                  <ul class="mb-0 ps-3">
+                    <li class="mb-2">Enter <code>stats</code> in the BZCC console to get a list of useful commands while the DLL is active.</li>
+                    <li class="mb-0">The statsgate DLL self-terminates once BZCC closes &mdash; you'll need to re-run the launcher if you restart the game.</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="col-12 col-md-6">
+                <h2 class="text-uppercase small fw-semibold text-primary mb-2">STEPS</h2>
+                <ol class="mb-0 ps-4">
+                  <li class="mb-2">Start Battlezone.</li>
+                  <li class="mb-2">
+                    Run <code>statsgatelauncher.exe</code> to begin stats collection.
+                    No further action is necessary at this point.
+                  </li>
+                  <li class="mb-0">
+                    Each match is automatically saved as a separate <code>.binpb</code> file in one of:
+                    <ul class="mt-1 mb-0 ps-3">
+                      <li><code>Documents\My Games\Battlezone Combat Commander\statsgate</code> <span class="text-muted">(default)</span></li>
+                      <li><code>Steam\steamapps\common\BZ2R\statsgate</code> <span class="text-muted">(if using novista launch option)</span></li>
+                    </ul>
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>
