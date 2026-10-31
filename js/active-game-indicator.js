@@ -20,8 +20,9 @@
  *
  * Loaders:
  *   - data/known-hosts.json     (eager, on init) -> allowlist Set + name map
- *   - data/steamid_to_name.txt  (lazy, on first MATCH_FOUND) -> canonical
- *     name resolver for pill labels.
+ *   - data/steamid_to_name.txt  (on first MATCH_FOUND, awaited before that
+ *     render) -> host Steam name for the pill label. Label order: this
+ *     file, then known-hosts.json, then the lobby nickname, then Steam64.
  *
  * Polling:
  *   - 60s cadence always (presence-only; no fast path), never faster than
@@ -157,8 +158,8 @@
     if (steamId && canonicalNames && canonicalNames.has(steamId)) {
       return canonicalNames.get(steamId);
     }
-    if (lobbyName) return lobbyName;
     if (steamId && knownHostNames.has(steamId)) return knownHostNames.get(steamId);
+    if (lobbyName) return lobbyName;
     return steamId || 'Unknown host';
   }
 
@@ -366,9 +367,10 @@
       });
       const filtered = filterAllowlisted(result && result.sessions);
       const hasWidget = !!document.getElementById('vt-active-game');
-      // Resolve canonical host names for the pill label (widget pages only).
+      // The pill only redraws on the next poll, so the names must be in
+      // before this render or the lobby nickname sticks for 60s.
       if (hasWidget && filtered.length > 0) {
-        loadCanonicalNames();
+        await loadCanonicalNames();
       }
       activeSessions = filtered;
       errorStreak = 0;
