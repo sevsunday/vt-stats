@@ -3385,6 +3385,12 @@ Below 1280px, the grid collapses to single-col and page scrolls. The 1280px brea
 
 The Lobby Tools page is **picker-unaware** (mirrors VTSR-T leaderboard and the player/map browser pages). The dashboard's match picker has no influence on tools-page roster, balonce, wheel slices, or map-roll pools — tools is a live-data + manual-curation surface, not a corpus-aggregate view.
 
+### 16.13 Discord Time (`time/`)
+
+Sibling of Lobby Tools, opened from the Tools dropdown. A static page: the browser's own date and time fields (so a US, Canadian, German, or Australian visitor gets that system's date order and clock), one `<t:UNIX:F>` code to copy, and three quieter codes (`t` short time, `D` long date, `R` relative). The dashboard world-clock bar, under the result, shows that same instant in Los Angeles · Vancouver, Chicago, New York · Toronto, Berlin (`de-DE`, 24-hour), and Sydney (`en-AU`, day/month). `?t=<unix>` reopens the instant. Not in the pipeline cache key, picker-unaware.
+
+The Tools dropdown button keeps `data-vt-tools-link` and `vt-nav-icon-btn--tools`. The dashboard poller still pulses that button when a known-host lobby is live, and the Tools menu row tints with it. Discord Time does not.
+
 ## 17. Models Browser (`models/`)
 
 The project's **eighth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.

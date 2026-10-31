@@ -66,7 +66,8 @@ SITE_URL = "https://vtstats.bz"
 # v11 adds ODF Guide to that dropdown.
 # v12 replaces the directory chip rows with Any-default dropdowns.
 # v13 adds Weapons (the /weapons/ Weapons Lab) to the ODF dropdown.
-MAP_TEMPLATE_VERSION = 15
+# v16 turns the Tools link into a dropdown (Tools, Discord Time).
+MAP_TEMPLATE_VERSION = 16
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently

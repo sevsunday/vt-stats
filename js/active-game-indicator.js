@@ -11,7 +11,8 @@
  *    show, torn down on hide).
  *
  *  - Flips data-vt-tools-live="0|1" on the dashboard's [data-vt-tools-link]
- *    so the Tools link can pulse when a known-host lobby is active.
+ *    so the Tools dropdown button can pulse when a known-host lobby is active.
+ *    The Tools menu row picks up the same flag; Discord Time does not.
  *
  * Does nothing on pages without #vt-active-game (early-return in init).
  * Self-contained: bootstraps on DOMContentLoaded, exposes nothing on

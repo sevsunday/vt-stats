@@ -126,12 +126,24 @@
               <li><a class="dropdown-item" href="elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
             </ul>
           </div>
-          <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
-             data-vt-tools-link data-vt-tools-live="0"
-             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
-             aria-label="Tools">
-            <i class="bi bi-controller me-1"></i>Tools
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
+                    data-bs-toggle="dropdown" data-bs-auto-close="true"
+                    data-vt-tools-link data-vt-tools-live="0"
+                    title="Lobby tools and Discord timestamps"
+                    aria-label="Tools">
+              <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="tools/" data-vt-tools-item
+                     title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
+                <i class="bi bi-controller me-2"></i>Tools
+              </a></li>
+              <li><a class="dropdown-item" href="time/">
+                <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+            </ul>
+          </div>
 
           <!-- Relocated into the Settings gear by js/cursor-settings.js. -->
           <button class="vt-nav-icon-btn" id="share-url-btn" hidden data-vt-page-control
@@ -2366,7 +2378,7 @@
        BZ2 lobby via window.BZ2API every 60s and surfaces a pulsing LIVE
        pill + Game Watch iframe modal whenever a session hosted by an
        allowlisted Steam64 (data/known-hosts.json) is live. Also flips the
-       dashboard Tools link's data-vt-tools-live attribute when the same
+       dashboard Tools dropdown's data-vt-tools-live attribute when the same
        condition holds. Early-returns on pages without #vt-active-game. -->
   <script src="js/active-game-indicator.js"></script>
 

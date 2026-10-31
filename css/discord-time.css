@@ -1,0 +1,89 @@
+/* Discord Time. The card, the form fields, and the world-clock bar are
+   the shared components. These rules only let the longer city labels
+   (a short date plus "Los Angeles · Vancouver") wrap inside the card.
+   The dashboard bar is unchanged. */
+
+.vt-time-step-title {
+    color: var(--kb-primary);
+}
+
+.vt-time-step + .vt-time-step {
+    border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+}
+
+.vt-time-now {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8125rem;
+    line-height: 1.2;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+}
+
+.vt-time-now:hover,
+.vt-time-now:focus-visible {
+    color: var(--kb-text-primary);
+}
+
+.vt-time-now:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
+}
+
+.vt-discord-elsewhere.vt-world-clocks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    width: auto;
+    border: 0;
+    border-radius: 0;
+}
+
+.vt-discord-elsewhere .vt-world-clock {
+    flex: 1 1 9.5rem;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    white-space: normal;
+    text-align: center;
+    margin: 0;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    border-radius: 0.85rem;
+    background: color-mix(in oklab, var(--kb-text-primary) 4%, transparent);
+}
+
+.vt-discord-elsewhere .vt-world-clock:last-child {
+    border-right: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+}
+
+.vt-discord-elsewhere .vt-world-clock--local {
+    background: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+}
+
+.vt-discord-elsewhere .vt-world-clock-place {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-wrap: nowrap;
+    row-gap: 0.05rem;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.vt-discord-elsewhere .vt-world-clock-city,
+.vt-discord-elsewhere .vt-world-clock-offset {
+    white-space: nowrap;
+}
+
+.vt-discord-elsewhere .vt-world-clock-city::before,
+.vt-discord-elsewhere .vt-world-clock-offset::before {
+    content: none;
+    margin: 0;
+}

@@ -64,7 +64,8 @@ SITE_URL = "https://vtstats.bz"
 # v22 drops the VTSR-T directory sorts (adds VTSR-C), loads
 # js/vtsr-display.js, and takes VTSR-T numbers out of the OG description.
 # v23 re-renders every stub for the six-tier ladder (Tier 0 at the top).
-PLAYER_TEMPLATE_VERSION = 23
+# v24 turns the Tools link into a dropdown (Tools, Discord Time).
+PLAYER_TEMPLATE_VERSION = 24
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

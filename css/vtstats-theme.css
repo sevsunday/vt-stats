@@ -1317,13 +1317,14 @@ body::before {
 
 /* ============================================================================
    TOOLS TOPNAV PULSE
-   Slim "live activity" pulse on the `Tools` topnav link, fired by the same
-   js/active-game-indicator.js poller. Markup contract: any `<a>` with
+   Slim "live activity" pulse on the Tools dropdown button, fired by
+   js/active-game-indicator.js. Markup contract: the button with
    `data-vt-tools-link` carries `data-vt-tools-live="0|1"`. `1` triggers
-   the pulse animation; `0` is the resting state. Same animation as the
-   LIVE pill dot above so the visual language stays consistent across
-   pages (only index.html has both; other pages just have the Tools-link
-   pulse since the widget DOM is absent).
+   the pulse animation; `0` is the resting state. The same flag tints the
+   Tools menu row (not Discord Time) while the menu is open. Same
+   animation as the LIVE pill dot above so the visual language stays
+   consistent. Only index.html loads the poller; other shells keep the
+   attribute so the markup matches.
    ============================================================================ */
 
 .vt-nav-icon-btn--tools[data-vt-tools-live="1"] {
@@ -1347,6 +1348,11 @@ body::before {
     .vt-nav-icon-btn--tools[data-vt-tools-live="1"] {
         animation: none;
     }
+}
+
+.vt-nav-dropdown:has(.vt-nav-icon-btn--tools[data-vt-tools-live="1"]) .dropdown-item[data-vt-tools-item]:not(.active),
+.vt-nav-dropdown:has(.vt-nav-icon-btn--tools[data-vt-tools-live="1"]) .dropdown-item[data-vt-tools-item]:not(.active) i {
+    color: var(--kb-success);
 }
 
 /* ============================================================================
