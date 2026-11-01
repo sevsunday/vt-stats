@@ -65,7 +65,12 @@ SITE_URL = "https://vtstats.bz"
 # js/vtsr-display.js, and takes VTSR-T numbers out of the OG description.
 # v23 re-renders every stub for the six-tier ladder (Tier 0 at the top).
 # v24 turns the Tools link into a dropdown (Tools, Discord Time).
-PLAYER_TEMPLATE_VERSION = 24
+# v25 = the Players hub + profile rework: hub tab nav / filter bar mount /
+# Leaderboards-Commanders-Trends-Highlights panes on the directory, the
+# Performance / Trends profile tabs (Rating, Axes, Rivals retired), and
+# the js/perf-axes.js + js/perf-ui.js + js/highlights-render.js +
+# js/players-tab.js + js/players-hub.js script set.
+PLAYER_TEMPLATE_VERSION = 25
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

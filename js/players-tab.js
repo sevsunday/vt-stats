@@ -1,11 +1,17 @@
 /**
- * All Matches → Experimental tab.
+ * Players hub → Trends: schedule strength, quarterly form, climbers.
+ * (Formerly the dashboard's All Matches → Experimental tab.)
  *
  * Display-only join. Recorded games use the pre-match rating. F9bomber
  * ledger games use each opponent's current VTSR, because the ledger has
- * no thug rating from the day the game was played. Corpus-wide: the match
- * picker does not change these figures. Nothing here is written back, and
- * this file does not feed VTAggregate, elo.py, or elo_commander.py.
+ * no thug rating from the day the game was played. Corpus-wide: the hub
+ * filter bar does not change these figures. Nothing here is written back,
+ * and this file does not feed VTAggregate, elo.py, or elo_commander.py.
+ *
+ * Mounts into the first element carrying `data-vt-players-tab` (the
+ * hub's Trends pane; legacy id `all-tab-players` still resolves). Data
+ * paths are prefixed with `window.__vtDataPrefix` ('' on the dashboard,
+ * '../' on /player/, '../../' on a pre-gen stub).
  *
  * Depends on charts.js globals (activeCharts, glassTooltipConfig,
  * getThemeColors, applyThemeDefaults, withAlpha, Chart).
@@ -14,6 +20,13 @@
   const SAMPLE_FLOOR = 8;
   const THIN_QUARTER = 3;
   const TEAM_LEDGER_SIZES = { '3v3': true, '4v4': true, '5v5': true };
+
+  function rootEl() {
+    return document.querySelector('[data-vt-players-tab]') || document.getElementById('all-tab-players');
+  }
+  function dataPath(rel) {
+    return (window.__vtDataPrefix || '') + rel;
+  }
 
   const state = {
     role: 'commander',
@@ -382,12 +395,12 @@
     if (built) return Promise.resolve(built);
     if (buildPromise) return buildPromise;
     buildPromise = Promise.all([
-      window.__vtContributions ? Promise.resolve(window.__vtContributions) : fetchJson('data/processed/match_contributions.json'),
-      window.__vtEloHistory !== undefined ? Promise.resolve(window.__vtEloHistory) : fetchJson('data/processed/elo_history.json'),
-      window.__vtEloCommanderHistory !== undefined ? Promise.resolve(window.__vtEloCommanderHistory) : fetchJson('data/processed/elo_commander_history.json'),
-      window.__vtCmdrElo !== undefined ? Promise.resolve(window.__vtCmdrElo) : fetchJson('data/processed/elo_commander_current.json'),
-      window.__vtElo !== undefined ? Promise.resolve(window.__vtElo) : fetchJson('data/processed/elo_current.json'),
-      fetchJson('data/external/f9_ledger.json'),
+      window.__vtContributions ? Promise.resolve(window.__vtContributions) : fetchJson(dataPath('data/processed/match_contributions.json')),
+      window.__vtEloHistory !== undefined ? Promise.resolve(window.__vtEloHistory) : fetchJson(dataPath('data/processed/elo_history.json')),
+      window.__vtEloCommanderHistory !== undefined ? Promise.resolve(window.__vtEloCommanderHistory) : fetchJson(dataPath('data/processed/elo_commander_history.json')),
+      window.__vtCmdrElo !== undefined ? Promise.resolve(window.__vtCmdrElo) : fetchJson(dataPath('data/processed/elo_commander_current.json')),
+      window.__vtElo !== undefined ? Promise.resolve(window.__vtElo) : fetchJson(dataPath('data/processed/elo_current.json')),
+      fetchJson(dataPath('data/external/f9_ledger.json')),
     ]).then(function (parts) {
       built = buildIndex(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
       return built;
@@ -832,6 +845,10 @@
 
   function playerLink(name, sid) {
     if (typeof window.vtPlayerLinkHtml === 'function') return window.vtPlayerLinkHtml(name, sid);
+    // On /player/ pages js/player.js owns the slug map + path logic.
+    if (window.VTPlayer && typeof window.VTPlayer.playerHref === 'function' && sid) {
+      return '<a href="' + esc(window.VTPlayer.playerHref(sid)) + '">' + esc(name) + '</a>';
+    }
     return esc(name);
   }
 
@@ -982,7 +999,9 @@
   }
 
   function syncPills() {
-    document.querySelectorAll('#all-tab-players [data-vt-role]').forEach(function (btn) {
+    const root = rootEl();
+    if (!root) return;
+    root.querySelectorAll('[data-vt-role]').forEach(function (btn) {
       const on = btn.getAttribute('data-vt-role') === state.role;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-checked', on ? 'true' : 'false');
@@ -1026,8 +1045,9 @@
       paintSchedule();
       return;
     }
+    const root = rootEl();
     const roleBtn = e.target.closest('[data-vt-role]');
-    if (roleBtn && roleBtn.closest('#all-tab-players')) {
+    if (roleBtn && root && root.contains(roleBtn)) {
       state.role = roleBtn.getAttribute('data-vt-role');
       syncPills();
       paintSchedule();
@@ -1036,7 +1056,7 @@
     }
     if (e.target.closest('a')) return;
     const pick = e.target.closest('[data-vt-pick]');
-    if (pick && pick.closest('#all-tab-players')) {
+    if (pick && root && root.contains(pick)) {
       closeSearch();
       selectSid(pick.getAttribute('data-vt-pick'), { sync: true });
     }
@@ -1044,7 +1064,7 @@
 
   function bind() {
     if (bound) return;
-    const root = document.getElementById('all-tab-players');
+    const root = rootEl();
     if (!root) return;
     bound = true;
     root.addEventListener('click', onRootClick);

@@ -43,7 +43,7 @@
       steam64: "76561198820311491",
       slug:    "m-s",
       name:    "M.S",
-      template_version: 24
+      template_version: 25
     };
   </script>
 </head>
@@ -151,10 +151,13 @@
 
   <main class="container-fluid px-3 px-md-4 py-4 flex-grow-1 d-none" id="vt-player-main">
 
-    <!-- Directory view (hidden under the pre-gen boot path; included
-         so the same JS code path can navigate back here without
-         requiring a second page fetch). -->
+    <!-- ============================================================== -->
+    <!-- DIRECTORY VIEW — default landing (no URL params)                -->
+    <!-- ============================================================== -->
     <section id="vt-player-directory" class="d-none">
+      <!-- Hero band: corpus-level callouts (player count, top-rated,
+           date range). Mirrors the dashboard hero typography so the
+           page feels like a sibling, not a bolt-on. -->
       <header class="vt-player-hero card mb-3">
         <div class="card-body">
           <div class="d-flex flex-wrap gap-3 align-items-baseline justify-content-between">
@@ -171,6 +174,34 @@
         </div>
       </header>
 
+      <!-- Players hub: shared perf filter bar (faction / ship / weapon /
+           role / format / period) + tab nav. The bar scopes every tab
+           through one VTAggregate.build(fileIds, {rowFilter}); state
+           lives in the URL. Rendered by js/players-hub.js. -->
+      <div class="card mb-3" id="vt-hub-filter-card">
+        <div class="card-body py-2" id="vt-hub-filter-mount"></div>
+      </div>
+      <div class="vt-tab-scroll-wrap mb-3">
+        <ul class="nav nav-pills vt-player-tabs" id="vt-hub-tabs" role="tablist">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#vt-hub-tab-players" type="button" role="tab"><i class="bi bi-people me-1"></i>Players</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#vt-hub-tab-leaderboards" type="button" role="tab"><i class="bi bi-list-ol me-1"></i>Leaderboards</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#vt-hub-tab-commanders" type="button" role="tab"><i class="bi bi-person-badge me-1"></i>Commanders</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#vt-hub-tab-trends" type="button" role="tab"><i class="bi bi-graph-up me-1"></i>Trends</button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#vt-hub-tab-highlights" type="button" role="tab"><i class="bi bi-star me-1"></i>Highlights</button></li>
+        </ul>
+      </div>
+
+      <div class="tab-content" id="vt-hub-tab-content">
+      <div class="tab-pane fade show active" id="vt-hub-tab-players" role="tabpanel">
+
+      <!-- Toolbar: search + facet chip clusters + sort + compare toggle.
+           Sticky under the navbar so it persists while the grid scrolls.
+
+           On <md the chip groups + sort + compare collapse into a
+           right-anchored Bootstrap responsive offcanvas (`.offcanvas-md`)
+           triggered by the funnel button so the sticky bar stays a
+           single row on phones. At >=md the offcanvas renders inline
+           and the layout matches the original desktop toolbar. -->
       <div class="vt-player-toolbar card mb-3" id="vt-player-toolbar">
         <div class="card-body py-2">
           <div class="d-flex flex-wrap gap-2 align-items-center">
@@ -181,18 +212,23 @@
             </div>
 
             <!-- View mode stays outside the filter drawer so it remains
-                 visible on phones. Layout only; not a filter. -->
+                 visible on phones. Layout only; not a filter.
+                 Cards = the card grid; Table = the sortable overview
+                 table (Career-Leaderboard columns + axis percentiles). -->
             <div class="btn-group btn-group-sm vt-player-view-toggle" role="group" aria-label="View mode">
               <button type="button" class="btn vt-player-view-btn" data-view="grid"
-                      aria-pressed="true" title="Grid view" aria-label="Grid view">
-                <i class="bi bi-grid-3x3-gap-fill"></i>
+                      aria-pressed="true" title="Cards" aria-label="Cards view">
+                <i class="bi bi-grid-3x3-gap-fill"></i><span class="d-none d-sm-inline ms-1">Cards</span>
               </button>
               <button type="button" class="btn vt-player-view-btn" data-view="list"
-                      aria-pressed="false" title="List view" aria-label="List view">
-                <i class="bi bi-list-ul"></i>
+                      aria-pressed="false" title="Table" aria-label="Table view">
+                <i class="bi bi-table"></i><span class="d-none d-sm-inline ms-1">Table</span>
               </button>
             </div>
 
+            <!-- Mobile-only funnel button: opens the filter offcanvas.
+                 Active-filter count badge is populated by
+                 updateFilterCount() in js/player.js. -->
             <button type="button" class="vt-player-filter-toggle d-md-none ms-auto"
                     data-bs-toggle="offcanvas" data-bs-target="#vt-player-filter-offcanvas"
                     aria-controls="vt-player-filter-offcanvas" aria-label="Open filters">
@@ -200,6 +236,9 @@
               <span class="vt-player-filter-count" id="vt-player-filter-count" hidden>0</span>
             </button>
 
+            <!-- Responsive offcanvas: drawer on <md, inline flex row on
+                 >=md. All chip / select / button IDs match the original
+                 toolbar so existing js/player.js wiring is untouched. -->
             <div class="offcanvas-md offcanvas-end vt-player-filter-panel"
                  tabindex="-1" id="vt-player-filter-offcanvas"
                  aria-labelledby="vt-player-filter-offcanvas-label">
@@ -213,17 +252,21 @@
                         aria-label="Close"></button>
               </div>
               <div class="offcanvas-body">
+                <!-- Tier chips. Multi-select; chips toggle a pill color
+                     in the assigned tier token. Empty selection = no filter. -->
                 <div class="vt-chip-group" role="group" aria-label="Tier filter" id="vt-player-tier-chips">
                   <span class="vt-chip-group-label">Tier</span>
+                  <!-- Chips injected at boot (Tier I–V + Provisional). -->
                 </div>
 
-                <div class="vt-chip-group" role="group" aria-label="Role bias" id="vt-player-role-chips">
-                  <span class="vt-chip-group-label">Role</span>
-                  <button type="button" class="vt-chip" data-role="any" data-selected="true">Any</button>
-                  <button type="button" class="vt-chip" data-role="commander">Commander-leaning</button>
-                  <button type="button" class="vt-chip" data-role="thug">Thug-leaning</button>
+                <!-- Roster scope: ranked players only (default) or also
+                     unranked players above the career floor in scope. -->
+                <div class="form-check form-switch vt-player-unranked-switch" title="Also list players who are not on the VTSR-T or VTSR-C ladder but have enough matches in the current scope">
+                  <input class="form-check-input" type="checkbox" role="switch" id="vt-player-unranked-toggle">
+                  <label class="form-check-label small" for="vt-player-unranked-toggle">Include unranked</label>
                 </div>
 
+                <!-- Activity bucket. Single-select. -->
                 <div class="vt-chip-group" role="group" aria-label="Activity" id="vt-player-activity-chips">
                   <span class="vt-chip-group-label">Activity</span>
                   <button type="button" class="vt-chip" data-activity="any">All</button>
@@ -240,9 +283,12 @@
                     <option value="matches-desc">Matches played</option>
                     <option value="last-desc">Most recent activity</option>
                   </select>
+
+                  <!-- Compare mode toggle. Wired in Phase 7; renders the
+                       selection chrome on cards + sticky action bar. -->
                   <button type="button" id="vt-player-compare-toggle"
                           class="btn btn-sm vt-player-compare-toggle"
-                          title="Select up to 4 players to compare"
+                          title="Select up to 5 players to compare"
                           aria-pressed="false">
                     <i class="bi bi-bar-chart-steps me-1"></i>Compare
                   </button>
@@ -250,11 +296,14 @@
               </div>
             </div>
           </div>
+
         </div>
       </div>
 
+      <!-- Card grid. `data-empty` hides the grid for empty-state. -->
       <div class="vt-player-grid" id="vt-player-grid"></div>
 
+      <!-- Empty state — shown when no players match the active filters. -->
       <div class="vt-player-empty text-center text-secondary py-5" id="vt-player-empty" hidden>
         <i class="bi bi-search vt-player-empty-icon"></i>
         <p class="mt-3 mb-2">No players match the current filters.</p>
@@ -263,12 +312,14 @@
         </button>
       </div>
 
+      <!-- Sticky compare action bar (Phase 7 wiring; injected at bottom
+           of viewport when compare-mode is on AND >=1 selection). -->
       <div class="vt-player-compare-bar" id="vt-player-compare-bar" hidden>
         <div class="container-fluid px-3 px-md-4">
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <strong class="me-2">Compare:</strong>
             <div class="d-flex flex-wrap gap-2 align-items-center" id="vt-player-compare-chips"></div>
-            <span class="text-secondary small ms-2" id="vt-player-compare-count">0 of 4 selected</span>
+            <span class="text-secondary small ms-2" id="vt-player-compare-count">0 of 5 selected</span>
             <div class="ms-auto d-flex gap-2">
               <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-player-compare-clear">
                 <i class="bi bi-x-circle me-1"></i>Clear
@@ -280,32 +331,154 @@
           </div>
         </div>
       </div>
+      </div><!-- /#vt-hub-tab-players -->
+
+      <!-- Hub tabs rendered by js/players-hub.js on first activation.
+           Leaderboards = Career Leaderboard + Ship specialists + Role
+           boards + VTSR-T ladder teaser; Commanders = cohort strip,
+           leaderboard, Economy Leaders, H2H, faction picks; Trends =
+           absolute-stat quarterly trends, ship & faction meta,
+           activity, schedule strength / quarterly form / climbers
+           (js/players-tab.js); Highlights = career cards + global
+           rivalries (js/highlights-render.js). -->
+      <div class="tab-pane fade" id="vt-hub-tab-leaderboards" role="tabpanel"></div>
+      <div class="tab-pane fade" id="vt-hub-tab-commanders" role="tabpanel"></div>
+      <div class="tab-pane fade" id="vt-hub-tab-trends" role="tabpanel">
+        <div id="vt-hub-trends-mount"></div>
+        <!-- js/players-tab.js mounts schedule strength / quarterly form
+             into these two ids (kept from the dashboard so the module
+             moves with minimal edits). -->
+        <div class="card mb-4" id="section-players-schedule">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-diagram-2 me-2"></i>Strength of schedule</h5>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Schedule role">
+                <li class="nav-item">
+                  <button type="button" class="nav-link active" data-vt-role="commander" role="radio" aria-checked="true">Commanders</button>
+                </li>
+                <li class="nav-item">
+                  <button type="button" class="nav-link" data-vt-role="thug" role="radio" aria-checked="false">Thugs</button>
+                </li>
+              </ul>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="vt-players-show-small">
+                <label class="form-check-label small" for="vt-players-show-small">Show under 8 matches</label>
+              </div>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="vt-players-show-unranked">
+                <label class="form-check-label small" for="vt-players-show-unranked">Show unranked</label>
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            <p class="text-secondary small">Who has faced stronger or weaker opposition. The default bar is how much the opposing thugs cost in win chance, measured against a typical schedule in this view. Harder schedules sit to the right. Choosing another column header redraws the bar from that column. Thug gap is how much own thugs moved the win chance against opposing thugs, with that player left out of their own side. On the chart, a negative gap points right, because opposing thugs were stronger. VTSR-T shows as win chance or a band, never as a number; VTSR-C keeps its numbers. Recorded games use the rating from that day. Community games use each opponent's rating today. Only team games (3 or more a side) count; 1v1s and 2v2s have their own ladders. The list starts as the ranked ladder for that pill. This is the full corpus; the hub filter bar does not change it.</p>
+            <div class="vt-players-schedule-scroll">
+              <div class="chart-container" id="vt-players-schedule-chart-wrap">
+                <canvas id="vt-players-schedule-chart"></canvas>
+              </div>
+            </div>
+            <p class="text-secondary small d-none mb-2" id="vt-players-schedule-empty"></p>
+            <div class="table-responsive vt-sticky-thead-card">
+              <table id="vt-players-schedule-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
+                <thead>
+                  <tr>
+                    <th data-vt-sort="name">Player</th>
+                    <th data-vt-sort="matches" class="text-end">Matches</th>
+                    <th data-vt-sort="oppThug" class="text-end is-sorted" title="Win chance against a typical schedule: negative means the opposing thugs were stronger than usual">Opp. thugs</th>
+                    <th data-vt-sort="gap" class="text-end" title="Win chance from own thugs against opposing thugs">Thug gap</th>
+                    <th data-vt-sort="oppCmdr" class="text-end">Opp. cmdr VTSR-C</th>
+                    <th data-vt-sort="own" class="text-end" id="vt-players-own-heading">Current VTSR-C</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="text-secondary small mb-0 mt-3">Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>. A row under 8 matches is hidden until the switch above is on.</p>
+          </div>
+        </div>
+
+        <div class="card mb-4" id="section-players-form">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Form over time</h5>
+          </div>
+          <div class="card-body">
+            <div class="vt-players-search position-relative mb-3">
+              <label class="form-label small text-secondary mb-1" for="vt-players-search">Player</label>
+              <input type="search" class="form-control form-control-sm" id="vt-players-search" placeholder="Find a player" autocomplete="off" aria-autocomplete="list" aria-controls="vt-players-search-menu">
+              <div class="list-group vt-players-search-menu d-none" id="vt-players-search-menu" role="listbox"></div>
+            </div>
+            <div id="vt-players-form-empty">
+              <p class="text-secondary small">Pick a player to see determined win rate by quarter, as commander and as a thug. The largest rating climbs over the last two quarters are below. Each name has at least 8 matches in that role under the format selected above.</p>
+              <div class="row g-4">
+                <div class="col-md-6">
+                  <h6 class="text-secondary">VTSR-C climb</h6>
+                  <div id="vt-players-climb-c"></div>
+                </div>
+                <div class="col-md-6">
+                  <h6 class="text-secondary">VTSR-T climb</h6>
+                  <div id="vt-players-climb-t"></div>
+                </div>
+              </div>
+            </div>
+            <div id="vt-players-form-body" class="d-none">
+              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <h6 class="mb-0" id="vt-players-form-name"></h6>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-players-form-clear">Clear</button>
+              </div>
+              <h6 class="text-secondary">As commander</h6>
+              <div class="chart-container chart-container-sm mb-3">
+                <canvas id="vt-players-cmdr-chart"></canvas>
+              </div>
+              <p class="text-secondary small d-none" id="vt-players-cmdr-empty">No determined commander games for this player.</p>
+              <h6 class="text-secondary">As thug</h6>
+              <div class="chart-container chart-container-sm mb-2">
+                <canvas id="vt-players-thug-chart"></canvas>
+              </div>
+              <p class="text-secondary small d-none" id="vt-players-thug-empty">No determined thug games for this player.</p>
+              <p class="text-secondary small mb-0 mt-2"><span class="vt-players-thin-mark" aria-hidden="true"></span> A hollow bar is a quarter with one or two games. The line is the rating at the end of that quarter (VTSR-T on a tier axis). VTSR-C moves on community duels. VTSR-T holds through a quarter that is only community games. Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane fade" id="vt-hub-tab-highlights" role="tabpanel"></div>
+      </div><!-- /#vt-hub-tab-content -->
     </section>
 
-    <!-- Single-player view (default landing for pre-gen stubs) -->
+    <!-- ============================================================== -->
+    <!-- SINGLE-PLAYER VIEW — populated via ?p=<steam64> or ?slug=<slug> -->
+    <!-- ============================================================== -->
     <section id="vt-player-single" class="d-none">
-      <!-- Breadcrumb back-link to the player directory. Static href —
-           we're at /player/<slug>/ so `../` lands on /player/. The link
-           lives INSIDE the section so it auto-hides whenever
-           showSection() switches away from single-player view; no JS
-           wiring needed. -->
+      <!-- Breadcrumb back-link. Static href — `./` lands on /player/
+           which always resolves to the directory view since we strip
+           ?p / ?slug / ?compare on the way. The link lives INSIDE the
+           section so it auto-hides whenever showSection() switches
+           away from single-player view; no JS wiring needed. -->
       <a href="../" class="vt-player-back-link mb-3" aria-label="Back to all players">
         <i class="bi bi-arrow-left"></i><span>All players</span>
       </a>
+      <!-- Hero card -->
       <header class="vt-player-single-hero card mb-3" id="vt-player-single-hero"></header>
-      <ul class="nav nav-pills vt-player-tabs mb-3" id="vt-player-tabs" role="tablist"></ul>
+
+      <!-- Tabs -->
+      <ul class="nav nav-pills vt-player-tabs mb-3" id="vt-player-tabs" role="tablist">
+        <!-- Tab buttons injected by js/player.js so the markup stays
+             in lockstep with the renderers (and Phase-4..6 tabs can be
+             added without HTML churn). -->
+      </ul>
+
       <div class="tab-content" id="vt-player-tab-content">
         <div class="tab-pane fade show active" id="vt-player-tab-overview" role="tabpanel"></div>
-        <div class="tab-pane fade" id="vt-player-tab-rating" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-performance" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-trends" role="tabpanel"></div>
         <div class="tab-pane fade" id="vt-player-tab-commander" role="tabpanel"></div>
-        <div class="tab-pane fade" id="vt-player-tab-axes" role="tabpanel"></div>
         <div class="tab-pane fade" id="vt-player-tab-highlights" role="tabpanel"></div>
-        <div class="tab-pane fade" id="vt-player-tab-rivals" role="tabpanel"></div>
         <div class="tab-pane fade" id="vt-player-tab-loadout" role="tabpanel"></div>
       </div>
     </section>
 
-    <!-- Compare view -->
+    <!-- ============================================================== -->
+    <!-- COMPARE VIEW — populated via ?compare=<slug,slug,...> (Phase 7) -->
+    <!-- ============================================================== -->
     <section id="vt-player-compare" class="d-none">
       <a href="../" class="vt-player-back-link mb-3" aria-label="Back to all players">
         <i class="bi bi-arrow-left"></i><span>All players</span>
@@ -314,7 +487,7 @@
       <div id="vt-player-compare-body"></div>
     </section>
 
-    <!-- Error fallback -->
+    <!-- Error state (player not found, data load failure, etc.) -->
     <section id="vt-player-error" class="d-none">
       <div class="card">
         <div class="card-body text-center py-5">
@@ -346,10 +519,10 @@
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline-secondary" data-pref="grid">
-              <i class="bi bi-grid-3x3-gap-fill me-1"></i>Default to Gallery
+              <i class="bi bi-grid-3x3-gap-fill me-1"></i>Default to Cards
             </button>
             <button type="button" class="btn btn-primary" data-pref="list">
-              <i class="bi bi-list-ul me-1"></i>Default to List
+              <i class="bi bi-table me-1"></i>Default to Table
             </button>
           </div>
         </div>
@@ -358,7 +531,9 @@
 
   </main>
 
-  <!-- Shared vendor bundle (paths relative to /player/<slug>/) -->
+  <!-- Shared vendor bundle — same load order as index.html so the
+       single-player tabs (Phase 4–6) can call into renderPlayerRadar /
+       getPlayerColor as if running under the dashboard. -->
   <script src="../../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="../../vendor/chartjs/chart.umd.min.js"></script>
   <script src="../../vendor/chartjs/hammer.min.js"></script>
@@ -370,9 +545,17 @@
   <script src="../../js/all-matches-aggregator.js"></script>
   <script src="../../js/video-links.js"></script>
   <script src="../../js/vtsr-display.js"></script>
+  <!-- Descriptive performance axes: data layer + shared UI (filter bar,
+       radar, axis cards). Loaded before player.js / players-hub.js. -->
+  <script src="../../js/perf-axes.js"></script>
+  <script src="../../js/perf-ui.js"></script>
+  <!-- Shared Highlights renderer (career cards on the hub). -->
+  <script src="../../js/highlights-render.js"></script>
+  <!-- Schedule strength / quarterly form / climbers (hub Trends tab). -->
+  <script src="../../js/players-tab.js"></script>
   <script src="../../js/player.js"></script>
+  <script src="../../js/players-hub.js"></script>
 
-  <!-- Site-wide custom cursor + Settings gear. -->
   <script src="../../js/cursor-settings.js"></script>
 </body>
 </html>

@@ -181,9 +181,21 @@
       econ_cancels: 0,
       econ_float_sum: 0,           // Σ mean_float_ratio (averaged at emit)
       econ_peak_pools: 0,          // career max
+      econ_peak_pools_sum: 0,      // Σ per-match peak pools (mean at emit)
       econ_upgrades: 0,
       econ_rebuild_latency_sum: 0, // Σ per-match median latencies
       econ_rebuild_latency_n: 0,
+
+      // ---- Descriptive performance axes (scripts/perf_axes.py) ----
+      // Per-axis Σ z / Σ raw / n over this player's rated rows in scope.
+      // Display-only: powers the player-page Performance tab + hub
+      // percentiles. Never a rating input.
+      perf_axes: Object.create(null),   // axis -> { sum_z, sum_raw, n }
+      // Per-match highlight awards won / runner-up, keyed by category.
+      // Fed from the contribution's `highlight_awards` slice.
+      award_counts: Object.create(null), // category -> { wins, runner_ups, last_win_id, last_win_date }
+      // Per-format match counts (manifest/contribution `match_format`).
+      format_counts: { '1v1': 0, '2v2': 0, team: 0, other: 0 },
     };
   }
 
@@ -364,6 +376,14 @@
     const minMatchesThreshold = Number.isFinite(opts.minMatchesThreshold)
       ? Math.max(0, Math.floor(opts.minMatchesThreshold))
       : MIN_CAREER_MATCHES;
+    // Optional per-row predicate `(row, entry) -> boolean`. Rows it
+    // rejects are omitted from every per-player tally (career, commander
+    // econ, awards) exactly like the exclusion flags -- pure omission.
+    // Match-level rollups (meta, faction, maps, weapon meta, rivalries)
+    // are NOT affected: they describe the match, not the player. Used by
+    // the player pages / Players hub for faction / ship / weapon / role
+    // scoping; the dashboard never passes one.
+    const rowFilter = typeof opts.rowFilter === 'function' ? opts.rowFilter : null;
     const career = new Map();        // player_id -> career bucket
     const globalWeapon = new Map();  // weapon name -> { dealt, shots, hits }
     const globalRivalry = new Map(); // shooter -> Map<victim, dmg>
@@ -578,6 +598,9 @@
         // for this player. Pipeline-emitted flags; legacy contributions
         // default all three to falsy and pass through unchanged.
         if (p.is_campod || p.is_low_activity || p.is_zero_damage) continue;
+        // Caller-supplied scope (faction / ship / weapon / role). Same
+        // pure-omission semantics as the flags above.
+        if (rowFilter && !rowFilter(p, m)) continue;
         let c = career.get(key);
         if (!c) {
           c = newCareerBucket();
@@ -775,6 +798,65 @@
         if (c.best_match == null || (p.dealt || 0) > c.best_match.dealt) {
           c.best_match = { id: m.id, map: m.map, dealt: p.dealt || 0 };
         }
+
+        // Descriptive performance axes (scripts/perf_axes.py). The block
+        // is null on excluded rows (already skipped above) and absent on
+        // pre-axes contributions. Σ z / Σ raw / n per axis; means at emit.
+        const pa = p.perf_axes;
+        if (pa && typeof pa === 'object') {
+          for (const axis in pa) {
+            const d = pa[axis];
+            if (!d || typeof d.z !== 'number') continue;
+            let acc = c.perf_axes[axis];
+            if (!acc) { acc = { sum_z: 0, sum_raw: 0, n: 0 }; c.perf_axes[axis] = acc; }
+            acc.sum_z   += d.z;
+            acc.sum_raw += (typeof d.raw === 'number' ? d.raw : 0);
+            acc.n       += 1;
+          }
+        }
+
+        // Format split ("1v1" / "2v2" / "team" / "other"; missing -> other).
+        const fmt = m.match_format;
+        if (fmt && c.format_counts[fmt] != null) c.format_counts[fmt] += 1;
+        else c.format_counts.other += 1;
+      }
+
+      // ---- Highlight awards cabinet ----
+      // Per-match award slice (contribution `highlight_awards`). Credit
+      // wins / runner-ups to the career bucket by Steam64 (name fallback
+      // for legacy rows). Pair-type winners carry a null Steam64 and
+      // are skipped. A player whose row was omitted this match (flags /
+      // rowFilter) has no bucket yet and gets no credit -- same
+      // pure-omission contract as every other per-player tally.
+      for (const aw of (m.highlight_awards || [])) {
+        if (!aw || !aw.category) continue;
+        const credit = (steam64, name, field) => {
+          let cb = null;
+          if (steam64) cb = career.get(`s64:${steam64}`);
+          if (!cb && name) {
+            for (const [, bucket] of career) {
+              if (bucket.name === name) { cb = bucket; break; }
+            }
+          }
+          if (!cb) return;
+          // Only credit buckets that actually counted THIS match (the
+          // player may have been filtered out of it by rowFilter).
+          const rowHere = lb.find(r => r && (steam64 ? String(r.steam64 || '') === String(steam64) : r.name === name));
+          if (!rowHere || rowHere.is_campod || rowHere.is_low_activity || rowHere.is_zero_damage) return;
+          if (rowFilter && !rowFilter(rowHere, m)) return;
+          let ac = cb.award_counts[aw.category];
+          if (!ac) {
+            ac = { wins: 0, runner_ups: 0, last_win_id: null, last_win_date: null };
+            cb.award_counts[aw.category] = ac;
+          }
+          ac[field] += 1;
+          if (field === 'wins' && (!ac.last_win_date || (m.date || '') >= ac.last_win_date)) {
+            ac.last_win_id = m.id;
+            ac.last_win_date = m.date || null;
+          }
+        };
+        if (aw.winner_steam64 || aw.winner_name) credit(aw.winner_steam64, aw.winner_name, 'wins');
+        if (aw.runner_up_name) credit(null, aw.runner_up_name, 'runner_ups');
       }
 
       // ---- v17: commander economy career rollup ----
@@ -793,6 +875,7 @@
           const s64 = String(slice.steam64);
           const lbRow = lb.find(p => p && String(p.steam64 || '') === s64);
           if (!lbRow || lbRow.is_campod || lbRow.is_low_activity || lbRow.is_zero_damage) continue;
+          if (rowFilter && !rowFilter(lbRow, m)) continue;
           const cb = career.get(`s64:${s64}`);
           if (!cb) continue;
           if (m.has_resource_data) {
@@ -806,6 +889,7 @@
             if ((slice.peak_pool_count || 0) > cb.econ_peak_pools) {
               cb.econ_peak_pools = slice.peak_pool_count;
             }
+            cb.econ_peak_pools_sum += slice.peak_pool_count || 0;
           }
           if (m.has_build_data) {
             cb.build_matches += 1;
@@ -1022,6 +1106,22 @@
       const pvpAcc = c.total_shots_fired > 0
         ? c.total_pvp_shots_hit / c.total_shots_fired : 0;
 
+      // Descriptive axes: means per axis (sorted keys for determinism).
+      const perfAxesSummary = {};
+      for (const axis of Object.keys(c.perf_axes).sort()) {
+        const a = c.perf_axes[axis];
+        if (!a || a.n <= 0) continue;
+        perfAxesSummary[axis] = {
+          mean_z:   r3(a.sum_z / a.n),
+          mean_raw: Math.round((a.sum_raw / a.n + Number.EPSILON) * 10000) / 10000,
+          n:        a.n,
+        };
+      }
+      const awardCounts = {};
+      for (const cat of Object.keys(c.award_counts).sort()) {
+        awardCounts[cat] = Object.assign({}, c.award_counts[cat]);
+      }
+
       careerStats.push({
         player_id: c.player_id,
         name:                c.name,
@@ -1089,6 +1189,19 @@
         mean_weapons_used:   r1(meanWeaponsUsed),
         ...movementFields,
         ...targetLockFields,
+        // Descriptive performance axes: per-axis { mean_z, mean_raw, n }
+        // over this player's rated rows in scope. Display-only.
+        perf_axes:           perfAxesSummary,
+        // Highlight awards cabinet: category -> { wins, runner_ups,
+        // last_win_id, last_win_date }. Display-only.
+        award_counts:        awardCounts,
+        // Per-format appearance counts (1v1 / 2v2 / team / other).
+        format_counts:       Object.assign({}, c.format_counts),
+        // Win / loss split (determined-winner matches only) so the
+        // player pages can show a W-L without re-walking contributions.
+        wins:                { total: c.wins.total, as_commander: c.wins.as_commander, as_thug: c.wins.as_thug },
+        losses:              { total: c.losses.total, as_commander: c.losses.as_commander, as_thug: c.losses.as_thug },
+        matches_with_determined_winner: c.matches_with_determined_winner,
       });
     }
     // Stable sort matches the Python pipeline: dealt desc, name asc.
@@ -1232,6 +1345,16 @@
         avg_float_ratio: c.econ_matches > 0
           ? r3(c.econ_float_sum / c.econ_matches) : null,
         peak_pools: c.econ_matches > 0 ? c.econ_peak_pools : null,
+        // Mean per-match peak pools (the per-match average the player
+        // page econ block shows; `peak_pools` stays the career max).
+        avg_peak_pools: c.econ_matches > 0 ? r2(c.econ_peak_pools_sum / c.econ_matches) : null,
+        // Per-match averages of the summed econ fields, so consumers can
+        // show averages without re-deriving the denominators.
+        avg_scrap_income: c.econ_matches > 0 ? r1(c.econ_scrap_income / c.econ_matches) : null,
+        avg_income_loose: c.econ_matches > 0 ? r1(c.econ_income_loose / c.econ_matches) : null,
+        avg_ships_built: c.build_matches > 0 ? r2(c.econ_ships_built / c.build_matches) : null,
+        avg_combat_ship_value: c.build_matches > 0 ? r1(c.econ_combat_ship_value / c.build_matches) : null,
+        avg_scrap_spent: c.build_matches > 0 ? r1(c.econ_scrap_spent_units / c.build_matches) : null,
         avg_rebuild_latency_sec: c.econ_rebuild_latency_n > 0
           ? r1(c.econ_rebuild_latency_sum / c.econ_rebuild_latency_n) : null,
       });

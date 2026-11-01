@@ -35,8 +35,11 @@ scripts/process_stats.py              Python pipeline
 data/processed/                       Pre-computed JSON consumed by the browser
         ├── matches.json                    Match manifest (drives the picker)
         ├── <match_id>.json                 Per-match aggregates + positioning + odf_map
-        └── match_contributions.json        Slim per-match contributions for the
-                                            client-side All Matches aggregator
+        ├── match_contributions.json        Slim per-match contributions for the
+        │                                   client-side aggregator (+ per-row perf_axes,
+        │                                   per-match highlight_awards)
+        └── ship_names.json                 {odf_stem: unitName} labels for the raw
+                                            loadout stems (display-only)
         │
         ▼
 index.html + JS                       Dashboard renders charts, tables, replay, positioning
@@ -581,7 +584,7 @@ Implementation lives in `js/charts-radar.js`: `_safeRatio`, `_percentile`, `_fin
 | single | Overview player profile card | Unfiltered `currentData` so the ghost median reflects the whole match roster | N/A — follows the selected player |
 | compare | Rivalries tab (`#section-rivalry-radar`) | Client-filtered `data` | Click a top-rivalry card to drill in (default = `top_rivalries[0]`); **Custom...** reveals two dropdowns for arbitrary pairs. On filter change the selection reconciles against the filtered roster with fallback to the first visible `top_rivalries[]` entry |
 | team | Combat tab (`#section-faction-radar`) | Client-filtered `data` | Aggregated from `faction_totals` + per-faction leaderboard subsets. Mobility = mean `activity_score` across faction members with positioning data; T-Key Usage = mean `target_lock_pct` across the same subset |
-| career | All Matches tab (`#section-career-radar`) | In-memory aggregate's `career_stats[]` (built client-side by `VTAggregate.build()` from `match_contributions.json`) | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. A separate **Totals \| Per match** segmented toggle on the card header switches the scale of axes 1 (Damage Dealt), 3 (Kills), and 6 (Weapon Diversity) between lifetime totals and per-match averages — the other 5 axes are already match-agnostic and identical between scales. Per-match scale uses `total_dealt / matches_played`, `total_kills / matches_played`, and `mean_weapons_used` respectively, with all three peer maxes recomputed accordingly. State lives in `careerRadarState.mode` in `js/app.js` and persists in `localStorage` under `vt-career-radar-mode` (default `'totals'`); preserved across `loadAllMatches()` re-runs since it is a UI lens, not match-data state. Composes orthogonally with Compare. Mobility uses `mean_movement_score` (match-relative average — approximation); T-Key Usage uses `mean_target_lock_pct` (absolute — valid direct average). The All Matches view does **not** apply the global filter — the A/B picker here is the only selection UI |
+| career | *(retired from the UI)* | In-memory aggregate's `career_stats[]` | The `mode: 'career'` branch (Totals \| Per match scale, Bayesian-shrunk Survivability) stays in `js/charts-radar.js` but no page draws it: the All Matches Career Radar card was retired when the player-centric views moved to the Players hub, whose radars are the **10 descriptive lobby-z axes** (`career_stats[].perf_axes`, drawn by `js/perf-ui.js::renderRadar`) rather than these 8 career-total axes |
 
 **Empty states:**
 
@@ -1580,39 +1583,67 @@ The legacy `all_matches.json` artifact is no longer written; `scripts/process_st
     "duration_sec": 847.8,
     "submitter": "VTrider",
     "player_count": 10,
+    "match_format": "team",
     "has_position_data": true,
     "has_target_lock_data": false,
     "has_pickup_data": false,
+    "has_bullet_hit_data": true,
+    "has_resource_data": false, "has_build_data": false,
+    "commander_economy": null,
     "sentinel_damage_count": 0,
+    "team_leaders": { "1": { "name": "VTrider", "s64": "7656..." }, "2": { "name": "Domakus", "s64": "7656..." } },
+    "team_factions": { "1": { "code": "i", "name": "ISDF" }, "2": { "code": "f", "name": "Scion" } },
+    "winner": { "team": 1, "decided_by": "clean_win" },
     "leaderboard": [
       {
-        "player_id": "VTrider", "name": "VTrider",
+        "player_id": "VTrider", "name": "VTrider", "steam64": "7656...",
+        "slot": 1, "team": 1, "is_commander": true,
+        "is_campod": false, "is_low_activity": false, "is_zero_damage": false,
         "dealt": 75489.3, "received": 33462.1,
         "pvp_dealt": 35058.7, "pve_dealt": 40430.6,
         "pvp_received": 31936.1, "pve_received": 1526.0,
         "asset_dealt": 0.0, "structure_dealt": 4218.7,
-        "shots_fired": 3700, "shots_hit": 3116,
-        "kills": 0, "deaths": 0, "pickups": 17,
+        "shots_fired": 3700, "shots_hit": 3116, "shots_hit_est": 3116, "pve_shots_hit_est": 0, "pvp_shots_hit": 2800,
+        "kills": 12, "deaths": 4, "pvp_kills": 9, "pve_kills": 3, "pvp_deaths": 3, "pve_deaths": 1,
+        "effective_pvp_kills": 7.4, "pvp_assists": 5,
+        "self_dealt": 0.0, "self_received": 0.0, "self_kills": 0, "self_deaths": 0, "self_shots_hit": 0,
+        "pickups": 17,
         "weapon_breakdown": { "Minigun": { "dealt": 20576.0, "shots": 958, "hits": 651,
-          "range_hist": { "pvp": [120, 88, 60, ...], "pve": [10, 4, ...] },
-          "range_pct_hist": { "pvp": [40, 70, 88, ...], "pve": [3, 5, ...] } } },
-        "distance_buckets": { "pvp": { "close": 268, "mid": 90, "long": 12, "extreme": 1 },
-                              "pve": { "close": 14, "mid": 2, "long": 0, "extreme": 0 } },
+          "pvp_hits": 600, "self_hits": 0, "pve_hits_est": 0, "hits_est": 651 } },
+        "loadout": { "ships": { "ivscout_vsr.odf": { "name": "ivscout_vsr", "share": 0.62, "seconds": 525.1 } },
+                     "primary_ship": { "odf": "ivscout_vsr.odf", "name": "ivscout_vsr", "share": 0.62 },
+                     "secondary_ship": null, "ship_diversity": 1, "active_seconds": 847.8 },
+        "per_ship_combat": [ { "ship": "ivscout_vsr.odf", "ship_name": "ivscout_vsr", "time_seconds": 525.1,
+                               "kills": 12, "deaths": 4, "pvp_kills": 9, "pvp_deaths": 3, "dealt": 75489.3,
+                               "shots": 3700, "hits": 3116, "pvp_hits": 2800 } ],
         "activity_score": 84, "movement_band": "Aggressive",
         "path_length": 17154.2,
-        "target_lock_pct": null
+        "target_lock_pct": null,
+        "perf_axes": { "enemy_damage_share": { "raw": 0.1843, "z": 0.607 },
+                       "net_damage_share":   { "raw": 0.1103, "z": 0.592 },
+                       "thug_kill_rate":     { "raw": 0.85,   "z": 0.023 } }
       }
     ],
     "weapon_meta": [
-      { "weapon": "Minigun", "total_damage": 20576.0, "total_shots": 958, "total_hits": 651 }
+      { "weapon": "Minigun", "total_damage": 20576.0, "total_shots": 958, "total_hits": 651, "total_hits_est": 651 }
     ],
-    "distance_bin_edges": [10, 20, 30, 40, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200],
-    "distance_pct_bin_edges": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120],
-    "weapon_ranges": { "Minigun": 105.0, "Sabot": 800.0 },
-    "rivalry_matrix": { "VTrider": { "Domakus": 18900.1 } }
+    "rivalry_matrix": { "VTrider": { "Domakus": 18900.1 } },
+    "snipes_by_player": { "VTrider": 2 },
+    "powerup_destructions_by_player": {},
+    "perf_axes_version": 1,
+    "highlight_awards": [
+      { "category": "the_bully", "winner_steam64": "7656...", "winner_name": "VTrider", "runner_up_name": "Domakus", "value": 35058.7 }
+    ],
+    "void": false
   }
 }
 ```
+
+Notes on the slice: `team` is the team number (1 / 2) — faction per row is `team_factions[String(row.team)].code`; `loadout.ships[*].name` / `primary_ship.name` / `per_ship_combat[].ship_name` are the **raw ODF stems** (the per-match `odf_map` pretty names are not copied; `data/processed/ship_names.json` `{stem: unitName}` labels them client-side); `range_hist` / `range_pct_hist` / `distance_buckets` / the schema-33 `enemy_*` damage split are **not** in the slice.
+
+**Descriptive performance axes (`perf_axes`, `scripts/perf_axes.py`).** Every rated row (campod / low-activity / zero-damage rows carry `null`) gets `{axis: {raw, z}}` for the axes VTSR-T used to score before v2.14, plus two descriptive extras: `enemy_damage_share`, `net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy` (omitted when `has_bullet_hit_data` is false), `pve_share`, `survivability` (60/40 damage-trade / K/D composite clipped at the lobby p95), `mobility`, `target_lock_pct` (omitted without `has_target_lock_data`), `snipe_bonus` (`min(snipes / 5, 1)`; omitted when nobody sniped). `z = clip(zscore_lobby(raw), -2, +2) / 2 ∈ [-1, +1]` — the same convention as `elo_history` `axis_contributions` but with **no** commander shift and **no** low-tier lift. `raw` 4 dp, `z` 3 dp. An axis the builder reports unavailable for the whole lobby is omitted from every row of that match. **Display-only**: powers the player pages' Performance tab, compare radar and the Players hub percentiles; never read by `scripts/elo*.py` (gate `_investigation/check_perf_axes.py`). The lobby mean of `z` is 0 by construction, so it is never charted as a time trend — the hub's trends use the absolute per-row stats. Entry-level `perf_axes_version` names the catalog version (1).
+
+**Awards slice (`highlight_awards`).** One entry per `highlights.cards[]` card with a winner: `{category, winner_steam64 (null for pair cards), winner_name, runner_up_name, value}`; names alias-pinned like the leaderboard. The aggregator folds these into `career_stats[].award_counts` (`{category: {wins, runner_ups, last_win_id, last_win_date}}`) for the profile's Awards cabinet. Display-only.
 
 **Engagement-range fields (`match.schema_version` 11, v2-only).**
 
@@ -1711,6 +1742,15 @@ Per-player career totals, sorted by total dealt (descending).
 | `matches_with_positioning` | `number` | Denominator for `mean_movement_score` / `total_path_length` — number of matches where this player had a positioning entry |
 | `mean_target_lock_pct` | `number \| null` | Mean `target_lock_pct` across matches where `has_target_lock_data=true` and the player has a positioning entry. **Valid direct average** (target_lock_pct is absolute). `null` when `matches_with_target_lock_data = 0` |
 | `matches_with_target_lock_data` | `number` | Denominator for `mean_target_lock_pct`. Always `<= matches_with_positioning`; the delta is the count of pre-schema or no-T-pressed matches that contributed positioning but no T-key signal |
+| `perf_axes` | `object` | Descriptive performance axes: axis → `{ mean_z, mean_raw, n }` over this player's rated rows in scope (`mean_z` 3 dp, `mean_raw` 4 dp). Only axes with `n > 0` appear. Means of per-match lobby z, so they compare players against the lobbies they were in — never a rating input. Powers the player pages' Performance tab / compare radar and the Players hub percentiles (`VTPerfAxes.percentileOf`) |
+| `award_counts` | `object` | Awards cabinet: per-match Highlights category → `{ wins, runner_ups, last_win_id, last_win_date }`, credited only when the player's row counted in that match (exclusion flags and `rowFilter` apply) |
+| `format_counts` | `object` | `{ "1v1", "2v2", team, other }` appearance counts from the contribution `match_format` |
+| `wins` / `losses` | `object` | `{ total, as_commander, as_thug }` on determined-winner matches (`winner.team` 1 / 2) |
+| `matches_with_determined_winner` | `number` | Denominator for the W–L split |
+
+`VTAggregate.build(contributions, fileIds, elo, { rowFilter })` — the optional `rowFilter(row, entry)` predicate omits leaderboard rows from every per-player tally (career rows, commander economy, awards) with the same pure-omission semantics as the exclusion flags; match-level rollups are untouched. Built by `js/perf-axes.js::rowFilter(filters)` from the Players hub / Performance tab facets (faction via `team_factions[row.team].code`, ship via `loadout.primary_ship`, weapon when it carried `PERF_WEAPON_MIN_SHARE` (20%) of the row's damage, role via `is_commander`); period and format select `fileIds` instead.
+
+`commander_stats.rows[]` additionally carries the per-match economy averages `avg_scrap_income`, `avg_income_loose`, `avg_ships_built`, `avg_combat_ship_value`, `avg_scrap_spent`, `avg_peak_pools` beside the `total_*` / `peak_pools` fields (each `null` below its half's telemetry denominator).
 
 #### `global_weapon_meta[]` — same structure as per-match `weapon_meta` but summed across all matches.
 

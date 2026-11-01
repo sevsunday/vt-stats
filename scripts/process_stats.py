@@ -27,6 +27,7 @@ import statsgate_v2_pb2       # v2 (frozen schema, retained for the 2026-04..08 
 import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
 import identity_aliases
 import match_format
+import perf_axes
 from google.protobuf.message import DecodeError
 
 # Internal schema labels stamped onto each match_data["match"]["proto_schema_version"].
@@ -2841,7 +2842,7 @@ def load_cache_index():
             "elo_current_alpha25.json", "elo_history_alpha25.json",
             "elo_current_alpha50.json", "elo_history_alpha50.json",
             "elo_current_alpha100.json", "elo_history_alpha100.json",
-            "validation_summary.json"}
+            "validation_summary.json", "ship_names.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
             continue
@@ -10893,6 +10894,13 @@ def _extract_contribution(match_data):
         for row in (match_data.get("pickups", {}).get("by_player") or [])
     }
 
+    # Descriptive performance axes (scripts/perf_axes.py): lobby-z-scored
+    # per-row block for the player pages / Players hub. Display-only --
+    # never read by any rating module (gate: _investigation/check_perf_axes.py).
+    # Computed from the FULL per-match dict (the builders need the nested
+    # personal.* / positioning / snipes shapes); keyed by elo._player_key.
+    perf_axes_by_key = perf_axes.compute_perf_axes(match_data)
+
     leaderboard = []
     name_remap = {}  # per-match display name -> pinned career name
     for p in match_data.get("leaderboard") or []:
@@ -11041,6 +11049,11 @@ def _extract_contribution(match_data):
             "movement_band":    pm.get("movement_band") if pm else None,
             "path_length":      pm.get("path_length", 0.0) if pm else 0.0,
             "target_lock_pct":  pm.get("target_lock_pct") if pm and "target_lock_pct" in pm else None,
+            # Descriptive lobby-z axes ({axis: {raw, z}}); None for rows
+            # outside the rated lobby (campod / partial / idle). Display-only.
+            "perf_axes":        perf_axes_by_key.get(
+                str(p.get("steam64")) if p.get("steam64") else (orig_name or "")
+            ),
         })
 
     weapon_meta = [
@@ -11172,6 +11185,18 @@ def _extract_contribution(match_data):
         "rivalry_matrix":  rivalry_matrix,
         "snipes_by_player":               snipes_by_player,
         "powerup_destructions_by_player": powerup_destructions_by_player,
+        # Descriptive axes catalog version (scripts/perf_axes.py) and the
+        # per-match award slice for the career awards cabinet. Both are
+        # display-only; neither is read by a rating module.
+        "perf_axes_version": perf_axes.PERF_AXES_VERSION,
+        "highlight_awards":  [
+            {
+                **a,
+                "winner_name":    name_remap.get(a.get("winner_name"), a.get("winner_name")),
+                "runner_up_name": name_remap.get(a.get("runner_up_name"), a.get("runner_up_name")),
+            }
+            for a in perf_axes.extract_highlight_awards(match_data)
+        ],
         # Operator void. The aggregator skips the whole match when true.
         "void": bool(m.get("void")),
     }
@@ -11992,6 +12017,39 @@ def main():
     with open(contrib_path, "w", encoding="utf-8") as f:
         json.dump(contributions, f, indent=2, ensure_ascii=False)
     print(f"Contributions: {contrib_path.name} ({contrib_path.stat().st_size:,} bytes, {len(contributions)} matches)")
+
+    # Ship display names for the loadout stems the contributions carry.
+    # `loadout.ships[*].name` / `primary_ship.name` are raw ODF stems, so
+    # the player pages / Players hub read this tiny corpus-wide map to
+    # label ships ("Tank", "Scout", ...). Same resolution the per-match
+    # odf_map used (prettify_odf), falling back to the ODF DB unitName and
+    # then the stem. Display-only; not in the pipeline cache key.
+    ship_names = {}
+    for match_data in all_match_data:
+        omap = match_data.get("odf_map") or {}
+        for p in match_data.get("leaderboard") or []:
+            ships = ((p.get("loadout") or {}).get("ships") or {})
+            for odf_key in ships.keys():
+                stem = re.sub(r"\.odf$", "", odf_key, flags=re.IGNORECASE).lower()
+                if stem in ship_names:
+                    continue
+                # Plain unitName first (the per-match odf_map disambiguates
+                # same-name collisions as "Name (stem)", which a corpus-wide
+                # label does not want); odf_map, then the stem, as fallbacks.
+                key_odf = odf_key if odf_key.lower().endswith(".odf") else f"{odf_key}.odf"
+                name = resolve_unit(key_odf) or resolve_unit(_strip_vsr_suffix(key_odf) or "")
+                if not name:
+                    name = omap.get(odf_key) or omap.get(f"{stem}.odf") or omap.get(stem)
+                    if name:
+                        name = re.sub(r"\s*\([^)]*\)\s*$", "", name) or name
+                ship_names[stem] = name or stem
+    ship_names_path = OUTPUT_DIR / "ship_names.json"
+    with open(ship_names_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {"schema_version": 1, "names": dict(sorted(ship_names.items()))},
+            f, indent=2, ensure_ascii=False,
+        )
+    print(f"Ship names: {ship_names_path.name} ({len(ship_names)} stems)")
 
     # ----- VTSR-T (combat ELO + alpha-stub Wins ELO blend) -----
     # Pipeline-side, full-corpus, time-ordered. Feeds the All Matches

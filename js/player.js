@@ -6,10 +6,14 @@
  *                  (?q= ?tier= ?role= ?activity= ?sort= when filters differ
  *                  from the defaults)
  *   - single:        ?p=<steam64> OR ?slug=<slug>
- *                  (?tab=rating|axes|highlights|rivals|loadout; Overview
- *                  omits ?tab=). Pre-gen stubs use the same query on
- *                  /player/<slug>/.
- *   - compare:       ?compare=<slug,slug,...>  (cap 4)
+ *                  (?tab=performance|trends|commander|highlights|loadout;
+ *                  Overview omits ?tab=. Legacy ?tab=rating|axes|rivals
+ *                  alias to trends / performance / overview). Pre-gen
+ *                  stubs use the same query on /player/<slug>/.
+ *                  The Performance tab + Compare share the perf filter
+ *                  params (?f= ?ship= ?wpn= ?role= ?fmt= ?period=) read
+ *                  by js/perf-axes.js.
+ *   - compare:       ?compare=<slug,slug,...>  (cap 5)
  *                  (?x=matches when the progression chart is not by date)
  *
  * User-initiated view changes pushState so Back/Forward walk them.
@@ -49,7 +53,7 @@
   // scripts/elo.py ELO_LADDER_MIN_MATCHES. Independent of the
   // 10-match Provisional badge.
   const ELO_LADDER_MIN_MATCHES_FALLBACK = 25;
-  const COMPARE_MAX = 4;
+  const COMPARE_MAX = 5;
 
   // Commander-leaning / thug-leaning threshold. Mirrors the heuristic
   // we used for the Phase 6 "Most-commanded-against" panel gate, but
@@ -96,16 +100,25 @@
   // bumps historyWrites so those applies cannot write.
 
   const PLAYER_TAB_TARGETS = {
-    overview:   '#vt-player-tab-overview',
-    rating:     '#vt-player-tab-rating',
-    commander:  '#vt-player-tab-commander',
-    axes:       '#vt-player-tab-axes',
-    highlights: '#vt-player-tab-highlights',
-    rivals:     '#vt-player-tab-rivals',
-    loadout:    '#vt-player-tab-loadout',
+    overview:    '#vt-player-tab-overview',
+    performance: '#vt-player-tab-performance',
+    trends:      '#vt-player-tab-trends',
+    commander:   '#vt-player-tab-commander',
+    highlights:  '#vt-player-tab-highlights',
+    loadout:     '#vt-player-tab-loadout',
+    // Legacy slugs (pre-rework tabs) keep their deep links alive.
+    rating:      '#vt-player-tab-trends',
+    axes:        '#vt-player-tab-performance',
+    rivals:      '#vt-player-tab-overview',
   };
   const PLAYER_DEFAULT_TAB = PLAYER_TAB_TARGETS.overview;
-  const DIRECTORY_URL_KEYS = ['q', 'tier', 'role', 'activity', 'sort'];
+  // Directory / hub keys. The old commander-leaning / thug-leaning
+  // `role` chips are retired: the hub's perf filter bar owns `role`
+  // (per-row scope -- games played AS commander / AS thug).
+  const DIRECTORY_URL_KEYS = ['q', 'tier', 'activity', 'sort', 'view', 'unranked'];
+  // Perf-filter keys (js/perf-axes.js). Shared by the Performance tab,
+  // Compare and the Players hub; cleared when leaving those surfaces.
+  const PERF_URL_KEYS = ['f', 'ship', 'wpn', 'role', 'fmt', 'period'];
 
   let historyWrites = 0;
   let searchReplace = false;
@@ -169,19 +182,29 @@
       const order = vtsrTiers().map(t => String(t.id)).concat(PROVISIONAL_KEY);
       params.set('tier', [...state.filters.tiers].sort((a, b) => order.indexOf(a) - order.indexOf(b)).join(','));
     }
-    if (state.filters.role && state.filters.role !== 'any') params.set('role', state.filters.role);
     if (state.filters.activity && state.filters.activity !== 'active') {
       params.set('activity', state.filters.activity);
     }
     if (state.filters.sort && state.filters.sort !== DEFAULT_SORT) params.set('sort', state.filters.sort);
+    // Layout rides on the URL only when it differs from the stored preference.
+    const prefList = storedViewPref() === 'list';
+    if (state.viewMode === 'list' && !prefList) params.set('view', 'table');
+    else if (state.viewMode !== 'list' && prefList) params.set('view', 'cards');
+    if (state.filters.includeUnranked) params.set('unranked', '1');
   }
 
   function syncDirectoryUrl(mode) {
     if (!sectionVisible('directory')) return;
     const params = currentParams();
     applyDirectoryToParams(params);
-    params.delete('tab');
     params.delete('x');
+    // Hub tab + perf filters are owned by js/players-hub.js; it writes
+    // them through the same params object via VTPlayer hooks.
+    if (window.VTPlayersHub && typeof window.VTPlayersHub.applyToParams === 'function') {
+      window.VTPlayersHub.applyToParams(params);
+    } else {
+      params.delete('tab');
+    }
     writeHistory(params, mode);
   }
 
@@ -209,9 +232,13 @@
     state.filters.tiers = tiers;
     paintChipGroup(dom.tierChips, 'tier', tiers);
 
-    const role = params.get('role');
-    state.filters.role = (role === 'commander' || role === 'thug') ? role : 'any';
-    paintChipGroup(dom.roleChips, 'role', state.filters.role);
+    state.filters.includeUnranked = params.get('unranked') === '1';
+    if (dom.unrankedToggle) dom.unrankedToggle.checked = state.filters.includeUnranked;
+
+    // ?view=table|cards overrides the stored layout preference for this visit.
+    const view = params.get('view');
+    if (view === 'table' || view === 'list') setViewMode('list');
+    else if (view === 'cards' || view === 'grid') setViewMode('grid');
 
     const activity = params.get('activity');
     state.filters.activity = (activity === 'any' || activity === 'veteran' || activity === 'pillar')
@@ -225,10 +252,15 @@
     if (!writesSuppressed()) syncDirectoryUrl('replace');
   }
 
+  // Canonical (non-alias) slugs only: the first key that maps to the target.
+  const PLAYER_TAB_CANONICAL = ['overview', 'performance', 'trends', 'commander', 'highlights', 'loadout'];
   function tabSlugForTarget(target) {
     if (target === PLAYER_DEFAULT_TAB) return null;
-    return Object.keys(PLAYER_TAB_TARGETS).find(k => k !== 'overview' && PLAYER_TAB_TARGETS[k] === target) || null;
+    return PLAYER_TAB_CANONICAL.find(k => k !== 'overview' && PLAYER_TAB_TARGETS[k] === target) || null;
   }
+
+  // Tabs that read the perf filter params. Leaving them drops the params.
+  const PERF_FILTER_TABS = new Set(['#vt-player-tab-performance']);
 
   function syncTabUrl(target) {
     if (!sectionVisible('single')) return;
@@ -236,6 +268,8 @@
     const slug = tabSlugForTarget(target);
     if (slug) params.set('tab', slug);
     else params.delete('tab');
+    if (!PERF_FILTER_TABS.has(target)) PERF_URL_KEYS.forEach(k => params.delete(k));
+    else if (window.VTPerfAxes) window.VTPerfAxes.applyFiltersToParams(params, state.perfFilters);
     writeHistory(params, 'push');
   }
 
@@ -251,6 +285,18 @@
     if (slug && isDefault) {
       params.delete('tab');
       changed = true;
+    } else if (slug && target && tabSlugForTarget(target) !== slug) {
+      // Legacy alias (rating / axes) -> canonical slug.
+      params.set('tab', tabSlugForTarget(target));
+      changed = true;
+    }
+    // Perf filters ride only on the Performance tab.
+    if (window.VTPerfAxes) {
+      if (!isDefault && PERF_FILTER_TABS.has(target)) {
+        state.perfFilters = window.VTPerfAxes.filtersFromParams(params);
+      } else {
+        PERF_URL_KEYS.forEach(k => { if (params.has(k)) { params.delete(k); changed = true; } });
+      }
     }
     if (changed) writeHistory(params, 'replace');
     const btn = document.querySelector(`#vt-player-tabs [data-bs-target="${isDefault ? PLAYER_DEFAULT_TAB : target}"]`);
@@ -308,7 +354,14 @@
     v1RatingChart: null,     // Chart.js instance for the VTSR-1v1 time-series (Commander tab)
     v2Elo:         undefined, // parsed elo_2v2_current.json (lazy; undefined = unfetched, null = 404)
     v2EloHistory:  undefined, // parsed elo_2v2_history.json (lazy; same contract)
-    overviewRadarChart: null, // Chart.js instance for the Overview VTSR-T radar
+    overviewRadarChart: null, // Chart.js instance for the Overview perf radar
+    perfRadarChart: null,     // Chart.js instance for the Performance tab radar
+    axisTrendChart: null,     // Chart.js instance for the Trends tab axis picker
+    perfFilters:   null,      // VTPerfAxes filters for the Performance tab (null = empty)
+    perfAggregate: null,      // VTAggregate.build result under perfFilters (cached per filter key)
+    perfAggregateKey: '',
+    trendsFormat:  null,      // 'team' | '2v2' | '1v1' (null = pick most-played)
+    shipNames:     null,      // parsed data/processed/ship_names.json (404-safe)
     mapRegistry:   undefined, // parsed data/map-registry.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
@@ -316,9 +369,9 @@
     filters: {
       query:     '',
       tiers:     new Set(),    // Set<string> of tier keys ('0'..'5', 'p'); empty = all
-      role:      'any',
       activity:  'active',
       sort:      DEFAULT_SORT,
+      includeUnranked: false,  // hub Players tab: also list unranked players above the career floor
     },
     compareMode: false,
     selection:   new Set(),    // Set<steam64-string>
@@ -457,8 +510,14 @@
       total dealt, accuracy) that the bare ELO row doesn't carry. */
   function buildPlayerRows() {
     const ratings = (state.elo && state.elo.ratings) || [];
+    // Hub scope: the Players hub's filter bar (faction / ship / weapon /
+    // role / format / period) narrows the career rows the directory
+    // reads; players with no matches in scope drop out.
+    const hubScoped = window.VTPlayersHub && typeof window.VTPlayersHub.careerStats === 'function'
+      ? window.VTPlayersHub.careerStats() : null;
+    const careerRows = hubScoped || state.careerStats || [];
     const careerBySteam = new Map();
-    for (const c of (state.careerStats || [])) {
+    for (const c of careerRows) {
       if (c.steam64) careerBySteam.set(String(c.steam64), c);
     }
     const cmdrBySteam = new Map();
@@ -467,21 +526,28 @@
     }
     // The directory lists ranked players only: on the VTSR-T ladder or the
     // VTSR-C ladder. Profiles, stubs and compare links still resolve anyone.
+    // The hub's "Include unranked" switch adds players above the career
+    // floor (meta.min_career_matches) in the current scope.
     const isRanked = (r, cmdr) => vtsrLadderEligible(r, state.elo)
       || !!(cmdr && cmdrLadderEligible(cmdr, state.cmdrElo));
+    const minCareer = (state.aggregate && state.aggregate.meta && state.aggregate.meta.min_career_matches) || 5;
     return ratings.map((r) => {
       const cmdr = cmdrBySteam.get(String(r.steam64)) || null;
-      if (!isRanked(r, cmdr)) return null;
       const c = careerBySteam.get(String(r.steam64)) || null;
+      const ranked = isRanked(r, cmdr);
+      if (!ranked && !(state.filters.includeUnranked && c && c.matches_played >= minCareer)) return null;
+      // Under a hub scope a player with zero matches in scope is not listed.
+      if (hubScoped && !c) return null;
       return {
         ...r,
+        ranked,
         vtsr_c:           cmdr && Number.isFinite(cmdr.vtsr_c) ? cmdr.vtsr_c : null,
         vtsr_c_provisional: !!(cmdr && cmdr.provisional),
         vtsr_c_games:     cmdr ? (cmdr.matches_commanded_rated || 0) : 0,
         vtsr_c_history:   cmdr && Array.isArray(cmdr.win_history) ? cmdr.win_history : [],
         career: c,
         primary_ship: c && c.career_loadout && c.career_loadout.primary_ship
-          ? c.career_loadout.primary_ship.name
+          ? shipLabel(c.career_loadout.primary_ship.odf, c.career_loadout.primary_ship.name)
           : null,
         total_dealt:  c ? c.total_dealt  : null,
         accuracy:     c && c.total_shots_fired > 0 ? (c.total_shots_hit / c.total_shots_fired) : null,
@@ -588,11 +654,6 @@
         const b = VTSRDisplay.bandFor(r);
         if (!f.tiers.has(tierKeyForBand(b))) return false;
       }
-      if (f.role !== 'any') {
-        const share = commanderShare(r);
-        if (f.role === 'commander' && share < ROLE_COMMANDER_RATIO) return false;
-        if (f.role === 'thug'      && share >= ROLE_COMMANDER_RATIO) return false;
-      }
       if (f.activity !== 'any') {
         const bucket = ACTIVITY_BUCKETS[f.activity];
         if (bucket && safeNum(r.matches_played) < bucket.min) return false;
@@ -672,21 +733,30 @@
     const rows = buildPlayerRows();
     const visible = applyFilters(rows);
     dom.heroStats.innerHTML = buildHeroStats(rows);
+    const who = state.filters.includeUnranked ? 'players' : 'ranked players';
 
     if (!visible.length) {
       dom.grid.innerHTML = '';
       dom.empty.hidden = false;
       dom.heroSub.textContent = `0 of ${rows.length} players match the current filters.`;
     } else {
-      dom.grid.innerHTML = visible.map(renderCard).join('');
+      // Cards (grid) or the hub's sortable table (list / "Table" view).
+      if (state.viewMode === 'list' && window.VTPlayersHub && typeof window.VTPlayersHub.playersTableHtml === 'function') {
+        dom.grid.innerHTML = window.VTPlayersHub.playersTableHtml(visible);
+      } else {
+        dom.grid.innerHTML = visible.map(renderCard).join('');
+      }
       dom.empty.hidden = true;
       dom.heroSub.textContent =
         visible.length === rows.length
-          ? `Showing all ${rows.length} ranked players.`
-          : `Showing ${visible.length} of ${rows.length} ranked players.`;
+          ? `Showing all ${rows.length} ${who}.`
+          : `Showing ${visible.length} of ${rows.length} ${who}.`;
     }
 
     updateFilterCount();
+    if (window.VTPlayersHub && typeof window.VTPlayersHub.onDirectoryRendered === 'function') {
+      window.VTPlayersHub.onDirectoryRendered(visible);
+    }
   }
 
   function updateFilterCount() {
@@ -694,7 +764,6 @@
     if (!el) return;
     const f = state.filters;
     const n = f.tiers.size
-            + (f.role !== 'any' ? 1 : 0)
             + (f.activity !== 'active' ? 1 : 0)
             + ((f.query || '').trim() ? 1 : 0);
     if (n > 0) {
@@ -753,6 +822,7 @@
     if (fromToggle && mode === state.viewMode) return;
 
     const hadPref = !!storedViewPref();
+    const changed = state.viewMode !== mode;
     state.viewMode = mode;
     document.documentElement.dataset.playerView = mode;
     syncViewTogglePressed();
@@ -763,6 +833,11 @@
     if (fromToggle && mode !== 'list') hideViewPrefModal();
     if (mode === 'list' && fromToggle && !state.viewModalDismissed && !hadPref) {
       openViewPrefModal();
+    }
+    // Cards <-> Table swaps the rendered markup, not just CSS.
+    if (fromToggle && changed && dom.grid && sectionVisible('directory')) {
+      renderDirectoryGrid();
+      syncDirectoryUrl('push');
     }
   }
 
@@ -794,14 +869,16 @@
   function clearFilters() {
     state.filters.query = '';
     state.filters.tiers.clear();
-    state.filters.role = 'any';
     state.filters.activity = 'active';
     state.filters.sort = DEFAULT_SORT;
     dom.searchInput.value = '';
     if (dom.sortSelect) dom.sortSelect.value = DEFAULT_SORT;
     dom.tierChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
-    dom.roleChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.role === 'any' ? 'true' : 'false'));
     dom.activityChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.activity === 'active' ? 'true' : 'false'));
+    // The hub owns the perf filter bar; clearing the directory also clears it.
+    if (window.VTPlayersHub && typeof window.VTPlayersHub.clearFilters === 'function') {
+      window.VTPlayersHub.clearFilters({ silent: true });
+    }
     renderDirectoryGrid();
     syncDirectoryUrl('push');
   }
@@ -1069,94 +1146,42 @@
     });
   }
 
-  // Coaching copy keyed by axis. Each entry has a short headline +
-  // one-liner action. Surfaced only when the player's axis_mean
-  // is below median (z < 0). Tone: pragmatic, no condescension.
-  const COACHING_COPY = {
-    enemy_damage_share: {
-      head: 'You\u2019re dealing less damage to the enemy than the lobby average.',
-      body: 'VTSR-T is your share of the damage your lobby did to the enemy. Every point counts the same whether it lands on a tank, a scavenger, an extractor or a building, so the lever is time spent putting damage on something of theirs.\n\n<u>If you raid pools and scavs</u> \u2014 that work counts in full; staying alive between targets keeps the damage coming.\n\n<u>If you dogfight</u> \u2014 damage you land counts even when the pilot bails out before the kill.\n\nDamage to your own team\u2019s units, loose scrap and map props does not count.',
-    },
-  };
-
-  // Share of the per-match performance grade an axis carries (raw
-  // weight over the sum, matching elo.py's renormalization).
-  function axisWeightShare(axisKey) {
-    const weights = (state.elo && state.elo.weights) || {};
-    const raw = +weights[axisKey] || 0;
-    const total = Object.keys(weights).reduce((s, k) => s + (+weights[k] || 0), 0);
-    return total > 0 ? raw / total : 0;
-  }
-
   // ---- Phase 4: Overview tab renderer ----------------------------------
 
   function renderSingle(rating) {
     const role = roleLabel(rating);
     const band = VTSRDisplay.bandFor(rating);
-    const peakBand = VTSRDisplay.rawBandFor(rating.peak_vtsr || rating.vtsr);
-    const form = recentFormStat(rating);
-    const ladder = ladderStatusStat(rating);
-    const statAttrs = s => (s.title ? ` title="${escapeHtml(s.title)}"` : '');
+    // Title strip only: name, band chip, role, VTSR-C chip when rated,
+    // Compare button. The rich hero body (position bar, peak, form,
+    // ladder status, spark) is the first Overview card so every tab
+    // keeps the context line without the height.
+    const cRow = cmdrRatingRowQuick(String(rating.steam64 || ''));
+    const cChip = cRow
+      ? `<span class="vt-player-card-pill vt-player-card-pill--vtsrc${cRow.provisional ? ' is-provisional' : ''}"
+               title="VTSR-C ${Math.round(cRow.vtsr_c)}: commander win/loss rating over ${cRow.games} rated commander game${cRow.games === 1 ? '' : 's'}${cRow.provisional ? ' (provisional)' : ''}">
+           <i class="bi bi-shield-fill"></i>C <span class="num">${Math.round(cRow.vtsr_c)}</span>
+         </span>`
+      : '';
     dom.singleHero.innerHTML = `
-      <div class="vt-player-single-hero-body">
-        <div>
-          <div class="vt-player-single-tier-row">
-            <span class="text-secondary small">VTSR-T</span>
-            <span class="text-secondary small">&middot;</span>
-            <span class="text-secondary small">${role.label}</span>
-          </div>
-          <h1 class="vt-player-single-name">${escapeHtml(rating.name)}</h1>
-          <div class="vt-player-single-vtsr">
-            ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
-            ${VTSRDisplay.positionBarHtml(rating, ratingNoiseSigma(), { band, bsTooltip: false })}
-          </div>
-          <div class="vt-player-single-peak mt-2">
-            <i class="bi bi-trophy-fill" style="color: var(--kb-success);"></i>
-            Peak ${peakBand && !band.provisional ? escapeHtml(peakBand.label) : '\u2014'} &middot;
-            <span class="num">${formatNumber(rating.matches_played)}</span> matches
-            (<span class="num">${formatNumber(rating.matches_as_commander)}</span>C /
-             <span class="num">${formatNumber(rating.matches_as_thug)}</span>T)
-          </div>
-          <div class="vt-player-single-spark mt-3">
-            ${sparkSvg(rating.win_history, 320, 72)}
-          </div>
-          <div class="mt-3">
-            <button type="button" class="btn btn-sm btn-outline-primary"
-                    id="vt-player-single-compare-btn"
-                    data-steam64="${escapeHtml(rating.steam64)}"
-                    title="Stage this player and pick more to compare on the directory">
-              <i class="bi bi-bar-chart-steps me-1"></i>Compare with…
-            </button>
-          </div>
+      <div class="vt-player-title-strip">
+        <h1 class="vt-player-single-name mb-0">${escapeHtml(rating.name)}</h1>
+        <div class="vt-player-title-chips">
+          ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
+          ${cChip}
+          <span class="vt-player-card-pill vt-player-card-pill--role ${escapeHtml(role.class || '')}" title="Role by share of matches commanded">${escapeHtml(role.label)}</span>
+          <span class="text-secondary small"><span class="num">${formatNumber(rating.matches_played)}</span> matches</span>
         </div>
-        <div>
-          <div class="vt-player-single-stats">
-            <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">Last game</div>
-              <div class="vt-player-single-stat-value">
-                ${Number.isFinite(rating.last_delta) ? VTSRDisplay.verdictChipHtml(rating.last_delta, { long: true, bsTooltip: false }) : '\u2014'}
-              </div>
-            </div>
-            <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">${escapeHtml(form.label)}</div>
-              <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(form)}>${form.valueHtml}</div>
-            </div>
-            <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">${escapeHtml(ladder.label)}</div>
-              <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(ladder)}>${ladder.valueHtml}</div>
-            </div>
-            <div class="vt-player-single-stat">
-              <div class="vt-player-single-stat-label">Last match</div>
-              <div class="vt-player-single-stat-value" style="font-size:0.95rem;">
-                ${rating.last_match_id ? escapeHtml(String(rating.last_match_id).slice(0, 10)) : '\u2014'}
-              </div>
-            </div>
-          </div>
+        <div class="ms-auto">
+          <button type="button" class="btn btn-sm btn-outline-primary"
+                  id="vt-player-single-compare-btn"
+                  data-steam64="${escapeHtml(rating.steam64)}"
+                  title="Stage this player and pick more to compare on the directory">
+            <i class="bi bi-bar-chart-steps me-1"></i>Compare with…
+          </button>
         </div>
       </div>`;
 
-    // Tab pills (single placeholder for now; Phase 4–6 will register
-    // renderers and populate each pane on first activation).
+    // Tab pills; each pane renders on first activation.
     renderSingleTabs();
 
     // Stash the current rating on state so tab renderers can be
@@ -1181,28 +1206,29 @@
       });
     }
 
-    // Overview tab (Phase 4).
+    // Overview renders now (contributions are loaded at boot).
     renderOverviewTab(rating);
-    // Rating tab (Phase 5) — render shell now; lazy-load elo_history
-    // + match_contributions and rebuild on first tab activation.
-    renderRatingTabShell(rating);
-    // Phase 6 tabs — lazy-render on first activation. Axes + rivals
-    // need elo_history / contributions which load on Rating-tab open;
-    // we re-use the same lazy-fetch when these tabs activate (cheap if
-    // already loaded).
-    bindLazyTab('vt-player-tab-commander',  () => renderCommanderTab(rating));
-    bindLazyTab('vt-player-tab-axes',       () => renderAxesTab(rating));
-    bindLazyTab('vt-player-tab-highlights', () => renderHighlightsTab(rating));
-    bindLazyTab('vt-player-tab-rivals',     () => renderRivalsTab(rating));
-    bindLazyTab('vt-player-tab-loadout',    () => renderLoadoutTab(rating));
-    // Render placeholders so the panes aren't empty until first
-    // activation. Each renderer self-overwrites.
-    $('vt-player-tab-commander').innerHTML  = phasePlaceholder('Commander', 'Click this tab to load.');
-    $('vt-player-tab-axes').innerHTML       = phasePlaceholder('Axis deep-dive', 'Click this tab to load.');
-    $('vt-player-tab-highlights').innerHTML = phasePlaceholder('Highlights', 'Click this tab to load.');
-    $('vt-player-tab-rivals').innerHTML     = phasePlaceholder('Rivals', 'Click this tab to load.');
-    $('vt-player-tab-loadout').innerHTML    = phasePlaceholder('Loadout &amp; ships', 'Click this tab to load.');
+    // Trends shell now; the rating chart / match log / axis trend load
+    // elo_history on first activation.
+    renderTrendsTabShell(rating);
+    // Remaining tabs lazy-render on first activation.
+    bindLazyTab('vt-player-tab-performance', () => renderPerformanceTab(rating));
+    bindLazyTab('vt-player-tab-commander',   () => renderCommanderTab(rating));
+    bindLazyTab('vt-player-tab-highlights',  () => renderHighlightsTab(rating));
+    bindLazyTab('vt-player-tab-loadout',     () => renderLoadoutTab(rating));
+    $('vt-player-tab-performance').innerHTML = phasePlaceholder('Performance', 'Click this tab to load.');
+    $('vt-player-tab-commander').innerHTML   = phasePlaceholder('Commander', 'Click this tab to load.');
+    $('vt-player-tab-highlights').innerHTML  = phasePlaceholder('Highlights', 'Click this tab to load.');
+    $('vt-player-tab-loadout').innerHTML     = phasePlaceholder('Loadout &amp; ships', 'Click this tab to load.');
     activateTabFromUrl();
+  }
+
+  // VTSR-C row for the title strip (elo_commander_current is fetched at boot).
+  function cmdrRatingRowQuick(sid) {
+    const ratings = (state.cmdrElo && state.cmdrElo.ratings) || [];
+    const r = ratings.find(x => String(x.steam64 || '') === sid);
+    if (!r || !Number.isFinite(+r.vtsr_c)) return null;
+    return { vtsr_c: +r.vtsr_c, provisional: !!r.provisional, games: r.matches_commanded_rated || r.rated_match_count || 0 };
   }
 
   // ---- Phase 5: Rating & matches tab -----------------------------------
@@ -1213,14 +1239,137 @@
   state.ratingChart = null;
   state.matchLogState = null;
 
-  function renderRatingTabShell(rating) {
-    const pane = $('vt-player-tab-rating');
+  // ---- Trends tab -----------------------------------------------------------
+  //
+  // Format control (3v3+ | 2v2 | 1v1; default = the format the player
+  // has played most) over: 3v3+ = VTSR-T band chart + match log + axis
+  // trend picker; 2v2 = the VTSR-2v2 block; 1v1 = the VTSR-1v1 block.
+  // The 3v3+ shell is rendered up front (the chart + log need
+  // elo_history, fetched on first activation); 2v2 / 1v1 lazy-load
+  // their ladders when picked.
+
+  const TRENDS_FORMATS = [
+    { id: 'team', label: '3v3+', icon: 'bi-people' },
+    { id: '2v2',  label: '2v2',  icon: 'bi-people-fill' },
+    { id: '1v1',  label: '1v1',  icon: 'bi-person' },
+  ];
+
+  function formatCountsFor(rating) {
+    const career = lookupCareer(rating);
+    const fc = (career && career.format_counts) || {};
+    return { team: fc.team || 0, '2v2': fc['2v2'] || 0, '1v1': fc['1v1'] || 0 };
+  }
+
+  function defaultTrendsFormat(rating) {
+    const fc = formatCountsFor(rating);
+    let best = 'team';
+    for (const f of TRENDS_FORMATS) if (fc[f.id] > fc[best]) best = f.id;
+    return best;
+  }
+
+  function renderTrendsTabShell(rating) {
+    const pane = $('vt-player-tab-trends');
+    if (!pane) return;
+    const fc = formatCountsFor(rating);
+    state.trendsFormat = state.trendsFormat || defaultTrendsFormat(rating);
     pane.innerHTML = `
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-secondary small text-uppercase" style="letter-spacing:0.08em;">Format</span>
+        <div class="vt-trends-format d-flex gap-1" id="vt-trends-format" role="group" aria-label="Format">
+          ${TRENDS_FORMATS.map(f => `
+            <button type="button" class="vt-chip" data-format="${f.id}" data-selected="${state.trendsFormat === f.id ? 'true' : 'false'}"
+                    title="${fc[f.id]} recorded ${f.label} match${fc[f.id] === 1 ? '' : 'es'}">
+              <i class="bi ${f.icon} me-1"></i>${f.label} <span class="vt-chip-count">${fc[f.id]}</span>
+            </button>`).join('')}
+        </div>
+        <span class="text-secondary small ms-auto">Each format has its own ladder; none of them feed the others.</span>
+      </div>
+      <div id="vt-trends-team" ${state.trendsFormat === 'team' ? '' : 'hidden'}>
+        ${renderTeamTrendsShellHtml()}
+      </div>
+      <div id="vt-trends-2v2" ${state.trendsFormat === '2v2' ? '' : 'hidden'}></div>
+      <div id="vt-trends-1v1" ${state.trendsFormat === '1v1' ? '' : 'hidden'}></div>
+    `;
+
+    // Format chips.
+    const bar = $('vt-trends-format');
+    if (bar) {
+      bar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.vt-chip');
+        if (!btn) return;
+        state.trendsFormat = btn.dataset.format;
+        bar.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
+        ['team', '2v2', '1v1'].forEach(f => { const el = $(`vt-trends-${f}`); if (el) el.hidden = f !== state.trendsFormat; });
+        renderTrendsFormatBody(rating).catch(e2 => console.warn('player.js: trends format render failed', e2));
+      });
+    }
+
+    // Tab activation hook: real render fires on first show.
+    const tabBtn = document.querySelector('[data-bs-target="#vt-player-tab-trends"]');
+    if (tabBtn) {
+      tabBtn.addEventListener('shown.bs.tab', () => {
+        renderTrendsFormatBody(rating).catch((e) => {
+          console.warn('player.js: renderTrendsFormatBody failed', e);
+          const el = $('vt-rating-chart-empty');
+          if (el) { el.textContent = 'Failed to load rating history.'; el.hidden = false; }
+        });
+      }, { once: false });
+    }
+
+    // Wire the zoom chips even before the chart exists; they no-op
+    // when state.ratingChart is null and rebind cleanly later.
+    const chipBar = $('vt-rating-zoom-chips');
+    if (chipBar) {
+      chipBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.vt-chip');
+        if (!btn) return;
+        applyRatingChartRange(btn.dataset.range);
+        chipBar.querySelectorAll('.vt-chip').forEach(b =>
+          b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
+      });
+    }
+  }
+
+  // Renders the body for the selected format. 3v3+ reuses the Rating
+  // tab machinery (chart + log + axis trend); 2v2 / 1v1 reuse the
+  // ladder blocks that used to live on the Commander tab.
+  async function renderTrendsFormatBody(rating) {
+    const sid = String(rating.steam64 || '');
+    const fmt = state.trendsFormat || 'team';
+    if (fmt === 'team') {
+      await renderRatingTabBody(rating);
+      renderAxisTrendCard(rating);
+      return;
+    }
+    if (fmt === '2v2') {
+      const host = $('vt-trends-2v2');
+      if (!host) return;
+      if (state.v2Elo === undefined) {
+        host.innerHTML = phasePlaceholder('2v2', 'Loading the 2v2 ladders.');
+        await ensureV2EloLoaded();
+      }
+      host.innerHTML = render2v2BlockHtml(sid) || phasePlaceholder('2v2', 'No recorded 2v2 games for this player.');
+      return;
+    }
+    if (fmt === '1v1') {
+      const host = $('vt-trends-1v1');
+      if (!host) return;
+      if (state.v1Elo === undefined) {
+        host.innerHTML = phasePlaceholder('1v1', 'Loading the 1v1 ladder.');
+        await ensureV1EloLoaded();
+      }
+      host.innerHTML = render1v1BlockHtml(sid) || phasePlaceholder('1v1', 'No recorded 1v1 games for this player.');
+      drawV1RatingChart(sid);
+    }
+  }
+
+  function renderTeamTrendsShellHtml() {
+    return `
       <div class="card mb-3">
         <div class="card-body">
           <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
             <h2 class="h6 mb-0 text-secondary text-uppercase" style="letter-spacing:0.08em;">
-              <i class="bi bi-graph-up me-1"></i>Rating history
+              <i class="bi bi-graph-up me-1"></i>VTSR-T history
             </h2>
             <div class="ms-auto vt-rating-zoom-chips d-flex gap-1" id="vt-rating-zoom-chips">
               <button type="button" class="vt-chip" data-range="all" data-selected="true">All time</button>
@@ -1280,32 +1429,98 @@
           </div>
         </div>
       </div>
+
+      <div class="card mt-3" id="vt-axis-trend-card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <h2 class="h6 mb-0 text-secondary text-uppercase" style="letter-spacing:0.08em;">
+              <i class="bi bi-activity me-1"></i>Axis over time
+            </h2>
+            <select class="form-select form-select-sm ms-auto" id="vt-axis-trend-pick" style="width:auto;" aria-label="Axis"></select>
+          </div>
+          <div style="position:relative;height:220px;">
+            <canvas id="vt-axis-trend-chart"></canvas>
+          </div>
+          <p class="text-secondary small mb-0 mt-2" id="vt-axis-trend-note">
+            Each bar is one 3v3+ match's lobby z on the picked axis (\u22121\u2026+1); the line is the
+            trailing 5-match mean. These are descriptive axes, not the rating.
+          </p>
+        </div>
+      </div>
     `;
+  }
 
-    // Tab activation hook: real render fires on first show.
-    const tabBtn = document.querySelector('[data-bs-target="#vt-player-tab-rating"]');
-    if (tabBtn) {
-      tabBtn.addEventListener('shown.bs.tab', () => {
-        renderRatingTabBody(rating).catch((e) => {
-          console.warn('player.js: renderRatingTabBody failed', e);
-          $('vt-rating-chart-empty').textContent = 'Failed to load rating history.';
-          $('vt-rating-chart-empty').hidden = false;
-        });
-      }, { once: false });
+  // Axis-over-time card on the Trends (3v3+) pane: per-match z bars with
+  // a rolling mean, driven by the axis picker. Reads perf_axes off the
+  // contributions (format = team).
+  function renderAxisTrendCard(rating) {
+    const pick = $('vt-axis-trend-pick');
+    const canvas = $('vt-axis-trend-chart');
+    if (!pick || !canvas || !window.VTPerfAxes || !state.contributions) return;
+    const P = window.VTPerfAxes;
+    if (!pick.options.length) {
+      pick.innerHTML = P.AXES.map(a => `<option value="${escapeHtml(a.key)}">${escapeHtml(a.label)}</option>`).join('');
+      pick.addEventListener('change', () => drawAxisTrend(rating, pick.value));
     }
+    drawAxisTrend(rating, pick.value || P.AXES[0].key);
+  }
 
-    // Wire the zoom chips even before the chart exists; they no-op
-    // when state.ratingChart is null and rebind cleanly later.
-    const chipBar = $('vt-rating-zoom-chips');
-    if (chipBar) {
-      chipBar.addEventListener('click', (e) => {
-        const btn = e.target.closest('.vt-chip');
-        if (!btn) return;
-        applyRatingChartRange(btn.dataset.range);
-        chipBar.querySelectorAll('.vt-chip').forEach(b =>
-          b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
-      });
+  function drawAxisTrend(rating, axisKey) {
+    const canvas = $('vt-axis-trend-chart');
+    const note = $('vt-axis-trend-note');
+    if (!canvas || !window.Chart || !window.VTPerfAxes) return;
+    const P = window.VTPerfAxes;
+    const def = P.axis(axisKey) || P.AXES[0];
+    if (state.axisTrendChart) { try { state.axisTrendChart.destroy(); } catch (_) {} state.axisTrendChart = null; }
+    const f = Object.assign(P.emptyFilters(), { formats: ['team'] });
+    const series = P.playerSeries(state.contributions, rating.steam64, f);
+    const pts = P.rollingMean(series, def.key, 5);
+    if (!pts.length) {
+      canvas.hidden = true;
+      if (note) note.textContent = `No 3v3+ matches with ${def.label} data yet.`;
+      return;
     }
+    canvas.hidden = false;
+    if (note) {
+      note.innerHTML = `Each bar is one 3v3+ match's lobby z on <strong>${escapeHtml(def.label)}</strong> (\u22121\u2026+1); the line is the trailing 5-match mean. ${escapeHtml(def.desc)}`;
+    }
+    const success = getCSSVar('--kb-success') || '#2ecc71';
+    const danger = getCSSVar('--kb-danger') || '#e74c3c';
+    const primary = getCSSVar('--kb-primary') || '#36a2eb';
+    const muted = getCSSVar('--kb-text-muted') || '#888';
+    state.axisTrendChart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: pts.map(p => String(p.date).slice(0, 10)),
+        datasets: [
+          { type: 'line', label: 'Trailing 5 mean', data: pts.map(p => p.mean), borderColor: primary, borderWidth: 2, pointRadius: 0, tension: 0.25, order: 0 },
+          { type: 'bar', label: 'Match z', data: pts.map(p => p.z), backgroundColor: pts.map(p => (p.z >= 0 ? success : danger)), borderWidth: 0, order: 1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: items => (items.length ? `${pts[items[0].dataIndex].date ? new Date(pts[items[0].dataIndex].date).toLocaleDateString() : ''}` : ''),
+              label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${(+ctx.parsed.y).toFixed(2)}`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: muted, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
+          y: { min: -1, max: 1, ticks: { color: muted, stepSize: 0.5 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        },
+        onClick: (_e, els) => {
+          if (!els || !els.length) return;
+          const p = pts[els[0].index];
+          const row = document.querySelector(`#vt-matchlog-tbody tr[data-match-id="${CSS.escape(p.id)}"]`);
+          if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        },
+      },
+    });
   }
 
   // Lazy-load elo_history.json + match_contributions.json on first
@@ -1359,6 +1574,8 @@
     for (const fileKey in contribs) {
       const m = contribs[fileKey];
       if (m.void) continue;
+      // 1v1 / 2v2 games live on their own Trends panes (separate ladders).
+      if (m.match_format === '1v1' || m.match_format === '2v2') continue;
       const lbRow = (m.leaderboard || []).find(p => String(p.steam64 || '') === sid);
       if (!lbRow) continue;
       const deltaData = deltasByMatch.get(m.id) || null;
@@ -2043,7 +2260,7 @@
       const pct = (s.share || 0) * 100;
       return `<div class="vt-wbar">
         <div class="vt-wbar-head">
-          <span class="vt-wbar-name">${escapeHtml(s.name)}</span>
+          <span class="vt-wbar-name">${escapeHtml(shipLabel(s.key, s.name))}</span>
           <span class="vt-wbar-meta">${pct.toFixed(0)}%</span>
         </div>
         <div class="vt-axis-track">
@@ -2051,6 +2268,16 @@
         </div>
       </div>`;
     }).join('');
+  }
+
+  // Ship display name: data/processed/ship_names.json (via VTPerfUI) with
+  // the contribution's own name (a raw stem) as the fallback.
+  function shipLabel(odfOrStem, fallback) {
+    if (window.VTPerfUI) {
+      const n = window.VTPerfUI.shipLabel(odfOrStem);
+      if (n) return n;
+    }
+    return fallback || String(odfOrStem || '').replace(/\.odf$/i, '');
   }
 
   // ---- Phase 6: lazy tab activation ------------------------------------
@@ -2079,123 +2306,178 @@
     });
   }
 
-  // ---- Phase 6a: Axis deep-dive ----------------------------------------
+  // ---- Performance tab ---------------------------------------------------
+  //
+  // Descriptive performance axes (scripts/perf_axes.py via the
+  // contributions' per-row `perf_axes`): a shared filter bar (faction /
+  // ship / weapon / role / format / period), a 10-axis radar of the
+  // player's mean lobby z against the filtered player base's median, and
+  // one card per axis with the mean-z bar, a vs-player-base percentile
+  // chip, the n with data and a per-match z sparkline. The filter scopes
+  // BOTH the player's matches and the population the percentile is read
+  // against ("Top 18% of 42 Scion Tank players").
 
-  // Sparkline-style per-axis chart. Same approach as the directory
-  // sparklines (inline SVG) — fast, zero Chart.js instances, and the
-  // 8-up grid means each chart is small enough that an SVG bar trail
-  // reads cleanly.
-  function renderAxesTab(rating) {
-    const pane = $('vt-player-tab-axes');
-    if (!state.eloHistory || !state.eloHistory.history) {
-      pane.innerHTML = phasePlaceholder('Axis deep-dive', 'No rating history found for this player.');
-      return;
-    }
-    const sid = String(rating.steam64 || '');
-    const series = state.eloHistory.history.map(entry => {
-      const d = (entry.deltas || []).find(x => String(x.steam64 || '') === sid);
-      return d ? { date: entry.match_date, axis: d.axis_contributions || {} } : null;
-    }).filter(Boolean);
-
-    if (!series.length) {
-      pane.innerHTML = phasePlaceholder('Axis deep-dive', 'No rated matches yet for this player.');
-      return;
-    }
-
-    const cards = vtsrAxes().map(def => {
-      const vals = series.map(e => +e.axis[def.key]).filter(v => Number.isFinite(v));
-      if (!vals.length) {
-        return `<div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100"><div class="card-body py-3">
-            <div class="vt-axis-card-head">
-              <i class="bi ${def.icon}"></i>
-              <span class="vt-axis-card-label">${escapeHtml(def.label)}</span>
-            </div>
-            <p class="text-secondary small mb-0 mt-2">No data yet.</p>
-          </div></div>
-        </div>`;
-      }
-      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-      const recent = vals.slice(-Math.min(8, vals.length));
-      const recentMean = recent.reduce((s, v) => s + v, 0) / recent.length;
-      const trend = recentMean - mean;
-      const trendClass = trend > 0.03 ? 'vt-vtsr-delta-positive' :
-                         trend < -0.03 ? 'vt-vtsr-delta-negative' :
-                                         'text-secondary';
-      const trendIcon  = trend > 0.03 ? 'bi-arrow-up-short' :
-                         trend < -0.03 ? 'bi-arrow-down-short' :
-                                         'bi-dash';
-      return `<div class="col-12 col-md-6 col-xl-3">
-        <div class="card h-100">
-          <div class="card-body py-3">
-            <div class="vt-axis-card-head">
-              <i class="bi ${def.icon}"></i>
-              <span class="vt-axis-card-label">${escapeHtml(def.label)}</span>
-              <span class="vt-axis-card-mean ${mean >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">
-                ${mean >= 0 ? '+' : ''}${mean.toFixed(2)}
-              </span>
-            </div>
-            <div class="vt-axis-card-spark">${axisSparkSvg(vals, 240, 50)}</div>
-            <div class="vt-axis-card-foot small">
-              <span class="text-secondary">Last ${recent.length}:</span>
-              <span class="${trendClass}">
-                <i class="bi ${trendIcon}"></i> ${trend >= 0 ? '+' : ''}${trend.toFixed(2)}
-              </span>
-              <span class="text-secondary ms-2">vs career mean ${mean.toFixed(2)}</span>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-
-    pane.innerHTML = `
-      <div class="card mb-3">
-        <div class="card-body">
-          <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-            <i class="bi bi-bullseye me-1"></i>Per-axis time series
-          </h2>
-          <p class="text-secondary small mb-3">
-            Each bar trail is one match's post-clip contribution on that axis (range −1…+1).
-            The chip beside the axis name is the career mean; the footer compares the recent
-            ${Math.min(8, series.length)}-match window to the overall career.
-          </p>
-          <div class="row g-3">
-            ${cards}
-          </div>
-        </div>
-      </div>`;
+  function perfFilterKey(f) {
+    return JSON.stringify(f || {});
   }
 
-  // Per-axis sparkline -- like sparkSvg() but draws negative bars
-  // BELOW the midline (not folded). Domain is the symmetric [-1, +1]
-  // window because axis contributions are already post-clip.
-  function axisSparkSvg(vals, width, height) {
-    if (!vals.length) return '';
-    const w = width || 240, h = height || 50;
-    const padY = 2;
-    const innerH = h - padY * 2;
-    const midY = padY + innerH / 2;
-    const slot = w / vals.length;
-    const barW = Math.max(2, slot * 0.7);
-    const cx0 = (slot - barW) / 2;
-    let bars = '';
-    for (let i = 0; i < vals.length; i++) {
-      const v = Math.max(-1, Math.min(1, vals[i]));
-      const x = i * slot + cx0;
-      const mag = Math.abs(v) * (innerH / 2 - 1);
-      const top = v >= 0 ? midY - mag : midY;
-      const cls = v >= 0 ? 'vt-spark-pos' : 'vt-spark-neg';
-      bars += `<rect class="${cls}" x="${x.toFixed(2)}" y="${top.toFixed(2)}" width="${barW.toFixed(2)}" height="${Math.max(1, mag).toFixed(2)}" rx="1"/>`;
+  // VTAggregate.build under the current perf filters; cached per filter.
+  function perfAggregateFor(f) {
+    const P = window.VTPerfAxes;
+    if (!P || !state.contributions || !window.VTAggregate) return null;
+    const key = perfFilterKey(f);
+    if (state.perfAggregate && state.perfAggregateKey === key) return state.perfAggregate;
+    const fileIds = P.fileIdsFor(state.contributions, f);
+    const result = window.VTAggregate.build(state.contributions, fileIds, state.elo, {
+      minMatchesThreshold: 0,
+      rowFilter: P.rowFilter(f),
+    });
+    state.perfAggregate = result;
+    state.perfAggregateKey = key;
+    return result;
+  }
+
+  function perfMinN() {
+    const m = state.aggregate && state.aggregate.meta && state.aggregate.meta.min_career_matches;
+    return Number.isFinite(+m) && +m > 0 ? +m : window.VTPerfAxes.DEFAULT_MIN_N;
+  }
+
+  function populationMedians(careerStats, minN) {
+    const P = window.VTPerfAxes;
+    const out = {};
+    for (const a of P.AXES) {
+      const pop = P.population(careerStats, a.key, minN);
+      if (pop.length) out[a.key] = P.medianOf(pop.map(p => p.mean_z));
     }
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-      <style>
-        .vt-spark-pos { fill: var(--kb-success); }
-        .vt-spark-neg { fill: var(--kb-danger);  }
-        .vt-spark-mid { stroke: color-mix(in oklab, var(--kb-text-muted) 35%, transparent); stroke-width: 1; }
-      </style>
-      <line class="vt-spark-mid" x1="0" y1="${midY.toFixed(2)}" x2="${w}" y2="${midY.toFixed(2)}"/>
-      ${bars}
-    </svg>`;
+    return out;
+  }
+
+  function renderPerformanceTab(rating) {
+    const pane = $('vt-player-tab-performance');
+    if (!pane) return;
+    const P = window.VTPerfAxes;
+    const UI = window.VTPerfUI;
+    if (!P || !UI || !state.contributions) {
+      pane.innerHTML = phasePlaceholder('Performance', 'Match contributions are still loading.');
+      return;
+    }
+    const f = state.perfFilters || P.emptyFilters();
+    const agg = perfAggregateFor(f);
+    const careerStats = (agg && agg.career_stats) || [];
+    const sid = String(rating.steam64 || '');
+    const me = careerStats.find(c => String(c.steam64 || '') === sid) || null;
+    const minN = perfMinN();
+    const medians = populationMedians(careerStats, minN);
+    const series = P.playerSeries(state.contributions, sid, f);
+    // Chip counts answer "what would I get if I picked this?", so each
+    // facet is counted with its own selection removed.
+    const fmtCounts = { team: 0, '2v2': 0, '1v1': 0 };
+    for (const s of P.playerSeries(state.contributions, sid, Object.assign({}, f, { formats: [] }))) {
+      if (fmtCounts[s.format] != null) fmtCounts[s.format] += 1;
+    }
+    const facCounts = { i: 0, e: 0, f: 0 };
+    for (const s of P.playerSeries(state.contributions, sid, Object.assign({}, f, { faction: null }))) {
+      if (s.faction && facCounts[s.faction] != null) facCounts[s.faction] += 1;
+    }
+    const scope = UI.filterSummary(f);
+
+    const cards = P.AXES.map(a => {
+      const mine = me && me.perf_axes && me.perf_axes[a.key];
+      const pct = mine ? P.percentileOf(careerStats, a.key, mine.mean_z, minN) : null;
+      const spark = series.map(s => s.axes && s.axes[a.key]).filter(Boolean).map(d => d.z);
+      return UI.axisCardHtml(a, {
+        mean_z: mine ? mine.mean_z : null,
+        mean_raw: mine ? mine.mean_raw : null,
+        n: mine ? mine.n : 0,
+        pct,
+        median: medians[a.key],
+        spark,
+      }, { scope: f && !P.isEmptyFilters(f) ? `under this filter` : 'in the player base' });
+    }).join('');
+
+    const popN = P.population(careerStats, 'enemy_damage_share', minN).length;
+    pane.innerHTML = `
+      <div class="card mb-3">
+        <div class="card-body py-3">
+          ${UI.filterBarHtml('vt-perf-filterbar', {
+            contributions: state.contributions,
+            fileIds: Object.keys(state.contributions),
+            filters: f,
+            counts: { faction: facCounts, format: fmtCounts },
+          })}
+          <div class="text-secondary small mt-2">
+            <i class="bi bi-funnel me-1"></i>Showing <strong>${series.length}</strong> match${series.length === 1 ? '' : 'es'}
+            (${escapeHtml(scope)}) \u00b7 compared with <strong>${popN}</strong> player${popN === 1 ? '' : 's'} who have
+            ${minN}+ such matches.
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-5">
+          <div class="card h-100">
+            <div class="card-body">
+              <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+                <i class="bi bi-bullseye me-1"></i>Performance profile
+              </h2>
+              <div class="position-relative" style="aspect-ratio: 1 / 0.9;">
+                <canvas id="vt-perf-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+              </div>
+              <p class="text-secondary small mb-0 mt-2">
+                Solid = ${escapeHtml(rating.name)}'s mean lobby z per axis. Dashed = the median of players
+                with ${minN}+ matches under the same filter. Outside the dashed line is above the field.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-7">
+          <div class="card h-100">
+            <div class="card-body">
+              <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+                <i class="bi bi-info-circle me-1"></i>How to read this
+              </h2>
+              <p class="small text-secondary mb-2">
+                Every axis is a <strong>lobby z-score</strong>: how far this player sat from the average of the
+                players in that match, clipped to \u22121\u2026+1. +0.50 means roughly a standard deviation above
+                the lobby; 0 is the lobby average. These are the descriptive axes VTSR-T used to score before it
+                settled on enemy damage share \u2014 restored here as a <strong>picture, not a rating</strong>.
+              </p>
+              <p class="small text-secondary mb-2">
+                The percentile chip ranks the player's career mean on each axis against every other player
+                with ${minN}+ matches under the same filter, so "Top 18% of 42" with Scion \u00b7 Tank selected
+                means top 18% of Scion Tank players.
+              </p>
+              <p class="small text-secondary mb-0">
+                Filters narrow the player's own matches <em>and</em> the comparison group. Role scopes games played
+                as commander or as thug; a weapon counts for a match when it carried at least
+                ${Math.round(P.PERF_WEAPON_MIN_SHARE * 100)}% of that match's damage.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3" id="vt-perf-axis-cards">${cards}</div>
+    `;
+
+    // Radar.
+    if (state.perfRadarChart) { try { state.perfRadarChart.destroy(); } catch (_) {} state.perfRadarChart = null; }
+    const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : (getCSSVar('--kb-primary') || '#36a2eb');
+    const values = {};
+    if (me && me.perf_axes) for (const k in me.perf_axes) values[k] = me.perf_axes[k].mean_z;
+    try {
+      state.perfRadarChart = UI.renderRadar($('vt-perf-radar'), [{ label: rating.name, color, values }], {
+        median: Object.keys(medians).length ? medians : null,
+        medianLabel: `Median (${popN} players)`,
+      });
+    } catch (e) { console.warn('player.js: perf radar failed', e); }
+
+    // Filter bar.
+    UI.wireFilterBar($('vt-perf-filterbar'), f, (next) => {
+      state.perfFilters = next;
+      const params = currentParams();
+      P.applyFiltersToParams(params, next);
+      writeHistory(params, 'push');
+      renderPerformanceTab(rating);
+    });
   }
 
   // ---- Phase 6b: Highlights tab ----------------------------------------
@@ -2224,36 +2506,108 @@
       return false;
     });
 
-    if (!wonOrRunnerUp.length) {
-      pane.innerHTML = `
-        <div class="card"><div class="card-body">
+    const cabinet = renderAwardsCabinetHtml(rating);
+    const careerHtml = wonOrRunnerUp.length
+      ? `<div class="card mb-3">
+          <div class="card-body">
+            <h2 class="h6 text-secondary text-uppercase mb-1" style="letter-spacing:0.08em;">
+              <i class="bi bi-star me-1"></i>Career highlights
+            </h2>
+            <p class="text-secondary small mb-3">
+              Cards where ${escapeHtml(name)} is the winner or runner-up across the whole corpus.
+              Highlights are recomputed by the All Matches aggregator on every load.
+            </p>
+            <div class="row g-3">
+              ${wonOrRunnerUp.map(c => renderHighlightCard(c, name)).join('')}
+            </div>
+          </div>
+        </div>`
+      : `<div class="card mb-3"><div class="card-body">
           <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-            <i class="bi bi-star me-1"></i>Highlights
-          </h2>
-          <p class="text-secondary mb-0">
-            This player isn't currently the winner or runner-up of any career-highlight card.
-            Highlights cards self-omit when their data gates fail (some require a minimum
-            number of matches or activity threshold).
-          </p>
-        </div></div>`;
-      return;
-    }
-
-    pane.innerHTML = `
-      <div class="card mb-3">
-        <div class="card-body">
-          <h2 class="h6 text-secondary text-uppercase mb-1" style="letter-spacing:0.08em;">
             <i class="bi bi-star me-1"></i>Career highlights
           </h2>
-          <p class="text-secondary small mb-3">
-            Cards where ${escapeHtml(name)} is the winner or runner-up across the whole corpus.
-            Highlights are recomputed by the All Matches aggregator on every dashboard load.
+          <p class="text-secondary mb-0 small">
+            Not currently the winner or runner-up of any career-highlight card. Cards self-omit when
+            their data gates fail (some need a minimum number of matches).
           </p>
-          <div class="row g-3">
-            ${wonOrRunnerUp.map(c => renderHighlightCard(c, name)).join('')}
+        </div></div>`;
+    pane.innerHTML = `${cabinet}${careerHtml}`;
+  }
+
+  // Per-match award catalog (scripts/process_stats.py HIGHLIGHTS_LABELS).
+  // Labels + icons mirror the dashboard's Highlights card headers.
+  const MATCH_AWARD_CATALOG = {
+    the_bully:        { label: 'The Bully',        icon: 'bi-emoji-angry',         what: 'most PvP damage in a match' },
+    the_grim_reaper:  { label: 'The Grim Reaper',  icon: 'bi-person-x-fill',       what: 'most kills in a match' },
+    bullet_sponge:    { label: 'Bullet Sponge',    icon: 'bi-shield-fill',         what: 'most damage taken in a match' },
+    the_hustler:      { label: 'The Hustler',      icon: 'bi-graph-up-arrow',      what: 'best K/D in a match' },
+    sharpshooter:     { label: 'Sharpshooter',     icon: 'bi-bullseye',            what: 'best accuracy in a match' },
+    gunner:           { label: 'Gunner',           icon: 'bi-lightning-charge',    what: 'most shots fired in a match' },
+    puppeteer:        { label: 'Puppeteer',        icon: 'bi-diagram-3',           what: 'most damage from turrets, scavs and deployables' },
+    frenemies:        { label: 'Frenemies',        icon: 'bi-people-fill',         what: 'the lobby\u2019s hottest two-way rivalry' },
+    roadrunner:       { label: 'Roadrunner',       icon: 'bi-rocket-takeoff',      what: 'highest movement score' },
+    crate_pod_goblin: { label: 'Pod Goblin',       icon: 'bi-box-seam',            what: 'most powerups grabbed + denied' },
+    chris_kyle:       { label: 'Chris Kyle',       icon: 'bi-crosshair',           what: 'most pilot snipes' },
+    the_locksmith:    { label: 'The Locksmith',    icon: 'bi-lock-fill',           what: 'most time with target lock on' },
+    the_tycoon:       { label: 'Elon Musk',        icon: 'bi-cash-stack',          what: 'most scrap generated while commanding' },
+    loose_collector:  { label: 'Loose Collector',  icon: 'bi-box-arrow-in-down',   what: 'most loose collected while commanding' },
+    war_machine:      { label: 'Conveyor Belt',    icon: 'bi-gear-wide-connected', what: 'most combat-ship value fielded' },
+    first_upgrade:    { label: 'First Upgrade',    icon: 'bi-arrow-up-circle',     what: 'first live upgraded pool' },
+  };
+
+  // Awards cabinet: per per-match highlight card, how often this player
+  // won it, was runner-up, the win rate per match played, and the most
+  // recent win (links to the match). From the aggregator's award_counts.
+  function renderAwardsCabinetHtml(rating) {
+    const career = lookupCareer(rating);
+    const counts = (career && career.award_counts) || {};
+    const played = career ? safeNum(career.matches_played) : 0;
+    const cats = Object.keys(counts).filter(c => (counts[c].wins || 0) + (counts[c].runner_ups || 0) > 0);
+    if (!cats.length) {
+      return `<div class="card mb-3"><div class="card-body">
+        <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+          <i class="bi bi-trophy me-1"></i>Awards cabinet
+        </h2>
+        <p class="text-secondary small mb-0">No per-match awards yet.</p>
+      </div></div>`;
+    }
+    cats.sort((a, b) => (counts[b].wins - counts[a].wins) || (counts[b].runner_ups - counts[a].runner_ups) || a.localeCompare(b));
+    const totalWins = cats.reduce((s, c) => s + (counts[c].wins || 0), 0);
+    const tiles = cats.map(c => {
+      const meta = MATCH_AWARD_CATALOG[c] || { label: c.replace(/_/g, ' '), icon: 'bi-award', what: '' };
+      const w = counts[c].wins || 0;
+      const ru = counts[c].runner_ups || 0;
+      const rate = played > 0 ? (w / played) * 100 : null;
+      const last = counts[c].last_win_id
+        ? `<a href="${state.dataPrefix}index.html?match=${encodeURIComponent(counts[c].last_win_id)}" title="Open the most recent win">${escapeHtml(String(counts[c].last_win_date || counts[c].last_win_id).slice(0, 10))}</a>`
+        : '\u2014';
+      return `<div class="col-6 col-md-4 col-xl-3">
+        <div class="vt-award-tile${w > 0 ? '' : ' vt-award-tile--runnerup-only'}" title="${escapeHtml(meta.what)}">
+          <div class="vt-award-tile-head">
+            <i class="bi ${escapeHtml(meta.icon)}"></i>
+            <span class="vt-award-tile-label">${escapeHtml(meta.label)}</span>
           </div>
+          <div class="vt-award-tile-count"><span class="num">${w}</span><span class="vt-award-tile-x">\u00d7</span></div>
+          <div class="vt-award-tile-sub text-secondary small">
+            ${rate != null ? `${rate.toFixed(0)}% of matches` : ''}${ru ? ` \u00b7 ${ru} runner-up` : ''}
+          </div>
+          <div class="vt-award-tile-sub text-secondary small">Last: ${last}</div>
         </div>
       </div>`;
+    }).join('');
+    return `<div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-secondary text-uppercase mb-1" style="letter-spacing:0.08em;">
+          <i class="bi bi-trophy me-1"></i>Awards cabinet
+          <span class="text-secondary fw-normal text-none ms-2" style="letter-spacing:0;text-transform:none;">${totalWins} per-match award${totalWins === 1 ? '' : 's'} over ${played} match${played === 1 ? '' : 'es'}</span>
+        </h2>
+        <p class="text-secondary small mb-3">
+          Every recorded match hands out the Highlights cards; this is how often ${escapeHtml(rating.name)} took each one.
+          Hover a tile for what the award measures.
+        </p>
+        <div class="row g-2">${tiles}</div>
+      </div>
+    </div>`;
   }
 
   // Unit suffix on the headline number. Mirrors CAREER_HIGHLIGHT_UNITS in
@@ -2630,70 +2984,8 @@
     };
   }
 
-  function renderRivalsTab(rating) {
-    const pane = $('vt-player-tab-rivals');
-    if (!state.contributions) {
-      pane.innerHTML = phasePlaceholder('Rivals', 'Match contributions are still loading.');
-      return;
-    }
-    const name = rating.name;
-
-    // Build the per-player rivalry totals by walking every match's
-    // rivalry_matrix. dealt[victim] = damage I did to them across
-    // the corpus; received[shooter] = damage I took.
-    const dealtBy   = new Map(); // victim_name -> dmg
-    const takenFrom = new Map(); // shooter_name -> dmg
-    for (const key in state.contributions) {
-      const m = state.contributions[key];
-      const rm = m.rivalry_matrix || {};
-      // dealt: I'm the shooter
-      const myDealt = rm[name];
-      if (myDealt) {
-        for (const v in myDealt) {
-          if (v === name) continue;
-          dealtBy.set(v, (dealtBy.get(v) || 0) + (+myDealt[v] || 0));
-        }
-      }
-      // taken: someone else is the shooter, I'm the victim
-      for (const shooter in rm) {
-        if (shooter === name) continue;
-        const victims = rm[shooter] || {};
-        if (Number.isFinite(+victims[name])) {
-          takenFrom.set(shooter, (takenFrom.get(shooter) || 0) + (+victims[name] || 0));
-        }
-      }
-    }
-
-    // Merge into per-rival rows with both directions.
-    const rivals = new Map();
-    for (const [v, dmg] of dealtBy) {
-      if (!rivals.has(v)) rivals.set(v, { name: v, dealt: 0, received: 0 });
-      rivals.get(v).dealt = dmg;
-    }
-    for (const [s, dmg] of takenFrom) {
-      if (!rivals.has(s)) rivals.set(s, { name: s, dealt: 0, received: 0 });
-      rivals.get(s).received = dmg;
-    }
-    const rivalArr = Array.from(rivals.values())
-      .filter(r => r.dealt + r.received > 0)
-      .sort((a, b) => (b.dealt + b.received) - (a.dealt + a.received))
-      .slice(0, 10);
-
-    pane.innerHTML = `
-      <div class="card">
-        <div class="card-body">
-          <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-            <i class="bi bi-shield-shaded me-1"></i>Top rivals (corpus-wide)
-          </h2>
-          <p class="text-secondary small mb-3">
-            Two-way damage totals across every match this player appeared in. Tilt bar
-            shows whose direction landed more damage.
-          </p>
-          ${rivalArr.length ? renderRivalsTable(rivalArr) :
-            '<p class="text-secondary mb-0">No rivalry data found.</p>'}
-        </div>
-      </div>`;
-  }
+  // (The standalone Rivals tab is retired; rivalryTilesHtml() renders the
+  // nemesis / favorite-target tiles on the Overview from the same walk.)
 
   // ---- Commander Rivalries panel (VTSR-C) -------------------------------
   // Duel-lens on the player's commander career: every corpus match where
@@ -2985,16 +3277,16 @@
         <i class="bi bi-cash-stack me-1"></i>Commander economy
         <span class="vt-cmdr-econ-badge" title="Built from proto v4 resource/build telemetry \u2014 only matches recorded with the new collector count toward these stats.">v4 telemetry &middot; ${denomCaption}</span>
       </h3>
-      <p class="text-secondary small mb-2">Recorded, not scored. These figures are not part of the VTSR-C rating.</p>
+      <p class="text-secondary small mb-2">Recorded, not scored. Per-match averages over the telemetry matches; none of this is part of the VTSR-C rating.</p>
       <div class="vt-cmdr-econ-grid">
         ${tile('Income / min', fmtR(r.avg_income_per_min), 'scrap generated per minute')}
-        ${tile('Total income', fmtNum(r.total_scrap_income), 'scrap generated')}
-        ${tile('Loose collected', fmtNum(r.total_income_loose),
+        ${tile('Income / match', fmtNum(r.avg_scrap_income), `${fmtNum(r.total_scrap_income)} total`)}
+        ${tile('Loose / match', fmtNum(r.avg_income_loose),
                r.loose_share != null ? `${Math.round(r.loose_share * 100)}% of income` : 'scrap collected as loose')}
-        ${tile('Ships built', fmtNum(r.total_ships_built), `${fmtR(r.avg_ships_per_min, 2)} / min`)}
-        ${tile('Combat ship value', fmtNum(r.total_combat_ship_value), 'scrap fielded as warships')}
+        ${tile('Ships built / match', fmtR(r.avg_ships_built, 1), `${fmtR(r.avg_ships_per_min, 2)} / min \u00b7 ${fmtNum(r.total_ships_built)} total`)}
+        ${tile('Combat value / match', fmtNum(r.avg_combat_ship_value), 'scrap fielded as warships')}
         ${tile('Avg float', fmtPct(r.avg_float_ratio), 'bank level vs storage cap')}
-        ${tile('Peak pools', r.peak_pools == null ? dash : r.peak_pools, 'best extractor count')}
+        ${tile('Avg peak pools', fmtR(r.avg_peak_pools, 1), `best ${r.peak_pools == null ? dash : r.peak_pools} in one match`)}
         ${tile('Rebuild latency', r.avg_rebuild_latency_sec == null ? dash : `${fmtR(r.avg_rebuild_latency_sec)}s`, 'median queue\u2192build wait')}
       </div>
     </div>`;
@@ -3661,32 +3953,22 @@
     const sid = String(rating.steam64 || '');
     const cmdrPending = state.cmdrElo === undefined || state.cmdrEloHistory === undefined;
     const mapPending = state.mapRegistry === undefined;
-    const v1Pending = state.v1Elo === undefined || state.v1EloHistory === undefined;
-    const v2Pending = state.v2Elo === undefined || state.v2EloHistory === undefined;
-    if (cmdrPending || mapPending || v1Pending || v2Pending) {
+    if (cmdrPending || mapPending) {
       const jobs = [];
       if (cmdrPending) jobs.push(Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]));
       if (mapPending) jobs.push(ensureMapRegistryLoaded());
-      if (v1Pending) jobs.push(ensureV1EloLoaded());
-      if (v2Pending) jobs.push(ensureV2EloLoaded());
       Promise.all(jobs).then(() => scheduleCommanderRerender(rating));
     }
     const riv = buildCommanderRivalries(sid);
     const series = buildCmdrRatingSeries(sid);
     const ladder = cmdrLadderRowFor(sid);
-    const v1Html = render1v1BlockHtml(sid);
-    const v2Html = render2v2BlockHtml(sid);
     if (cmdrPending && riv.commandedTotal < 1) {
       pane.innerHTML = phasePlaceholder('Commander', 'Loading commander rating.');
       return;
     }
     if (!cmdrPending && riv.commandedTotal < 1 && series.length < 1 && !ladder) {
-      if (v1Html || v2Html) {
-        pane.innerHTML = `${v1Html}${v2Html}`;
-        drawV1RatingChart(sid);
-        return;
-      }
-      pane.innerHTML = phasePlaceholder('Commander', 'No commander games recorded.');
+      pane.innerHTML = phasePlaceholder('Commander',
+        'No commander games recorded. 1v1 and 2v2 ladders live on the Trends tab.');
       return;
     }
     const panel = renderCommanderRivalriesPanel(rating, sid);
@@ -3695,15 +3977,12 @@
     pane.innerHTML = `
       ${panel.ratingHtml || ''}
       ${renderCmdrInsightsHtml(series)}
+      ${econCard}
       ${panel.opponentsHtml || ''}
       ${renderCmdrMapsHtml(sid)}
       ${renderCmdrFactionsHtml(sid)}
-      ${renderCmdrDuelLogHtml(series)}
-      ${econCard}
-      ${v1Html}
-      ${v2Html}`;
+      ${renderCmdrDuelLogHtml(series)}`;
     drawCmdrRatingChart(rating, sid);
-    drawV1RatingChart(sid);
   }
 
   // ---- Phase 6d: Loadout & ships tab -----------------------------------
@@ -3727,6 +4006,10 @@
       ? Object.keys(loadout.ships).map(k => ({ key: k, ...loadout.ships[k] }))
           .sort((a, b) => b.share - a.share)
       : [];
+    // Same-name ships (ISDF Scout / Scion Scout) get their faction appended.
+    const shipLabelsFor = (keys) => (window.VTPerfUI ? window.VTPerfUI.shipLabels(keys) : keys.map(k => shipLabel(k)));
+    const loadoutLabels = shipLabelsFor(ships.map(s => s.key));
+    const perShipLabels = shipLabelsFor(perShip.map(s => s.ship));
 
     pane.innerHTML = `
       <div class="row g-3">
@@ -3738,7 +4021,7 @@
               </h2>
               ${loadout ? `
                 <p class="text-secondary small mb-3">
-                  Primary: <strong>${escapeHtml(loadout.primary_ship.name)}</strong>
+                  Primary: <strong>${escapeHtml(shipLabel(loadout.primary_ship.odf, loadout.primary_ship.name))}</strong>
                   (${(loadout.primary_ship.share * 100).toFixed(0)}% of active time).
                   Diversity: ${loadout.ship_diversity} ship${loadout.ship_diversity === 1 ? '' : 's'}
                   &middot; Total active: ${formatPlayTime(loadout.active_seconds)}.
@@ -3748,7 +4031,7 @@
                     const pct = (s.share || 0) * 100;
                     return `<div class="vt-wbar mb-2">
                       <div class="vt-wbar-head">
-                        <span class="vt-wbar-name">${escapeHtml(s.name)}</span>
+                        <span class="vt-wbar-name">${escapeHtml(loadoutLabels[i] || shipLabel(s.key, s.name))}</span>
                         <span class="vt-wbar-meta">${pct.toFixed(1)}% &middot; ${formatPlayTime(s.seconds)}</span>
                       </div>
                       <div class="vt-axis-track">
@@ -3781,12 +4064,12 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${perShip.map(s => {
+                      ${perShip.map((s, i) => {
                         const kd = s.deaths > 0 ? (s.kills / s.deaths).toFixed(2)
                                   : (s.kills > 0 ? '\u221E' : '0.00');
                         const acc = s.shots > 0 ? ((s.hits / s.shots) * 100).toFixed(1) + '%' : '\u2014';
                         return `<tr>
-                          <td><strong>${escapeHtml(s.ship_name || s.ship)}</strong></td>
+                          <td><strong>${escapeHtml(perShipLabels[i] || shipLabel(s.ship, s.ship_name || s.ship))}</strong></td>
                           <td class="text-end vt-matchlog-num">${formatPlayTime(s.time_seconds)}</td>
                           <td class="text-end vt-matchlog-num">${kd}
                             <span class="text-secondary small">(${s.kills}/${s.deaths})</span>
@@ -3818,35 +4101,67 @@
 
   function renderOverviewTab(rating) {
     const career = lookupCareer(rating);
-    const axisMeans = rating.axis_means || {};
-    const ranked = rankAxisMeans(axisMeans);
+    const band = VTSRDisplay.bandFor(rating);
+    const peakBand = VTSRDisplay.rawBandFor(rating.peak_vtsr || rating.vtsr);
+    const form = recentFormStat(rating);
+    const ladder = ladderStatusStat(rating);
+    const statAttrs = s => (s.title ? ` title="${escapeHtml(s.title)}"` : '');
 
     const html = `
       <div class="row g-3">
-        <!-- Strengths & weaknesses panel -->
-        <div class="col-12 col-lg-6">
-          <div class="card h-100">
+        <!-- Rating hero card (was the page hero) -->
+        <div class="col-12">
+          <div class="card vt-player-hero-card">
             <div class="card-body">
-              <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-graph-up-arrow me-1"></i>Strengths &amp; weaknesses
-              </h2>
-              ${renderStrengthsWeaknesses(ranked)}
-              <p class="text-secondary small mb-0 mt-3">
-                Scores are average post-clip <code>z</code> across this player's career
-                matches. Positive = above corpus median for the same role.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Coaching cards + quick wins -->
-        <div class="col-12 col-lg-6">
-          <div class="card h-100">
-            <div class="card-body">
-              <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-lightbulb me-1"></i>Performance observations
-              </h2>
-              ${renderCoachingPanel(ranked)}
+              <div class="vt-player-single-hero-body">
+                <div>
+                  <div class="vt-player-single-tier-row">
+                    <span class="text-secondary small">VTSR-T</span>
+                    <span class="text-secondary small">&middot;</span>
+                    <span class="text-secondary small">thug form rating, shown as a band</span>
+                  </div>
+                  <div class="vt-player-single-vtsr">
+                    ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
+                    ${VTSRDisplay.positionBarHtml(rating, ratingNoiseSigma(), { band, bsTooltip: false })}
+                  </div>
+                  <div class="vt-player-single-peak mt-2">
+                    <i class="bi bi-trophy-fill" style="color: var(--kb-success);"></i>
+                    Peak ${peakBand && !band.provisional ? escapeHtml(peakBand.label) : '\u2014'} &middot;
+                    <span class="num">${formatNumber(rating.matches_played)}</span> rated matches
+                    (<span class="num">${formatNumber(rating.matches_as_commander)}</span>C /
+                     <span class="num">${formatNumber(rating.matches_as_thug)}</span>T)
+                  </div>
+                  <div class="vt-player-single-spark mt-3" title="Last rated games: above (green) / below (red) what the rating expected">
+                    ${sparkSvg(rating.win_history, 320, 64)}
+                  </div>
+                </div>
+                <div>
+                  <div class="vt-player-single-stats">
+                    <div class="vt-player-single-stat">
+                      <div class="vt-player-single-stat-label">Last game</div>
+                      <div class="vt-player-single-stat-value">
+                        ${Number.isFinite(rating.last_delta) ? VTSRDisplay.verdictChipHtml(rating.last_delta, { long: true, bsTooltip: false }) : '\u2014'}
+                      </div>
+                    </div>
+                    <div class="vt-player-single-stat">
+                      <div class="vt-player-single-stat-label">${escapeHtml(form.label)}</div>
+                      <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(form)}>${form.valueHtml}</div>
+                    </div>
+                    <div class="vt-player-single-stat">
+                      <div class="vt-player-single-stat-label">${escapeHtml(ladder.label)}</div>
+                      <div class="vt-player-single-stat-value" style="font-size:0.95rem;"${statAttrs(ladder)}>${ladder.valueHtml}</div>
+                    </div>
+                    <div class="vt-player-single-stat">
+                      <div class="vt-player-single-stat-label">Last match</div>
+                      <div class="vt-player-single-stat-value" style="font-size:0.95rem;">
+                        ${rating.last_match_id
+                          ? `<a href="${state.dataPrefix}index.html?match=${encodeURIComponent(rating.last_match_id)}">${escapeHtml(String(rating.last_match_id).slice(0, 10))}</a>`
+                          : '\u2014'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3863,7 +4178,7 @@
           </div>
         </div>
 
-        <!-- Profile card (VTSR-T axis_means vs corpus median; radar at 3+ axes) -->
+        <!-- Compact 10-axis perf radar (all-time) -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">
@@ -3875,12 +4190,22 @@
                   <canvas id="vt-player-overview-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
                 </div>
                 <p class="text-secondary small mb-0 mt-2 text-center">
-                  These are the <strong>VTSR-T axes</strong>. Solid = this player's
-                  career-average z. Dashed = corpus median. Outside the dashed line =
-                  above median; inside = below.
-                  <a href="?tab=axes" data-vt-open-tab="axes">Axes over time</a>
+                  Mean lobby z per axis, all matches. Dashed = player-base median.
+                  <a href="?tab=performance" data-vt-open-tab="performance">Filter &amp; percentiles</a>
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rivalries: nemesis + favorite target -->
+        <div class="col-12" id="vt-player-rivalries-wrap">
+          <div class="card">
+            <div class="card-body">
+              <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
+                <i class="bi bi-shield-shaded me-1"></i>Rivalries
+              </h2>
+              ${rivalryTilesHtml(rating)}
             </div>
           </div>
         </div>
@@ -3919,53 +4244,122 @@
       wrap.classList.remove('d-none');
     });
 
-    // VTSR-T spider from axis_means. No fallback to the descriptive
-    // career radar in charts-radar.js — a missing rating is an empty state.
+    // Compact 10-axis radar from the all-time career perf_axes means
+    // (descriptive axes, not the rating). Empty state when the player has
+    // no rated rows with axes.
     if (state.overviewRadarChart) {
       try { state.overviewRadarChart.destroy(); } catch (_) {}
       state.overviewRadarChart = null;
     }
     const radarBody = $('vt-player-overview-radar-body');
-    if (!hasVtsrMeans(rating)) {
+    const P = window.VTPerfAxes;
+    const UI = window.VTPerfUI;
+    const hasAxes = career && career.perf_axes && Object.keys(career.perf_axes).length > 0;
+    if (!P || !UI || !hasAxes) {
       if (radarBody) {
-        radarBody.innerHTML = '<p class="text-secondary text-center my-4 small mb-0">Needs rated matches.</p>';
-      }
-    } else if (vtsrAxes().length < VTSR_RADAR_MIN_AXES) {
-      if (radarBody) {
-        const ratings = (state.elo && state.elo.ratings) || [];
-        const med = corpusMedianVtsr(ratings);
-        const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : '#36a2eb';
-        radarBody.innerHTML = `
-          ${vtsrAxisBarsHtml([{ label: rating.name, color, axisMeans: rating.axis_means }], med && med.raw)}
-          <p class="text-secondary small mb-0 mt-3">
-            Career-average score on the <strong>VTSR-T axis</strong>, against the lobbies
-            this player was in. The dashed tick is the corpus median.
-            <a href="?tab=axes" data-vt-open-tab="axes">Over time</a>
-          </p>`;
+        radarBody.innerHTML = '<p class="text-secondary text-center my-4 small mb-0">Needs rated matches with performance data.</p>';
       }
     } else {
-      const ratings = (state.elo && state.elo.ratings) || [];
-      const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : '#36a2eb';
+      const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : (getCSSVar('--kb-primary') || '#36a2eb');
+      const values = {};
+      for (const k in career.perf_axes) values[k] = career.perf_axes[k].mean_z;
+      const medians = populationMedians(state.careerStats || [], perfMinN());
       try {
-        state.overviewRadarChart = renderVtsrRadar($('vt-player-overview-radar'), {
-          series: [{ label: rating.name, color, axisMeans: rating.axis_means }],
-          showMedian: ratings.filter(hasVtsrMeans).length >= 2,
-          medianRatings: ratings,
-        });
+        state.overviewRadarChart = UI.renderRadar($('vt-player-overview-radar'),
+          [{ label: rating.name, color, values }],
+          { median: Object.keys(medians).length ? medians : null, legend: false });
       } catch (e) {
-        console.warn('player.js: renderVtsrRadar failed', e);
+        console.warn('player.js: overview radar failed', e);
       }
     }
-    const axesLink = radarBody && radarBody.querySelector('[data-vt-open-tab="axes"]');
-    if (axesLink) {
-      axesLink.addEventListener('click', (e) => {
+    const perfLink = radarBody && radarBody.querySelector('[data-vt-open-tab="performance"]');
+    if (perfLink) {
+      perfLink.addEventListener('click', (e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        const btn = document.querySelector('#vt-player-tabs [data-bs-target="#vt-player-tab-axes"]');
+        const btn = document.querySelector('#vt-player-tabs [data-bs-target="#vt-player-tab-performance"]');
         if (!btn || !(window.bootstrap && window.bootstrap.Tab)) return;
         e.preventDefault();
         window.bootstrap.Tab.getOrCreateInstance(btn).show();
       });
     }
+  }
+
+  // Rivalries tiles for the Overview: nemesis (most damage taken from)
+  // and favorite target (most damage dealt to), with the top-5 two-way
+  // table collapsed behind a details toggle. Walks every match's
+  // rivalry_matrix (damage only, name-keyed).
+  function rivalryTotals(name) {
+    const dealtBy = new Map();
+    const takenFrom = new Map();
+    for (const key in (state.contributions || {})) {
+      const m = state.contributions[key];
+      if (m.void) continue;
+      const rm = m.rivalry_matrix || {};
+      const myDealt = rm[name];
+      if (myDealt) {
+        for (const v in myDealt) {
+          if (v === name) continue;
+          dealtBy.set(v, (dealtBy.get(v) || 0) + (+myDealt[v] || 0));
+        }
+      }
+      for (const shooter in rm) {
+        if (shooter === name) continue;
+        const victims = rm[shooter] || {};
+        if (Number.isFinite(+victims[name])) {
+          takenFrom.set(shooter, (takenFrom.get(shooter) || 0) + (+victims[name] || 0));
+        }
+      }
+    }
+    const rivals = new Map();
+    for (const [v, dmg] of dealtBy) {
+      if (!rivals.has(v)) rivals.set(v, { name: v, dealt: 0, received: 0 });
+      rivals.get(v).dealt = dmg;
+    }
+    for (const [s, dmg] of takenFrom) {
+      if (!rivals.has(s)) rivals.set(s, { name: s, dealt: 0, received: 0 });
+      rivals.get(s).received = dmg;
+    }
+    return Array.from(rivals.values()).filter(r => r.dealt + r.received > 0);
+  }
+
+  function rivalryTilesHtml(rating) {
+    if (!state.contributions) return '<p class="text-secondary small mb-0">Match contributions are still loading.</p>';
+    const rows = rivalryTotals(rating.name);
+    if (!rows.length) return '<p class="text-secondary small mb-0">No rivalry data found.</p>';
+    const nemesis = rows.slice().sort((a, b) => b.received - a.received)[0];
+    const target = rows.slice().sort((a, b) => b.dealt - a.dealt)[0];
+    const top = rows.slice().sort((a, b) => (b.dealt + b.received) - (a.dealt + a.received)).slice(0, 5);
+    const link = n => {
+      const s64 = vtSteam64ForName(n);
+      return s64 ? `<a href="${playerHref(s64)}">${escapeHtml(n)}</a>` : escapeHtml(n);
+    };
+    const tile = (label, icon, r, value, sub) => `
+      <div class="vt-rival-tile">
+        <div class="vt-rival-tile-label"><i class="bi ${icon} me-1"></i>${label}</div>
+        <div class="vt-rival-tile-name">${r ? link(r.name) : '\u2014'}</div>
+        <div class="vt-rival-tile-value vt-mono">${value}</div>
+        <div class="vt-rival-tile-sub text-secondary small">${sub}</div>
+      </div>`;
+    return `
+      <div class="vt-rival-tiles">
+        ${tile('Nemesis', 'bi-lightning-charge', nemesis,
+               nemesis && nemesis.received > 0 ? formatNumber(Math.round(nemesis.received)) : '\u2014',
+               nemesis ? `damage taken from them \u00b7 you dealt ${formatNumber(Math.round(nemesis.dealt))} back` : '')}
+        ${tile('Favorite target', 'bi-crosshair', target,
+               target && target.dealt > 0 ? formatNumber(Math.round(target.dealt)) : '\u2014',
+               target ? `damage dealt to them \u00b7 they dealt ${formatNumber(Math.round(target.received))} back` : '')}
+      </div>
+      <details class="mt-2">
+        <summary class="small text-secondary">Top ${top.length} two-way rivalries</summary>
+        <div class="mt-2">${renderRivalsTable(top)}</div>
+      </details>`;
+  }
+
+  // Name -> Steam64 via the loaded career rows (contribution names are
+  // alias-pinned, so this is a stable join for rivalry links).
+  function vtSteam64ForName(name) {
+    const c = (state.careerStats || []).find(r => r.name === name);
+    return c && c.steam64 ? String(c.steam64) : null;
   }
 
   /** Match the rating's player to the threshold-0 career_stats row.
@@ -4006,26 +4400,55 @@
     const snipes = career && Number.isFinite(+career.total_snipes)
       ? +career.total_snipes
       : null;
+    const played = career ? safeNum(career.matches_played) : matches;
+    const perMatch = v => (career && played > 0 && Number.isFinite(+v) ? formatNumber(Math.round(+v / played)) : '\u2014');
+    const wins = career && career.wins ? career.wins.total : null;
+    const losses = career && career.losses ? career.losses.total : null;
+    const det = (wins || 0) + (losses || 0);
+    const winPct = det > 0 ? (wins / det) * 100 : null;
+    const fc = (career && career.format_counts) || {};
+    const fmtParts = [];
+    if (fc.team) fmtParts.push(`${fc.team} \u00d7 3v3+`);
+    if (fc['2v2']) fmtParts.push(`${fc['2v2']} \u00d7 2v2`);
+    if (fc['1v1']) fmtParts.push(`${fc['1v1']} \u00d7 1v1`);
+    if (fc.other) fmtParts.push(`${fc.other} other`);
+    const fmc = (career && career.faction_match_count) || {};
+    const facChips = [['i', 'ISDF'], ['e', 'Hadean'], ['f', 'Scion']]
+      .filter(([c]) => fmc[c] > 0)
+      .sort((a, b) => fmc[b[0]] - fmc[a[0]])
+      .map(([c, label]) => `<span class="vt-faction-badge" data-faction-code="${c}" title="${fmc[c]} match${fmc[c] === 1 ? '' : 'es'} as ${label}">${label}&nbsp;<span class="num">\u00d7${fmc[c]}</span></span>`)
+      .join(' ');
+    const shipChip = primary
+      ? `<span class="vt-player-card-pill vt-player-card-pill--ship" title="Primary ship by time: ${(career.career_loadout.primary_ship.share * 100).toFixed(0)}% of active time">
+           <i class="bi bi-fuel-pump"></i><span>${escapeHtml(shipLabel(career.career_loadout.primary_ship.odf, primary))}</span>
+         </span>`
+      : '';
 
     return `
       <div class="vt-player-single-stats">
-        ${stat('Matches', formatNumber(matches), `${cm} as commander / ${th} as thug`)}
+        ${stat('Matches', formatNumber(career ? played : matches), `${cm} as commander / ${th} as thug`)}
+        ${stat('Record', det > 0 ? `${wins}\u2013${losses}` : '\u2014',
+               det > 0 ? `${winPct.toFixed(0)}% on ${det} decided match${det === 1 ? '' : 'es'}` : 'no decided matches')}
+        ${stat('Formats', fmtParts.length ? fmtParts[0] : '\u2014',
+               fmtParts.length > 1 ? fmtParts.slice(1).join(' \u00b7 ') : 'games per format')}
         ${stat('Career K/D', kd === Infinity ? '\u221E' : (kd != null ? (Math.round(kd * 100) / 100).toFixed(2) : '\u2014'),
                career ? `${formatNumber(career.total_kills)} kills / ${formatNumber(career.total_deaths)} deaths` : '')}
         ${stat('PvP K/D', pvpKd === Infinity ? '\u221E' : (pvpKd != null ? (Math.round(pvpKd * 100) / 100).toFixed(2) : '\u2014'),
                career ? `${formatNumber(career.total_pvp_kills)} kills / ${formatNumber(career.total_pvp_deaths)} deaths` : '')}
         ${stat('Accuracy', acc != null ? `${(acc * 100).toFixed(1)}%` : '\u2014',
                career ? `${formatNumber(career.total_shots_hit)} hits / ${formatNumber(career.total_shots_fired)} shots` : '')}
-        ${stat('Damage trade', tradeRatio != null ? (Math.round(tradeRatio * 100) / 100).toFixed(2) : '\u2014',
-               career ? `${formatNumber(totalDealt)} dealt / ${formatNumber(totalReceived)} taken` : '')}
-        ${stat('PvE damage', career ? formatNumber(career.total_pve_dealt) : '\u2014',
+        ${stat('Damage / match', perMatch(totalDealt),
+               career ? `${perMatch(totalReceived)} taken / match \u00b7 trade ${tradeRatio != null ? (Math.round(tradeRatio * 100) / 100).toFixed(2) : '\u2014'}` : '')}
+        ${stat('PvE / match', perMatch(career && career.total_pve_dealt),
                career ? `${((career.total_pve_dealt / Math.max(1, career.total_pve_dealt + career.total_pvp_dealt)) * 100).toFixed(0)}% of damage` : '')}
         ${stat('T-Key usage', tkey != null ? `${(tkey * 100).toFixed(1)}%` : '\u2014',
-               tkey != null ? 'Avg target-lock time per match' : '')}
-        ${stat('Pilot snipes', snipes != null ? formatNumber(snipes) : '\u2014',
-               snipes != null && matches > 0 ? `${(snipes / matches).toFixed(2)} per match` : '')}
-        ${stat('Primary ship', primary || '\u2014',
-               career && career.career_loadout ? `${(career.career_loadout.primary_ship.share * 100).toFixed(0)}% of active time` : '')}
+               tkey != null ? 'avg target-lock time per match' : '')}
+        ${stat('Snipes / match', snipes != null && played > 0 ? (snipes / played).toFixed(2) : '\u2014',
+               snipes != null ? `${formatNumber(snipes)} pilot snipes` : '')}
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+        ${shipChip}
+        ${facChips}
       </div>`;
   }
 
@@ -4037,129 +4460,19 @@
     </div>`;
   }
 
-  /** Sort the player's axis_means by z desc. Returns an array of
-      { axisDef, z } entries — drops any axis the player has no entry
-      for (handles pre-v2.3 corpora gracefully). */
-  function rankAxisMeans(axisMeans) {
-    return vtsrAxes()
-      .map(def => ({ axisDef: def, z: Number.isFinite(+axisMeans[def.key]) ? +axisMeans[def.key] : null }))
-      .filter(e => e.z != null)
-      .sort((a, b) => b.z - a.z);
-  }
-
-  function renderStrengthsWeaknesses(ranked) {
-    if (!ranked.length) {
-      return '<p class="text-secondary mb-0">No axis breakdown available for this player.</p>';
-    }
-    // Order by axis weight descending (heaviest signal first) rather than
-    // by z. Primary key = elo.weights[key]; tiebreak = vtsrAxes() order,
-    // so this degrades gracefully if elo.weights is missing (404).
-    const weights = (state.elo && state.elo.weights) || {};
-    const axisOrder = new Map(vtsrAxes().map((def, i) => [def.key, i]));
-    const ordered = ranked.slice().sort((a, b) => {
-      const wDiff = (+weights[b.axisDef.key] || 0) - (+weights[a.axisDef.key] || 0);
-      if (wDiff !== 0) return wDiff;
-      return (axisOrder.get(a.axisDef.key) ?? 99) - (axisOrder.get(b.axisDef.key) ?? 99);
-    });
-    const rows = ordered.map((e, i) => {
-      const z = e.z;
-      const pct = Math.min(100, Math.max(0, ((z + 1) / 2) * 100));
-      const fillCls = z >= 0.25 ? 'vt-axis-fill-strong'
-                    : z >= 0    ? 'vt-axis-fill-mid'
-                                : 'vt-axis-fill-weak';
-      return `<div class="vt-axis-row">
-        <div class="vt-axis-row-head">
-          <span class="vt-axis-rank">${i + 1}.</span>
-          <i class="bi ${e.axisDef.icon} vt-axis-icon"></i>
-          <span class="vt-axis-label">${escapeHtml(e.axisDef.label)}</span>
-          <span class="vt-axis-z ${z >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">
-            ${z >= 0 ? '+' : ''}${z.toFixed(2)}
-          </span>
-        </div>
-        <div class="vt-axis-track">
-          <div class="vt-axis-midline"></div>
-          <div class="vt-axis-fill ${fillCls}" style="left: ${z >= 0 ? '50%' : (pct + '%')}; width: ${Math.abs(pct - 50)}%;"></div>
-        </div>
-      </div>`;
-    }).join('');
-    return `<div class="vt-axis-list">${rows}</div>`;
-  }
-
-  // Render a coaching `body` string into one or more <p> tags. Defensively
-  // HTML-escapes (even though COACHING_COPY is module-local) and then
-  // re-allows only the `<u>` inline tag. `\n\n` becomes a paragraph break so
-  // copy can opt into multi-paragraph layout without changing the dict shape.
-  function formatCoachingBody(body) {
-    if (typeof body !== 'string' || !body.length) return '';
-    const escaped = escapeHtml(body)
-      .replace(/&lt;u&gt;/g, '<u>')
-      .replace(/&lt;\/u&gt;/g, '</u>');
-    return escaped
-      .split(/\n\s*\n/)
-      .map(p => `<p class="mb-2 small text-secondary">${p}</p>`)
-      .join('');
-  }
-
-  function renderCoachingPanel(ranked) {
-    // Rank by impact (|z| * weight) instead of raw z so heavy axes outrank
-    // low-weight axes regardless of how negative their z is.
-    const weights = (state.elo && state.elo.weights) || {};
-    const weak = ranked
-      .filter(e => e.z < 0)
-      .map(e => ({ ...e, impact: Math.abs(e.z) * (+weights[e.axisDef.key] || 0) }))
-      .sort((a, b) => b.impact - a.impact)
-      .slice(0, 3);
-
-    if (!weak.length) {
-      return `<p class="text-secondary mb-3">
-        This player is at or above corpus median on every axis. Nicely done.
-      </p>
-      <p class="text-secondary small mb-0">
-        Marginal gains can still come from doubling down on top-axis play — see the strengths panel.
-      </p>`;
-    }
-
-    const cards = weak.map((e) => {
-      const copy = COACHING_COPY[e.axisDef.key] || {
-        head: `${e.axisDef.label} is below median.`,
-        body: 'No specific coaching tip wired yet for this axis.',
-      };
-      const share = axisWeightShare(e.axisDef.key);
-      const zCls = `vt-coaching-z ${e.z >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}`;
-      return `<div class="vt-coaching-card">
-        <div class="vt-coaching-head">
-          <i class="bi ${e.axisDef.icon}"></i>
-          <span class="vt-coaching-axis">${escapeHtml(e.axisDef.label)}</span>
-          <span class="${zCls}">
-            ${e.z >= 0 ? '+' : ''}${e.z.toFixed(2)}
-          </span>
-        </div>
-        <div class="vt-coaching-body">
-          <strong>${escapeHtml(copy.head)}</strong>
-          ${formatCoachingBody(copy.body)}
-          <div class="vt-coaching-projection">
-            <i class="bi bi-graph-up-arrow"></i>
-            This axis is
-            <strong class="vt-vtsr-delta-positive">${Math.round(share * 100)}%</strong>
-            of the game grade behind VTSR-T
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-
-    return `<div class="vt-coaching-list">${cards}</div>`;
-  }
-
+  // (Strengths & weaknesses, Performance observations and the coaching
+  // copy are retired: the Performance tab's per-axis cards with
+  // vs-player-base percentiles replace them, and the single VTSR-T axis
+  // no longer supports a "what to work on" ranking.)
 
   function renderSingleTabs() {
     const TABS = [
-      { id: 'vt-player-tab-overview',   label: 'Overview',   icon: 'bi-info-circle' },
-      { id: 'vt-player-tab-rating',     label: 'Rating',     icon: 'bi-graph-up' },
-      { id: 'vt-player-tab-commander',  label: 'Commander',  icon: 'bi-person-badge' },
-      { id: 'vt-player-tab-axes',       label: 'Axes',       icon: 'bi-bullseye' },
-      { id: 'vt-player-tab-highlights', label: 'Highlights', icon: 'bi-star' },
-      { id: 'vt-player-tab-rivals',     label: 'Rivals',     icon: 'bi-shield-shaded' },
-      { id: 'vt-player-tab-loadout',    label: 'Loadout',    icon: 'bi-fuel-pump' },
+      { id: 'vt-player-tab-overview',    label: 'Overview',    icon: 'bi-info-circle' },
+      { id: 'vt-player-tab-performance', label: 'Performance', icon: 'bi-bullseye' },
+      { id: 'vt-player-tab-trends',      label: 'Trends',      icon: 'bi-graph-up' },
+      { id: 'vt-player-tab-commander',   label: 'Commander',   icon: 'bi-person-badge' },
+      { id: 'vt-player-tab-highlights',  label: 'Highlights',  icon: 'bi-star' },
+      { id: 'vt-player-tab-loadout',     label: 'Loadout',     icon: 'bi-fuel-pump' },
     ];
     dom.singleTabs.innerHTML = TABS.map((t, i) => `
       <li class="nav-item">
@@ -4253,6 +4566,8 @@
     xAxisMode: 'date',   // 'date' | 'matches-played'
     radarChart: null,
     tsChart: null,
+    filters: null,       // VTPerfAxes filters (shared URL keys with the Performance tab)
+    careerRows: [],      // career_stats under `filters` (all-time rows when empty)
   };
 
   async function renderCompare(slugs) {
@@ -4298,11 +4613,24 @@
       }
     }
 
+    // Perf filters ride on the compare URL too (shared keys with the
+    // Performance tab). The filtered aggregate scopes the radar, the
+    // stat grid and the percentile rows; the time-series + common
+    // matches stay all-time (ratings are not filterable).
+    if (window.VTPerfAxes) {
+      compareState.filters = window.VTPerfAxes.filtersFromParams(currentParams());
+    }
+    const scoped = compareState.filters && window.VTPerfAxes && !window.VTPerfAxes.isEmptyFilters(compareState.filters)
+      ? perfAggregateFor(compareState.filters)
+      : null;
+    const careerRows = (scoped && scoped.career_stats) || state.careerStats || [];
+    compareState.careerRows = careerRows;
+
     // Decorate with career row + a stable per-slot color.
-    const careerByName = new Map();
-    for (const c of (state.careerStats || [])) careerByName.set(c.name, c);
+    const careerBySteam = new Map();
+    for (const c of careerRows) if (c.steam64) careerBySteam.set(String(c.steam64), c);
     found.forEach((f, i) => {
-      f.career = careerByName.get(f.rating.name) || null;
+      f.career = careerBySteam.get(String(f.rating.steam64 || '')) || null;
       f.color = (typeof window.getPlayerColor === 'function') ? window.getPlayerColor(i) : '#36a2eb';
     });
 
@@ -4346,7 +4674,7 @@
     const r = f.rating;
     const role = roleLabel(r);
     const primary = f.career && f.career.career_loadout && f.career.career_loadout.primary_ship
-      ? f.career.career_loadout.primary_ship.name : null;
+      ? shipLabel(f.career.career_loadout.primary_ship.odf, f.career.career_loadout.primary_ship.name) : null;
     const href = playerHref(r.steam64);
     return `
       <div class="vt-compare-mini-card" style="--vt-compare-accent: ${f.color};"
@@ -4392,16 +4720,35 @@
   }
 
   function renderCompareBody(found) {
-    // 4 sections: radar / rating chart / transposed stat grid / common
-    // matches. Two-column at lg+; single-column on phones.
+    // Filter bar + 4 sections: radar / rating chart / transposed stat
+    // grid / common matches. Two-column at lg+; single-column on phones.
+    const P = window.VTPerfAxes;
+    const UI = window.VTPerfUI;
+    const f = compareState.filters || (P ? P.emptyFilters() : null);
+    const filterBar = (P && UI && state.contributions)
+      ? `<div class="col-12">
+          <div class="card"><div class="card-body py-3">
+            ${UI.filterBarHtml('vt-compare-filterbar', {
+              contributions: state.contributions,
+              fileIds: Object.keys(state.contributions),
+              filters: f,
+            })}
+            <div class="text-secondary small mt-2">
+              <i class="bi bi-funnel me-1"></i>Scope: <strong>${escapeHtml(UI.filterSummary(f))}</strong> \u2014 applies to the
+              performance profile and the stat grid. Ratings over time and common matches are always all-time.
+            </div>
+          </div></div>
+        </div>`
+      : '';
     const html = `
       <div class="row g-3">
-        <!-- VTSR-T axis overlay (top-left): radar at 3+ axes, bars below -->
+        ${filterBar}
+        <!-- Performance profile overlay (top-left): 10 descriptive axes -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">
               <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-bullseye me-1"></i>VTSR-T axis overlay
+                <i class="bi bi-bullseye me-1"></i>Performance profile
               </h2>
               <div id="vt-compare-radar-body">
                 <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
@@ -4409,7 +4756,8 @@
                 </div>
               </div>
               <p class="text-secondary small mb-0 mt-2 text-center">
-                Career-mean post-clip z per VTSR-T axis, against the lobbies each player was in.
+                Mean lobby z per descriptive axis (\u22121\u2026+1), against the lobbies each player was in.
+                Dashed = player-base median under the same filter.
               </p>
             </div>
           </div>
@@ -4478,6 +4826,16 @@
       renderCompareTimeSeries(found);
       wireCompareBodyEvents(found);
     });
+
+    // Filter bar: rewrites the perf keys on the compare URL and re-renders.
+    if (P && UI) {
+      UI.wireFilterBar($('vt-compare-filterbar'), f, (next) => {
+        const params = currentParams();
+        P.applyFiltersToParams(params, next);
+        writeHistory(params, 'push');
+        renderCompare(compareState.found.map(x => x.slug));
+      });
+    }
   }
 
   // ---- Compare: radar overlay -----------------------------------------
@@ -4488,25 +4846,16 @@
       compareState.radarChart = null;
     }
     const canvas = $('vt-compare-radar');
-    if (!canvas) return;
-    if (vtsrAxes().length < VTSR_RADAR_MIN_AXES) {
-      const body = $('vt-compare-radar-body');
-      if (body) {
-        body.innerHTML = vtsrAxisBarsHtml(found.map(f => ({
-          label: f.rating.name,
-          color: f.color,
-          axisMeans: (f.rating && f.rating.axis_means) || {},
-        })), null);
-      }
-      return;
-    }
-    compareState.radarChart = renderVtsrRadar(canvas, {
-      series: found.map(f => ({
-        label: f.rating.name,
-        color: f.color,
-        axisMeans: (f.rating && f.rating.axis_means) || {},
-      })),
-      showMedian: false,
+    if (!canvas || !window.VTPerfUI || !window.VTPerfAxes) return;
+    const series = found.map(f => {
+      const values = {};
+      const pa = (f.career && f.career.perf_axes) || {};
+      for (const k in pa) values[k] = pa[k].mean_z;
+      return { label: f.rating.name, color: f.color, values };
+    });
+    const medians = populationMedians(compareState.careerRows || state.careerStats || [], perfMinN());
+    compareState.radarChart = window.VTPerfUI.renderRadar(canvas, series, {
+      median: Object.keys(medians).length ? medians : null,
     });
   }
 
@@ -4706,7 +5055,7 @@
                                                  ? career.total_shots_hit / career.total_shots_fired : null,
                                   format: pct,      dir: 'hi' },
       { label: 'PvP accuracy',   accessor: ({career}) => career && career.total_shots_fired > 0
-                                                 ? safeNum(career.total_pvp_hits) / career.total_shots_fired : null,
+                                                 ? safeNum(career.total_pvp_shots_hit) / career.total_shots_fired : null,
                                   format: pct,      dir: 'hi' },
       { label: 'Damage dealt',   accessor: ({career}) => career ? safeNum(career.total_dealt) : null,    format: num, dir: 'hi' },
       { label: 'Damage received',accessor: ({career}) => career ? safeNum(career.total_received) : null, format: num, dir: 'lo' },
@@ -4715,10 +5064,34 @@
                                   format: ratio,    dir: 'hi' },
       { label: 'T-Key usage',    accessor: ({career}) => career ? safeNum(career.mean_target_lock_pct) : null,
                                   format: pct,      dir: 'hi' },
-      { label: 'Enemy damage (z)', accessor: ({rating}) => rating && rating.axis_means ? safeNum(rating.axis_means.enemy_damage_share) : null,
-                                  format: (v) => Number.isFinite(+v) ? (Math.round(+v * 100) / 100).toFixed(2) : '—',
-                                  dir: 'hi' },
+      { label: 'Matches in scope', accessor: ({career}) => career ? safeNum(career.matches_played) : null, format: num, dir: 'hi',
+                                  section: 'Performance axes (scoped)' },
+      ...perfAxisStatRows(),
     ];
+  }
+
+  // One stat-grid row per descriptive axis: the mean z under the compare
+  // filter with the vs-player-base percentile beside it.
+  function perfAxisStatRows() {
+    const P = window.VTPerfAxes;
+    const UI = window.VTPerfUI;
+    if (!P || !UI) return [];
+    const minN = perfMinN();
+    return P.AXES.map(a => ({
+      label: a.label,
+      accessor: ({ career }) => {
+        const d = career && career.perf_axes && career.perf_axes[a.key];
+        return d && Number.isFinite(+d.mean_z) ? +d.mean_z : null;
+      },
+      format: (v, f) => {
+        const d = f.career && f.career.perf_axes && f.career.perf_axes[a.key];
+        if (v == null || !Number.isFinite(+v) || !d) return '\u2014';
+        const pct = P.percentileOf(compareState.careerRows || state.careerStats || [], a.key, +v, minN);
+        const label = pct && pct.pct != null ? P.percentileLabel(pct) : null;
+        return `${v >= 0 ? '+' : ''}${(+v).toFixed(2)}${label ? ` <span class="vt-compare-pct text-secondary small" title="#${pct.rank} of ${pct.n} \u00b7 ${d.n} matches">${escapeHtml(label)}</span>` : ''}`;
+      },
+      dir: 'hi',
+    }));
   }
 
   function renderCompareStatGrid(found) {
@@ -4753,7 +5126,10 @@
         }
         return `<td class="${classes.join(' ')}"><span class="num">${c.display}</span></td>`;
       }).join('');
-      return `<tr>
+      const section = rowDef.section
+        ? `<tr class="vt-compare-stat-section"><th scope="row" colspan="${found.length + 1}">${escapeHtml(rowDef.section)}</th></tr>`
+        : '';
+      return `${section}<tr>
         <th scope="row" class="vt-compare-stat-label">${escapeHtml(rowDef.label)}</th>
         ${tds}
       </tr>`;
@@ -5143,6 +5519,11 @@
 
   function showDirectory() {
     showSection('directory');
+    // The hub reads its tab + perf filters off the URL before the
+    // directory hydrates (buildPlayerRows reads the hub's scoped rows).
+    if (window.VTPlayersHub && typeof window.VTPlayersHub.hydrateFromUrl === 'function') {
+      window.VTPlayersHub.hydrateFromUrl();
+    }
     hydrateDirectoryFromUrl();
     // Hydrate the staged-from-single-player clipboard once (10-minute
     // TTL keeps the bounce-back tight; older crumbs are dropped). When
@@ -5150,6 +5531,9 @@
     // their card so the user's next click is just picking opponents.
     hydrateCompareClipboard();
     renderDirectoryGrid();
+    if (window.VTPlayersHub && typeof window.VTPlayersHub.render === 'function') {
+      window.VTPlayersHub.render();
+    }
   }
 
   function hydrateCompareClipboard() {
@@ -5193,15 +5577,13 @@
       syncDirectoryUrl('push');
     });
 
-    dom.roleChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.vt-chip');
-      if (!btn) return;
-      state.filters.role = btn.dataset.role;
-      dom.roleChips.querySelectorAll('.vt-chip').forEach(b =>
-        b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
+    if (dom.unrankedToggle) {
+      dom.unrankedToggle.addEventListener('change', () => {
+        state.filters.includeUnranked = !!dom.unrankedToggle.checked;
+        renderDirectoryGrid();
+        syncDirectoryUrl('push');
+      });
+    }
 
     dom.activityChips.addEventListener('click', (e) => {
       const btn = e.target.closest('.vt-chip');
@@ -5276,7 +5658,7 @@
 
     state.dataPrefix = detectDataPrefix();
     try {
-      const [elo, slugMap, validation] = await Promise.all([
+      const [elo, slugMap, validation, , , shipNames] = await Promise.all([
         fetchJson(`${state.dataPrefix}data/processed/elo_current.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/processed/player_slugs.json`).catch(() => null),
         // Bootstrap noise band for the Rating chart (improvement #6,
@@ -5285,11 +5667,15 @@
         ensureMatchVideosLoaded(),
         // VTSR-C for the directory sort + card chip (404-safe).
         ensureCmdrEloLoaded(),
+        // Ship display names for the raw loadout stems (404-safe -> stems).
+        fetchJson(`${state.dataPrefix}data/processed/ship_names.json`).catch(() => null),
       ]);
       VTSRDisplay.setConfig(elo);
       state.elo = elo;
       state.slugMap = slugMap;
       state.validation = validation;
+      state.shipNames = shipNames;
+      if (window.VTPerfUI && shipNames) window.VTPerfUI.setShipNames(shipNames);
     } catch (e) {
       console.error('player.js boot: failed to load corpus data', e);
     }
@@ -5354,7 +5740,7 @@
     dom.heroSub        = $('vt-player-hero-subtitle');
     dom.searchInput    = $('vt-player-search');
     dom.tierChips      = $('vt-player-tier-chips');
-    dom.roleChips      = $('vt-player-role-chips');
+    dom.unrankedToggle = $('vt-player-unranked-toggle');
     dom.activityChips  = $('vt-player-activity-chips');
     dom.sortSelect     = $('vt-player-sort');
     dom.compareToggle  = $('vt-player-compare-toggle');
@@ -5379,12 +5765,27 @@
     dom.errorBody      = $('vt-player-error-body');
   }
 
-  // Expose a tiny surface for the Phase 4–7 renderers + test hooks.
+  // Expose a tiny surface for js/players-hub.js + test hooks.
   window.VTPlayer = {
     boot,
     get state() { return state; },
     playerHref,
     sparkSvg,
+    escapeHtml,
+    formatNumber,
+    formatPlayTime,
+    shipLabel,
+    roleLabel,
+    currentParams,
+    writeHistory,
+    writesSuppressed,
+    renderDirectoryGrid,
+    perfMinN,
+    populationMedians,
+    MATCH_AWARD_CATALOG,
+    ratingNoiseSigma,
+    vtsrLadderEligible,
+    cmdrLadderEligible,
   };
 
   if (document.readyState === 'loading') {

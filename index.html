@@ -1178,16 +1178,10 @@
           <button class="nav-link active" id="all-tab-overview-btn" data-bs-toggle="pill" data-bs-target="#all-tab-overview" type="button" role="tab" aria-controls="all-tab-overview" aria-selected="true">Overview</button>
         </li>
         <li class="nav-item" role="presentation">
-          <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons &amp; Rivalries</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="all-tab-commanders-btn" data-bs-toggle="pill" data-bs-target="#all-tab-commanders" type="button" role="tab" aria-controls="all-tab-commanders" aria-selected="false">Commanders</button>
+          <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons</button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="all-tab-meta-btn" data-bs-toggle="pill" data-bs-target="#all-tab-meta" type="button" role="tab" aria-controls="all-tab-meta" aria-selected="false">Meta</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="all-tab-players-btn" data-bs-toggle="pill" data-bs-target="#all-tab-players" type="button" role="tab" aria-controls="all-tab-players" aria-selected="false">Experimental</button>
         </li>
       </ul>
     </div>
@@ -1210,487 +1204,31 @@
           </div>
         </div>
 
-        <div class="card mb-4" id="section-career">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Career Leaderboard</h5>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Career table columns">
-                <li class="nav-item">
-                  <button type="button" class="nav-link" data-career-cols="per-match" role="radio" aria-checked="false" title="Per-match averages only">Per match</button>
-                </li>
-                <li class="nav-item">
-                  <button type="button" class="nav-link" data-career-cols="totals" role="radio" aria-checked="false" title="Career totals only">Totals</button>
-                </li>
-                <li class="nav-item">
-                  <button type="button" class="nav-link" data-career-cols="all" role="radio" aria-checked="false" title="Totals and per-match columns">All</button>
-                </li>
-              </ul>
-              <button class="btn btn-sm" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
+        <!-- Player-centric career views (Career Leaderboard, Career
+             Highlights, Commanders, Trends) moved to the Players hub
+             (/player/). All Matches stays match-centric: hero stats above,
+             Weapons and Meta in the tabs. -->
+        <div class="vt-info-banner mb-4" id="all-matches-players-banner" role="note">
+          <i class="bi bi-people-fill"></i>
+          <div class="flex-grow-1">
+            Player careers, leaderboards, commanders and trends live on the
+            <a href="player/" class="fw-semibold">Players</a> hub, with faction / ship / weapon / role filters.
           </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="career-table" class="table table-hover align-middle mb-0 vt-career-cols-per-match vt-sticky-thead" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th class="vt-career-col-shared">#</th>
-                  <th class="vt-career-col-shared" data-sort="name">Player</th>
-                  <!-- No Tier / VTSR-T career columns: VTSR-T renders as a band,
-                       never as a number, and the Career Leaderboard leaves it out. -->
-                  <!-- Team column removed from the All Matches Career Leaderboard:
-                       team is a per-match attribute, not a meaningful career-wide value. -->
-                  <th data-sort="matches_played" class="text-end vt-career-col-shared">Matches</th>
-                  <th data-sort="total_pvp_dealt" class="text-end vt-col-split vt-career-col-total">
-                    PvP
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Dealt</strong><br>Damage dealt directly to other human players.<br>Includes friendly-fire. Subset of Dealt.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_pvp_dealt" class="text-end vt-col-split vt-career-col-avg">
-                    PvP/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Dealt per match</strong><br>Career PvP total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="total_pve_dealt" class="text-end vt-col-split vt-career-col-total">
-                    PvE
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Dealt</strong><br>Damage dealt to AI units and world props.<br>Equals Dealt &minus; PvP.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_pve_dealt" class="text-end vt-col-split vt-career-col-avg">
-                    PvE/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Dealt per match</strong><br>Career PvE total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="total_dealt" class="text-end vt-career-col-total">
-                    Dealt
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Unit Dmg).<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_total_dealt" class="text-end vt-col-split vt-career-col-avg">
-                    Dealt/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Dealt per match</strong><br>Career dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="total_pvp_received" class="text-end vt-col-split vt-career-col-total">
-                    PvP In
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Received</strong><br>Damage taken from other human players.<br>Subset of Received.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_pvp_received" class="text-end vt-col-split vt-career-col-avg">
-                    PvP In/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Received per match</strong><br>Career PvP received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="total_pve_received" class="text-end vt-col-split vt-career-col-total">
-                    PvE In
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Received</strong><br>Damage taken from AI units and world/environmental sources.<br>Equals Received &minus; PvP In.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_pve_received" class="text-end vt-col-split vt-career-col-avg">
-                    PvE In/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Received per match</strong><br>Career PvE received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="total_received" class="text-end vt-career-col-total">
-                    Received
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Received</strong><br>All damage this player personally took.<br>Equals PvP In + PvE In.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_total_received" class="text-end vt-col-split vt-career-col-avg">
-                    Rcvd/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Received per match</strong><br>Career received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="net" class="text-end vt-career-col-total">
-                    Net
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Net Damage</strong><br>Total Dealt &minus; Total Received. Positive = more output than taken.<br><em>Career totals.</em>"></i>
-                  </th>
-                  <th data-sort="avg_net" class="text-end vt-col-split vt-career-col-avg">
-                    Net/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Net per match</strong><br>Career net total &divide; matches played.<br>Same as average dealt minus average received."></i>
-                  </th>
-                  <th data-sort="ratio" class="text-end vt-career-col-shared">
-                    Ratio
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Damage Ratio</strong><br>Total Dealt &divide; Total Received.<br>&infin; when total received is zero but dealt is not.<br><em>Career totals.</em>"></i>
-                  </th>
-                  <th data-sort="overall_accuracy" class="text-end vt-career-col-shared">
-                    Accuracy
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Career accuracy</strong><br>Total hits &divide; total shots across all matches (not a simple average of each match&rsquo;s accuracy)."></i>
-                  </th>
-                  <th data-sort="total_kills" class="text-end vt-career-col-total">Kills</th>
-                  <th data-sort="avg_kills" class="text-end vt-col-split vt-career-col-avg">
-                    K/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Kills per match</strong><br>Career kills &divide; matches played."></i>
-                  </th>
-                  <th data-sort="total_deaths" class="text-end vt-career-col-total">Deaths</th>
-                  <th data-sort="avg_deaths" class="text-end vt-col-split vt-career-col-avg">
-                    D/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Deaths per match</strong><br>Career deaths &divide; matches played."></i>
-                  </th>
-                  <th data-sort="total_asset_dealt" class="text-end vt-career-col-total">
-                    Unit Dmg
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Unit Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt.<br><em>Summed across matches.</em>"></i>
-                  </th>
-                  <th data-sort="avg_asset_dealt" class="text-end vt-col-split vt-career-col-avg">
-                    Unit/m
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Unit damage per match</strong><br>Career unit dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
-                  </th>
-                  <th data-sort="mean_movement_score" class="text-center vt-career-col-shared" style="min-width:130px;">
-                    <i class="bi bi-compass me-1"></i>Movemint
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movemint Profile (career)</strong><br>Average activity score across matches with positioning data (scores are match-relative before averaging). Higher = more map coverage. Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a cell for standard deviation and match count."></i>
-                  </th>
-                  <th class="vt-career-col-shared" data-sort="fav_weapon">Fav Weapon</th>
-                  <th data-sort="weapons_used" class="text-end vt-career-col-shared">
-                    # Wpns
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong># Weapons (career)</strong><br>Distinct weapons with dealt damage across all career matches.<br>Not the sum of per-match weapon counts."></i>
-                  </th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <!-- Career Highlights — sibling of the per-match Match Highlights
-             card. 23 cards: 12 career-rolled (career_*) plus 11 cross-
-             match-only (the_veteran, the_workhorse, etc.). Built client-side
-             by buildCareerHighlights() in js/all-matches-aggregator.js
-             from career_stats / commander_stats / faction_stats. -->
-        <div class="card mb-4 vt-highlights-card d-none" id="section-career-highlights">
-          <div class="card-header"><h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Career Highlights</h5></div>
-          <div class="card-body">
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="career-highlights-grid"></div>
-          </div>
-        </div>
-
-        <!-- VTSR-T teaser. The full sortable leaderboard (expandable
-             detail panels, all 13 columns) moved to the dedicated /elo/
-             page; this card shows the top 5 NON-provisional players
-             (provisional players appear as muted chips below but never
-             occupy a top-5 slot) plus a "View full leaderboard" link.
-             Reads data/processed/elo_current.json (pipeline-emitted,
-             full-corpus). Hides itself when that file is missing.
-             Populated by renderVtsrTeaser() in js/app.js. -->
-        <div class="card mb-4 d-none" id="section-vtsr">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Ladder</h5>
-            <div class="d-flex align-items-center gap-1 flex-wrap">
-              <button type="button" class="btn btn-sm vt-vtsr-info-btn"
-                      id="vtsr-methodology-btn"
-                      data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
-                      aria-label="How VTSR-T is calculated">
-                <i class="bi bi-info-circle me-1"></i>How It's Calculated
-              </button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="vtsr-teaser-list" class="vt-vtsr-teaser-list"></div>
-            <div id="vtsr-teaser-provisional" class="vt-vtsr-teaser-provisional d-none"></div>
-            <div id="vtsr-teaser-inactive" class="vt-vtsr-teaser-inactive d-none"></div>
-            <div class="vt-vtsr-teaser-footer">
-              <a href="elo/?tab=vtsr-t" class="btn btn-sm btn-primary">
-                <i class="bi bi-trophy me-1"></i>View full ladder
-              </a>
-              <span class="text-muted small">Tier-grouped ladder, per-player breakdowns, methodology &amp; rating accuracy live on the ELO page.</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card mb-4" id="section-career-radar">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Career Radar</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-vt-radar-info="career"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 data-bs-custom-class="vt-katex-tooltip"
-                 title="Loading&hellip;"></i>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <div class="btn-group btn-group-sm" role="group" aria-label="Career radar scale">
-                <button type="button" class="btn btn-outline-secondary active"
-                        data-career-radar-mode="totals"
-                        title="Lifetime totals — players with more matches naturally rank higher on Damage, Kills, and Weapon Diversity">Totals</button>
-                <button type="button" class="btn btn-outline-secondary"
-                        data-career-radar-mode="per-match"
-                        title="Per-match averages — Damage, Kills, and Weapon Diversity normalized by matches played">Per match</button>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="career-radar-compare-toggle" type="button">Compare</button>
-              <button class="btn btn-sm" data-expand="section-career-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="vt-radar-custom-picker mb-3" id="career-radar-picker">
-              <div class="d-flex flex-wrap gap-2 align-items-center">
-                <span class="small" style="color:var(--kb-text-muted);">Player:</span>
-                <select class="form-select form-select-sm vt-radar-picker-select" id="career-radar-pick-a" aria-label="First player"></select>
-                <span class="small d-none vt-career-radar-vs" style="color:var(--kb-text-muted);">vs</span>
-                <select class="form-select form-select-sm vt-radar-picker-select d-none" id="career-radar-pick-b" aria-label="Second player"></select>
-              </div>
-            </div>
-            <div class="chart-container"><canvas id="career-radar-canvas"></canvas></div>
-            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="career-radar-hint">Need at least two players in career stats to compare.</p>
-          </div>
+          <a href="player/?tab=leaderboards" class="btn btn-sm btn-primary"><i class="bi bi-list-ol me-1"></i>Leaderboards</a>
+          <a href="player/?tab=trends" class="btn btn-sm btn-outline-secondary"><i class="bi bi-graph-up me-1"></i>Trends</a>
         </div>
       </div>
 
-      <!-- All Tab: Weapons & Rivalries -->
+      <!-- All Tab: Weapons -->
       <div class="tab-pane fade" id="all-tab-weapons" role="tabpanel" aria-labelledby="all-tab-weapons-btn">
         <div class="row g-4 mb-4">
-          <div class="col-lg-6">
+          <div class="col-12">
             <div class="card h-100" id="section-global-weapon">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0">Global Weapon Meta</h5>
                 <button class="btn btn-sm" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
               <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-global-rivalries">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Cross-Match Rivalries</h5>
-                <button class="btn btn-sm" data-expand="section-global-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="global-rivalries-container"></div>
-            </div>
-          </div>
-        </div>
-        <div class="card mb-4" id="section-career-accuracy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Career Accuracy &amp; T-Key</h5>
-            <button class="btn btn-sm" data-expand="section-career-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="career-accuracy-table" class="table table-hover table-sm align-middle mb-0 vt-sticky-thead" style="font-size: 0.8rem;">
-              <thead>
-                <tr>
-                  <th data-sort="name">Player</th>
-                  <th data-sort="matches" class="text-end">Matches</th>
-                  <th data-sort="fired" class="text-end">Fired</th>
-                  <th data-sort="hit" class="text-end">Hit</th>
-                  <th data-sort="accuracy" class="text-end">Accuracy</th>
-                  <th data-sort="tkey" class="text-end">
-                    T-Key
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top"
-                       title="Averaged over matches that recorded T-key data. Display only; not part of VTSR-T."></i>
-                  </th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- All Tab: Commanders -->
-      <div class="tab-pane fade" id="all-tab-commanders" role="tabpanel" aria-labelledby="all-tab-commanders-btn">
-
-        <div class="card mb-4 d-none" id="section-commander-standings">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Commander standings</h5>
-            <a href="elo/?tab=vtsr-c" class="btn btn-sm btn-primary">
-              <i class="bi bi-trophy me-1"></i>Full ladder
-            </a>
-          </div>
-          <div class="card-body" id="commander-standings-body"></div>
-        </div>
-
-        <div class="card mb-4" id="section-commander-leaderboard">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Commander Leaderboard</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 title="<strong>Commander vs Thug split</strong><br>Slot 1 (Team 1) and slot 6 (Team 2) are team commanders; everyone else is a thug. Win % columns require at least 5 determined-winner matches in that role; under that floor, the cell shows &mdash;.<br><br>The ranked table uses the same VTSR-C ladder gate: enough proto-v4 or older commander games, a recent game, and a recent command. Commanders who miss that gate are omitted here. Every commander rating is on the VTSR-C ladder. The gate is corpus-wide and does not follow the match picker."></i>
-            </div>
-            <button class="btn btn-sm" data-expand="section-commander-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body">
-          <div class="table-responsive vt-sticky-thead-card">
-            <table id="commander-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th data-sort="name">Player</th>
-                  <th data-sort="matches_as_commander" class="text-end">Cmdr</th>
-                  <th data-sort="matches_as_thug" class="text-end">Thug</th>
-                  <th data-sort="wins_losses_cmdr" class="text-end">W&ndash;L (cmdr)</th>
-                  <th data-sort="win_pct_as_commander" class="text-end sort-active">Win % (cmdr)</th>
-                  <th data-sort="win_pct_as_thug" class="text-end">Win % (thug)</th>
-                  <th data-sort="avg_dealt_as_commander" class="text-end">Avg Dlt (cmdr)</th>
-                  <th data-sort="avg_dealt_as_thug" class="text-end">Avg Dlt (thug)</th>
-                  <th data-sort="avg_kills_as_commander" class="text-end">Avg K (cmdr)</th>
-                  <th data-sort="avg_kills_as_thug" class="text-end">Avg K (thug)</th>
-                  <th class="text-center">Favored</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="text-muted small mb-0 mt-3">Every commander rating is on the <a href="elo/?tab=vtsr-c">VTSR-C ladder</a>.</p>
-          </div>
-        </div>
-
-        <div class="row g-4 mb-4" id="all-tab-commanders-secondary">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-commander-h2h">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>Commander Head-to-Head</h5>
-                <button class="btn btn-sm" data-expand="section-commander-h2h" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="commander-h2h-container"></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-commander-faction-picks">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-shield-shaded me-2"></i>Faction Picks per Commander</h5>
-                <button class="btn btn-sm" data-expand="section-commander-faction-picks" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container"><canvas id="commander-faction-picks-canvas"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Economy Leaders (proto v4 telemetry; hidden until any commander
-             has economy/build data in the current scope) -->
-        <div class="card mb-4 d-none" id="section-commander-economy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-cash-stack me-2"></i>Economy Leaders</h5>
-            <span class="badge vt-econ-inferred-badge" data-bs-toggle="tooltip"
-                  title="Built from proto v4 resource/build telemetry — only matches recorded with the new collector count toward these leaders.">v4 telemetry</span>
-          </div>
-          <div class="card-body">
-            <div class="row g-3" id="commander-economy-tiles"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- All Tab: Experimental — schedule strength and quarterly form.
-           Corpus-wide. Rendered by js/players-tab.js. -->
-      <div class="tab-pane fade" id="all-tab-players" role="tabpanel" aria-labelledby="all-tab-players-btn">
-
-        <div class="card mb-4" id="section-players-schedule">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Strength of schedule</h5>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Schedule role">
-                <li class="nav-item">
-                  <button type="button" class="nav-link active" data-vt-role="commander" role="radio" aria-checked="true">Commanders</button>
-                </li>
-                <li class="nav-item">
-                  <button type="button" class="nav-link" data-vt-role="thug" role="radio" aria-checked="false">Thugs</button>
-                </li>
-              </ul>
-              <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="vt-players-show-small">
-                <label class="form-check-label small" for="vt-players-show-small">Show under 8 matches</label>
-              </div>
-              <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" id="vt-players-show-unranked">
-                <label class="form-check-label small" for="vt-players-show-unranked">Show unranked</label>
-              </div>
-              <button class="btn btn-sm" data-expand="section-players-schedule" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body">
-            <p class="text-muted small">Who has faced stronger or weaker opposition. The default bar is how much the opposing thugs cost in win chance, measured against a typical schedule in this view. Harder schedules sit to the right. Choosing another column header redraws the bar from that column. Thug gap is how much own thugs moved the win chance against opposing thugs, with that player left out of their own side. On the chart, a negative gap points right, because opposing thugs were stronger. VTSR-T shows as win chance or a band, never as a number; VTSR-C keeps its numbers. Recorded games use the rating from that day. Community games use each opponent's rating today. Only team games (3 or more a side) count; 1v1s and 2v2s have their own ladders. The list starts as the ranked ladder for that pill. This is the full corpus. The match picker does not change it.</p>
-            <div class="vt-players-schedule-scroll">
-              <div class="chart-container" id="vt-players-schedule-chart-wrap">
-                <canvas id="vt-players-schedule-chart"></canvas>
-              </div>
-            </div>
-            <p class="text-muted small d-none mb-2" id="vt-players-schedule-empty"></p>
-            <div class="table-responsive vt-sticky-thead-card">
-              <table id="vt-players-schedule-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
-                <thead>
-                  <tr>
-                    <th data-vt-sort="name">Player</th>
-                    <th data-vt-sort="matches" class="text-end">Matches</th>
-                    <th data-vt-sort="oppThug" class="text-end is-sorted" title="Win chance against a typical schedule: negative means the opposing thugs were stronger than usual">Opp. thugs</th>
-                    <th data-vt-sort="gap" class="text-end" title="Win chance from own thugs against opposing thugs">Thug gap</th>
-                    <th data-vt-sort="oppCmdr" class="text-end">Opp. cmdr VTSR-C</th>
-                    <th data-vt-sort="own" class="text-end" id="vt-players-own-heading">Current VTSR-C</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <p class="text-muted small mb-0 mt-3">Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>. A row under 8 matches is hidden until the switch above is on.</p>
-          </div>
-        </div>
-
-        <div class="card mb-4" id="section-players-form">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Form over time</h5>
-            <button class="btn btn-sm" data-expand="section-players-form" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body">
-            <div class="vt-players-search position-relative mb-3">
-              <label class="form-label small text-muted mb-1" for="vt-players-search">Player</label>
-              <input type="search" class="form-control form-control-sm" id="vt-players-search" placeholder="Find a player" autocomplete="off" aria-autocomplete="list" aria-controls="vt-players-search-menu">
-              <div class="list-group vt-players-search-menu d-none" id="vt-players-search-menu" role="listbox"></div>
-            </div>
-            <div id="vt-players-form-empty">
-              <p class="text-muted small">Pick a player to see determined win rate by quarter, as commander and as a thug. The largest rating climbs over the last two quarters are below. Each name has at least 8 matches in that role under the format selected above.</p>
-              <div class="row g-4">
-                <div class="col-md-6">
-                  <h6 class="text-muted">VTSR-C climb</h6>
-                  <div id="vt-players-climb-c"></div>
-                </div>
-                <div class="col-md-6">
-                  <h6 class="text-muted">VTSR-T climb</h6>
-                  <div id="vt-players-climb-t"></div>
-                </div>
-              </div>
-            </div>
-            <div id="vt-players-form-body" class="d-none">
-              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-                <h6 class="mb-0" id="vt-players-form-name"></h6>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-players-form-clear">Clear</button>
-              </div>
-              <h6 class="text-muted">As commander</h6>
-              <div class="chart-container chart-container-sm mb-3">
-                <canvas id="vt-players-cmdr-chart"></canvas>
-              </div>
-              <p class="text-muted small d-none" id="vt-players-cmdr-empty">No determined commander games for this player.</p>
-              <h6 class="text-muted">As thug</h6>
-              <div class="chart-container chart-container-sm mb-2">
-                <canvas id="vt-players-thug-chart"></canvas>
-              </div>
-              <p class="text-muted small d-none" id="vt-players-thug-empty">No determined thug games for this player.</p>
-              <p class="text-muted small mb-0 mt-2"><span class="vt-players-thin-mark" aria-hidden="true"></span> A hollow bar is a quarter with one or two games. The line is the rating at the end of that quarter (VTSR-T on a tier axis). VTSR-C moves on community duels. VTSR-T holds through a quarter that is only community games. Community games are from <a href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber</a>.</p>
             </div>
           </div>
         </div>
@@ -1986,46 +1524,6 @@
           </ul>
         </div>
         <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- VTSR-T methodology modal (quick reference; the full explainer lives
-       on the /elo/ page). Body is populated lazily by renderVtsrTeaser()
-       in js/app.js from the shared VTSRExplain module. The body carries the
-       .vt-katex-tooltip class so the existing KaTeX equation-spacing rules
-       in css/vtstats-theme.css apply inside the modal body without having
-       to duplicate them. We deliberately do NOT put .vt-katex-tooltip on the
-       modal root because that selector caps width at 600px (for tooltips),
-       which would constrain the modal overlay and break centering.
-       v2 (Phase 12): bumped to modal-xl to host a richer 6-section reference
-       layout (golden equation / expected curve / composite / K & hope /
-       tiers / worked example). -->
-  <div class="modal fade" id="vtsr-methodology-modal" tabindex="-1"
-       aria-labelledby="vtsr-methodology-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <div>
-            <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
-              <i class="bi bi-stars me-2"></i>VTSR-T Methodology
-            </h5>
-            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.14 &middot; enemy damage share</small>
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body vt-katex-tooltip" id="vtsr-methodology-modal-body">
-          <!-- Populated on first modal open (KaTeX-ready). -->
-        </div>
-        <div class="modal-footer border-top">
-          <a href="elo/?tab=how" class="btn btn-sm btn-primary">
-            <i class="bi bi-trophy me-1"></i>Open the full ELO explainer
-          </a>
-          <a href="docs/?doc=developer#vtsr-methodology" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
-            Full methodology<i class="bi bi-box-arrow-up-right ms-2"></i>
-          </a>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
@@ -2361,10 +1859,10 @@
        Matches view honors picker filters without per-match round trips.
        See js/all-matches-aggregator.js header. -->
   <script src="js/all-matches-aggregator.js"></script>
-  <!-- All Matches Experimental tab: schedule strength and quarterly form.
-       Display-only join of ratings, contributions, and the F9 ledger.
-       Loaded before app.js so window.VTPlayersTab exists at boot. -->
-  <script src="js/players-tab.js"></script>
+  <!-- Shared Highlights renderer (window.VTHighlights): the per-match
+       Match Highlights grid here and the Career Highlights grid on the
+       Players hub draw from one copy table. Loaded before app.js. -->
+  <script src="js/highlights-render.js"></script>
   <!-- BZ2API: baked-in VSR_MAP_DATA catalog + iondriver map API client.
        Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
        before app.js so window.BZ2API is available during init. -->

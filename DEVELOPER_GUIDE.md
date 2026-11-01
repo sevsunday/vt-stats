@@ -1183,11 +1183,11 @@ New telemetry `match.bullet_hit_distance.rejected_implausible` (1,976 corpus-wid
 }
 ```
 
-The All Matches **Career Leaderboard** renders these fields in the same column order as the per-match Player Leaderboard (plus **Matches**); **Net**, **Ratio**, and **# Wpns** are derived in the browser from totals and `weapon_breakdown` (distinct weapons with `dealt > 0`). **Team** is shown as unavailable for aggregates.
+The **Career Leaderboard** (Players hub → Leaderboards, `js/players-hub.js` `CAREER_COLS`) renders these fields in the same column order as the per-match Player Leaderboard (plus **Matches**); **Net**, **Ratio**, and **# Wpns** are derived in the browser from totals and `weapon_breakdown` (distinct weapons with `dealt > 0`). **Team** is not a career column.
 
 **Per-match average columns** (headers like PvP/m, Dealt/m, K/m) are computed only in the browser as **career total ÷ `matches_played`** (matches with zeros still count). **Accuracy** remains **career hits ÷ career shots** (`overall_accuracy` from the pipeline), not an average of each match’s accuracy percentage.
 
-The Career Leaderboard card header **Per match / Totals / All** control (`careerColumnView` in `js/app.js`, persisted as `vt-career-cols-view`) toggles CSS classes `vt-career-col-total` vs `vt-career-col-avg` on `#career-table`; **shared** columns (Ratio, Accuracy, Movement, etc.) stay visible in every mode.
+The card header **Per match / Totals / All** control (`hub.careerCols`) picks which column group (`total` / `avg`) renders beside the **shared** columns (Ratio, Accuracy, Movemint, etc.), which stay visible in every mode.
 
 #### `global_weapon_meta[]` — same structure as per-match `weapon_meta`
 
@@ -1245,7 +1245,7 @@ HTML attributes: `<html data-theme="default" data-mode="dark">`.
 
 Dashboard content is organized into Bootstrap nav-pills tabs:
 - **Per-match:** Overview, Economy (v4 matches only), Elo, Combat, Rivalries, Weapons & Accuracy, Assets, Movemint, Storyline (v4 matches only), 3D Replay
-- **All Matches:** Overview, Weapons & Rivalries, Commanders, Meta
+- **All Matches:** Overview (hero stats + a link to the Players hub), Weapons, Meta. The former Career Leaderboard / Career Highlights / VTSR-T teaser / Career Radar cards and the Commanders + Experimental tabs live on the Players hub (`/player/`, §14.7); `?match=all&tab=commanders` / `&tab=players` redirect there.
 
 Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. Global filter changes also trigger the same lazy re-render pipeline — `destroyAllCharts()` + `resetTabState()` + re-register deferred renderers + re-register fullscreen chart renderers.
 
@@ -1280,7 +1280,7 @@ Deep link: `?match=<id>&tab=elo`.
 
 ### Global Player Filter
 
-**Scope.** The global filter applies to the **per-match view only**. The All Matches view consumes the in-memory aggregate produced by `VTAggregate.build()` from `match_contributions.json` (see [`js/all-matches-aggregator.js`](js/all-matches-aggregator.js)). `career_stats[]` fields render unfiltered with respect to `filterState`; the Career Radar's A/B picker (`careerRadarState` in `app.js`) is a chart-local selection mechanism with no interaction with `filterState`.
+**Scope.** The global filter applies to the **per-match view only**. The All Matches view consumes the in-memory aggregate produced by `VTAggregate.build()` from `match_contributions.json` (see [`js/all-matches-aggregator.js`](js/all-matches-aggregator.js)). `career_stats[]` fields render unfiltered with respect to `filterState`; the Players hub's filter bar (§14.7) is a separate, URL-carried scope that re-aggregates with `opts.rowFilter` and has no interaction with `filterState` or the match picker.
 
 **Picker filter (separate axis).** The match picker (`#match-picker-modal`) carries facets — duration band, faction (unordered Any vs Any; `?fac=` / `?vs=`, codes `i` / `f` / `e`), player count, submitter, full-roster Players (with Match-mode `any of these` / `all of these` and Role `any` / `Commander` / `Thug`; the chip cloud starts collapsed). When the user is on the All Matches view and toggles a chip, `applyPickerFilters()` schedules a debounced `loadAllMatches()` re-aggregate via `scheduleAllMatchesReaggregate()`, so the career table / radar / global weapon meta / global rivalries reflect only the filtered subset. The All-Matches-view banner above the aggregate surfaces the current scope ("Aggregate of K of N matches matching the active filters") and a Clear-filters shortcut. State lives in `pickerState` and is persisted in sessionStorage under `vt.picker.filters.v2` (one-shot v1 migration on first read).
 
@@ -2619,7 +2619,7 @@ Keying on the *canonical* rating (not the lifted one) is the load-bearing stabil
 
 **The change.** Both keys leave `THUG_WEIGHTS`, `compute_performance_index`, and the locked commander prior (`COMMANDER_BASELINE_LOCKED_AXES` is now `{"pve_share"}`; `thug_accuracy` stays role-blind). The six remaining raw weights are unchanged and sum to **0.91**; runtime renormalization still applies, so each core axis gains about 1.1% effective weight versus the v2.10 eight-axis mix. `axis_means` and `axis_contributions` carry 6 keys. `ELO_SCHEMA_VERSION 14 → 15`. No `PIPELINE_VERSION` or `match.schema_version` bump — per-match JSON is untouched, and ratings recompute every run. **Pre-v15 `peak_vtsr` is no longer comparable.**
 
-**Where the stats went.** Snipes stay on the per-match snipe feed and the Chris Kyle highlight. T-key usage is a column on the per-match Weapons & Accuracy table (`#accuracy-table`, joined from the unfiltered `positioning` block) and a sortable Career Accuracy & T-Key table on All Matches → Weapons & Rivalries. The Player Performance Radar (`js/charts-radar.js`) keeps its T-Key spoke; that radar is not the Elo composite.
+**Where the stats went.** Snipes stay on the per-match snipe feed and the Chris Kyle highlight. T-key usage is a column on the per-match Weapons & Accuracy table (`#accuracy-table`, joined from the unfiltered `positioning` block). Both are also **descriptive performance axes** on the player pages (§14.8: `target_lock_pct` and `snipe_bonus`, the v2.11 builders restored verbatim as lobby z-scores, display-only, never a rating input). The Player Performance Radar (`js/charts-radar.js`) keeps its T-Key spoke; neither radar is the Elo composite.
 
 **Measured drift (2026-10-06, 45 players).** Max |ΔVTSR-T| 3.6 (Darkvale 1529.3 → 1532.9), mean |Δ| 1.1, mean signed +1.0. Three adjacent leaderboard swaps: Nomad 1617.2 → 1616.4 with F9bomber 1616.1 → 1618.9; Lamper 1530.8 → 1531.1 with Darkvale; M.S 1456.0 → 1456.9 with The_Bylarge 1455.6 → 1457.5. Validator: Spearman ρ 0.496 → 0.492, self-consistency 0.917 → 0.916, clean-win mean accuracy unchanged.
 
@@ -2980,22 +2980,28 @@ Both thug ratings are published side by side by operator decision; the memo's pi
 - **Dashboard Outcome card**: a 2v2 branch in `js/balonce-meter.js`. A 2v2 is unavailable to the main join by construction, so `render()` falls back to the shared `ensure2v2HistoryLoaded()` (`window.__vtElo2v2History`, one request shared with `js/match-elo.js`). It shows the gauge + headline + verdict from the stored `wl.expected`, the main-reason line (`mainReason({cmdrLabel: 'VTSR-2v2C', thugNoun: 'thug', validation: {}})` — empty validation, because the corpus record per reason class is a team-game record), the commander and thug win/loss moves, and the thugs' performance duel; an undecided game shows the performance part only, and there is no what-if. `rosterRatings()` returns `{format: '2v2', ...}` so the team panels show `2v2C N` on commanders and `W/L N · Perf N` on thugs. Unlike VTSR-1v1, the meter is allowed to read 2v2 data (the memo records why).
 - **Tools Balonce**: `Team | 2v2` format pills (`#vt-tools-balonce-format`). In 2v2 the meter uses 2v2C + 2v2T (win/loss) with the 2v2 file's own λ / scale; the performance rating shows on thug rows as context. It needs exactly 4 playing players in a 2-2 layout. The lobby API cannot tell a spectator from a player, so the user ignores spectators by right-click; hidden lobby members are auto-ignored while 2v2 is on, can be restored, and come back when leaving 2v2. A Team-mode hint offers 2v2 when 4 are counted. The empty-seat rule is off in 2v2. Suggest keeps commanders that are set. The footer quotes the validator's 2v2 call rate over recorded games and the review threshold. `?from=` seeding only works for VTSR-T-rated lobbies, so 2v2 numbers are always today's.
 - **Match picker**: a **Format** facet (`1v1 · 2v2 · 3+v3+ · Other` chips with counts) from `manifest[].match_format`, state `pickerState.formats`, URL `?fmt=`, an optional key under `vt.picker.filters.v2` (no storage-key bump). A missing stamp reads as `other`.
-- **All Matches → Experimental** (`js/players-tab.js`): recorded games count only when `match_format === 'team'`; the F9 ledger stays size-based (3v3+). The old `3+ a side / All rated` Schedule toggle was retired, since with the 3-per-side rule both settings gave the same list.
+- **Players hub → Trends** (`js/players-tab.js`, formerly All Matches → Experimental): recorded games count only when `match_format === 'team'`; the F9 ledger stays size-based (3v3+). The old `3+ a side / All rated` Schedule toggle was retired, since with the 3-per-side rule both settings gave the same list.
 
 ## 14. Player Profile Pages (`player/`)
 
 The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs/index.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:
 
 1. **Pre-generated stubs** at `player/<slug>/index.html` — one HTML file per player with `matches_played >= 5`, rendered by `scripts/generate_player_pages.py` from `scripts/player_template.html`. Each stub carries per-player Open Graph meta tags in `<head>` for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtPlayerBoot` script block that hints the client-side renderer at the player's identity before fetch.
-2. **Runtime fallback** at `player/index.html` — same client-side JS (`js/player.js`) renders unstubbed players (`?p=<steam64>` / `?slug=<slug>`), the **Directory** landing (no params), and the **Compare view** (`?compare=<csv-of-slugs>`, capped at 4 players).
+2. **Runtime fallback** at `player/index.html` — same client-side JS (`js/player.js`) renders unstubbed players (`?p=<steam64>` / `?slug=<slug>`), the **Players hub** landing (no params; see §14.7), and the **Compare view** (`?compare=<csv-of-slugs>`, capped at 5 players).
 
 ### 14.1 Files
 
 | File | Purpose |
 |---|---|
-| `player/index.html` | Triple-duty shell: Directory landing / runtime single-player / compare view. Loads Chart.js + zoom plugin + the project's standard theme stack. |
-| `js/player.js` | Single bundle that dispatches on URL params (`?p`, `?slug`, `?compare`, none). Renders all seven single-player tabs (Overview · Rating · Commander · Axes · Highlights · Rivals · Loadout) plus the compare view plus the directory. Self-contained — no shared state with the dashboard. |
-| `css/player.css` | Player-page-specific styles (hero card, tier badges, sparklines, compare grid, axis cards). Sibling of `css/odf-browser.css`. |
+| `player/index.html` | Triple-duty shell: Players hub (directory + Leaderboards / Commanders / Trends / Highlights tabs) / runtime single-player / compare view. Loads Chart.js + zoom plugin + the project's standard theme stack. |
+| `js/player.js` | Dispatches on URL params (`?p`, `?slug`, `?compare`, none). Renders the six single-player tabs (Overview · Performance · Trends · Commander · Highlights · Loadout), the compare view and the directory card grid. Exposes `window.VTPlayer` (state + helpers) for `js/players-hub.js`. |
+| `js/players-hub.js` | The hub's shared perf filter bar + the Leaderboards / Commanders / Trends / Highlights tabs and the Players table view. One `VTAggregate.build(fileIds, { rowFilter })` per filter change. |
+| `js/perf-axes.js` | DOM-free data layer for the descriptive performance axes (`window.VTPerfAxes`): axis catalog, filter predicates + URL state, per-player series, population percentiles, quarterly buckets. Gate: `_investigation/check_perf_axes.mjs`. |
+| `js/perf-ui.js` | Shared rendering on top of it (`window.VTPerfUI`): filter bar, 10-axis radar, axis cards, percentile chips, ship labels from `data/processed/ship_names.json`. |
+| `js/highlights-render.js` | The Match / Career Highlights tile renderer (`window.VTHighlights`), extracted from `js/app.js` so the dashboard and the hub share one copy table. |
+| `js/players-tab.js` | Schedule strength · quarterly form · climbers (formerly the dashboard's Experimental tab), mounted in the hub's Trends pane via `[data-vt-players-tab]`. |
+| `scripts/perf_axes.py` | Pipeline module that stamps `perf_axes` + `highlight_awards` onto `match_contributions.json` (§14.8). Gate: `_investigation/check_perf_axes.py`. |
+| `css/player.css` | Player-page-specific styles (title strip, hero card, tier badges, sparklines, filter bar, axis cards, awards cabinet, hub table, compare grid). Sibling of `css/odf-browser.css`. |
 | `scripts/generate_player_pages.py` | Python generator: slug allocator (sticky), stub renderer, idempotent file writer. Wired into `scripts/process_stats.py::main()` after `elo_current.json` is written. |
 | `scripts/player_template.html` | Mustache-style `{{...}}` template for the per-player stubs. Substitutes name, tier, VTSR-T, peak, matches, OG title/description/url/image, canonical link, boot-hint. |
 | `scripts/build_og_card.py` | One-shot Pillow script that builds the single universal 1200x630 `data/og/player-card.png` from `img/isdf-logo.png`. Not invoked from the pipeline (run manually when the design changes). |
@@ -3043,31 +3049,30 @@ The Player Profile Pages are the project's **fifth standalone page**, sibling to
 5. **Idempotency**: skip the write if the new content byte-for-byte matches the existing file. Print a one-line summary at the end (`X stubs written, Y unchanged, Z removed`).
 6. **Pruning**: any `player/<existing-slug>/index.html` not in this pass's output set is deleted only if its `<!-- vtstats-player-stub:vN -->` marker matches the current `PLAYER_TEMPLATE_VERSION`. Stub files without the marker are left alone (manual edits, sanity check).
 
-`PLAYER_TEMPLATE_VERSION` (currently `22`; v22 dropped the VTSR-T directory sorts, added `js/vtsr-display.js`, and took VTSR-T numbers out of the OG description, which now reads e.g. `Tier 2 · Upper · 111 career matches · Thug`) is bumped whenever the rendered stub HTML shape changes (e.g. topnav additions, OG tag tweaks). Bumping forces a full regeneration even when the per-player numbers haven't moved. Does **NOT** require bumping `PIPELINE_VERSION` — the stub HTML is downstream of the JSON contract.
+`PLAYER_TEMPLATE_VERSION` (currently `25`; v22 dropped the VTSR-T directory sorts, added `js/vtsr-display.js`, and took VTSR-T numbers out of the OG description, which now reads e.g. `Tier 2 · Upper · 111 career matches · Thug`; v25 is the Players hub + profile rework — hub tab nav and filter-bar mount, the Performance / Trends profile panes and the `perf-axes` / `perf-ui` / `highlights-render` / `players-tab` / `players-hub` script set) is bumped whenever the rendered stub HTML shape changes (e.g. topnav additions, OG tag tweaks). Bumping forces a full regeneration even when the per-player numbers haven't moved. Does **NOT** require bumping `PIPELINE_VERSION` — the stub HTML is downstream of the JSON contract. The template's `<main>` + script block is a path-adjusted mirror of `player/index.html` (`../` → `../../`, `./` → `../`); keep the two in step.
 
 ### 14.4 Pages — three modes
 
 **Directory** (`player/index.html` with no params): card grid of **ranked players only** — a player is listed when they are on the VTSR-T ladder (`leaderboard_eligible`: 25 matches and globally active) **or** on the VTSR-C ladder (the commander OR-gate plus active and command-recent); `buildPlayerRows()` drops everyone else, so an inactive or provisional player no longer appears just because they have a ratings row (their profile page still works by direct link). Toolbar: free-text name search + tier multi-chips + role-bias chips (Commander / Mixed / Thug-only, derived from `matches_as_commander / matches_played`) + faction chips (most-flown via `career_loadout.primary_ship`'s first letter) + activity bucket (Active / Rusty / Inactive, based on `last_match_date` distance) + sort dropdown + compare-mode toggle. Each card carries name, VTSR-T band + position bar, a numeric VTSR-C chip when the player has one, role split chip, primary ship, and a **two-row sparkline block** (`.vt-player-card-sparks`): a `T` row of the last ten VTSR-T changes (`win_history` on `elo_current.json`; shape only, no digits) and, for commanders, a `C` row of the last ten VTSR-C changes (`ratings[].win_history` on `elo_commander_current.json`, appended by `_push_history()` in `scripts/elo_commander.py` at both the telemetry and F9 duel sites). List view keeps both rows at 18px; mobile hides the block. View-profile click target.
 
-**Single profile** (pre-gen stub or `player/index.html?p=<steam64>` / `?slug=<slug>`): seven tabs. The address bar tracks the open pill: Overview omits `tab`, and the others are `?tab=rating|commander|axes|highlights|rivals|loadout` (a redundant `overview` or unknown slug is stripped). Pill clicks `pushState`, so Back returns to the previous pill. The same query works on `/player/<slug>/`.
+**Single profile** (pre-gen stub or `player/index.html?p=<steam64>` / `?slug=<slug>`): a one-line **title strip** (name, VTSR-T band chip, numeric VTSR-C chip when rated, role pill, match count, `Compare with…`) above six tabs. The address bar tracks the open pill: Overview omits `tab`, and the others are `?tab=performance|trends|commander|highlights|loadout` (a redundant `overview` or unknown slug is stripped; the legacy `rating` / `axes` / `rivals` slugs alias to Trends / Performance / Overview and are rewritten). The Performance tab also carries the perf filter params (`f`, `ship`, `wpn`, `role`, `fmt`, `period` — §14.7), dropped when another pill is opened. Pill clicks `pushState`, so Back returns to the previous pill. The same query works on `/player/<slug>/`.
 
-Directory filters are shareable when they differ from the defaults: `q`, `tier` (CSV), `role` (`commander`|`thug`; `any` omitted), `activity` (`any`|`veteran`|`pillar`; `active` omitted), `sort` (`name-asc` omitted; the others are `vtsrc-desc`, `matches-desc`, `last-desc` — VTSR-T is never a sort key, and an old `vtsr-*` / `peak-desc` value falls back to the default). Compare adds `x=matches` when the progression chart is not by date. Search commits push once, then replace while the field stays focused.
+Directory filters are shareable when they differ from the defaults: `q`, `tier` (CSV), `activity` (`any`|`veteran`|`pillar`; `active` omitted), `sort` (`name-asc` omitted; the others are `vtsrc-desc`, `matches-desc`, `last-desc` — VTSR-T is never a sort key, and an old `vtsr-*` / `peak-desc` value falls back to the default), `view` (`table` / `cards`, only when it differs from the stored layout preference), `unranked=1` (the Include-unranked switch). The old commander-leaning / thug-leaning `role` chips are retired; `role` is now the hub filter bar's per-row role scope. Compare adds `x=matches` when the progression chart is not by date. Search commits push once, then replace while the field stays focused.
 
 | Tab | Contents |
 |---|---|
-| Overview | Hero card (name, tier, VTSR-T big, peak chip, sparkline, corpus rank). Career snapshot stats. 8-axis radar (`renderVtsrRadar` in `js/player.js` over `rating.axis_means` — the VTSR-T axes, including PvE Share) with a dashed corpus-median ghost. Strengths/weaknesses ranking panel. Coaching cards (static per-axis copy dict triggered when z<median) with +0.5σ ΔVTSR quick-wins projection. The All Matches Career Radar stays the descriptive `renderPlayerRadar(mode='career')` spider in `js/charts-radar.js`. |
-| Rating | Chart.js time-series of `elo_history.history[].deltas[].after` filtered by steam64. Tier-band background via inline plugin, anchor (1500) + floor (1000) reference lines, peak annotation, wheel/pinch zoom (vendored `chartjs-plugin-zoom`), preset zoom chips (`All` / `Last 50` / `Last 20` / `Last 10`), click-point-to-scroll. Virtualized sortable match-log table below with expandable per-row axis-contribution detail (reads `delta.axis_contributions`). |
-| Commander | VTSR-C rating, ladder rank, corpus W-L-D, time-series, vs-the-call and squad-gap lines, opposing commanders, favorite maps, faction when commanding, rated duel log, and v4 economy tiles (recorded, not scored). Empty state when the player has no commanded games and no rated duels. |
-| Axes | Per-axis time-series mini-cards (8 cards in a responsive grid). Each card is a tiny inline-SVG sparkline of the player's `axis_contributions[axis]` over time. |
-| Highlights | `career_highlights.cards[]` filtered to entries where this player is `winner` or `runner_up`. Renders via `renderHighlights(mode='career')` from `js/app.js`. |
-| Rivals | Top-10 two-way damage rivals, walked from each match's `rivalry_matrix`. |
-| Loadout | `career_loadout` ship-share donut. Per-ship combat table from `career_per_ship_combat`. |
+| Overview | **Rating hero card** (band chip + position bar, peak band, rated-match C/T split, `win_history` spark, Last game / Last 10 / Ladder / Last match tiles — the old page hero, moved into the tab). **Career snapshot** (matches, W–L on decided matches, games per format, K/D, PvP K/D, accuracy, damage / match, PvE / match, T-key, snipes / match, primary-ship + faction chips). Compact **10-axis performance radar** (all-time `career_stats[].perf_axes` means vs the player-base median; links to Performance). **Rivalries** tiles (nemesis = most damage taken from, favorite target = most dealt to, with the top-5 two-way table behind a details toggle). F9 community team-record strip. The Strengths & weaknesses / Performance observations panels are retired. |
+| Performance | The restored descriptive axes (§14.8). Shared filter bar (faction · role · format · period chips, ship + weapon selects) scoping BOTH the player's matches and the comparison population; 10-axis radar of mean lobby z with the filtered population's median dashed; one card per axis with the signed mean-z bar (population-median tick), a vs-player-base percentile chip (`Top 18% of 42`, rank-based), the n with data, a per-match z sparkline and the recent-vs-rest trend. |
+| Trends | Format control `3v3+ | 2v2 | 1v1` (default = the player's most-played format). 3v3+ = the VTSR-T band chart (zoom chips, tier bands, noise band) + the virtualized match log (1v1 / 2v2 games excluded) + an **Axis over time** card (per-match z bars with a trailing 5-match mean for the picked axis). 2v2 = the VTSR-2v2 block; 1v1 = the VTSR-1v1 block (both moved here from the Commander tab). |
+| Commander | VTSR-C rating, ladder rank, corpus W-L-D, time-series, vs-the-call and squad-gap lines, **economy tiles as per-match averages** (income / min, income / match, loose / match, ships built / match, combat value / match, avg float, avg peak pools, rebuild latency — recorded, not scored), opposing commanders, favorite maps, faction when commanding, rated duel log. Empty state when the player has no commanded games and no rated duels. |
+| Highlights | **Awards cabinet** (per per-match Highlights card: wins, runner-ups, win rate per match played, most recent win linking to the match — from `career_stats[].award_counts`) above the `career_highlights.cards[]` the player wins or places in. |
+| Loadout | `career_loadout` ship-share bars + per-ship combat table from `career_per_ship_combat`; ship names via `data/processed/ship_names.json` (same-name ships get their faction appended). |
 
-**Compare view** (`player/index.html?compare=<slug1>,<slug2>,...`, capped at `COMPARE_MAX = 4`): hero strip of mini-cards (name, tier, VTSR-T, remove `×`, "Add player" slot when under cap), then four panels:
+**Compare view** (`player/index.html?compare=<slug1>,<slug2>,...`, capped at `COMPARE_MAX = 5`): hero strip of mini-cards (name, band, remove `×`, "Add player" slot when under cap), the shared perf filter bar (scopes the radar and the stat grid; ratings-over-time and common matches stay all-time), then four panels:
 
-1. Overlaid 8-axis radar — one polygon per player, distinct colors.
+1. Overlaid 10-axis performance radar — one polygon per player, distinct colors, dashed population median under the same filter.
 2. Overlaid VTSR-T time-series with `By date` ↔ `By matches played` toggle.
-3. Transposed stat grid — rows are stats (VTSR-T, K/D, accuracy, etc.), columns are players, with best/worst cell highlighting.
+3. Transposed stat grid — rows are stats (band, K/D, accuracy, etc.) plus a `Performance axes (scoped)` section with each axis's mean z and percentile, columns are players, with best/worst cell highlighting.
 4. Common-matches table — rows are matches all selected players appeared in.
 
 The same push / popstate contract is used on the other standalone pages. Map directory: `q`, `pools`, `size`, `tag`, `played`, `author`, `sort` (`played-desc` omitted); `?file=` is not rewritten to a stub. Models directory: `q`, `faction` (omit `ISDF`; `all` when unfiltered), `cat` (omit `Building,Vehicle`; `all` when empty), `sort` (omit `name`); opening a model keeps those params. LEGO directory: `q`, `faction` (omit `all`), `sort` (omit `name`); a model opens on HQ, so `view` is omitted for HQ and set to `standard` or `photos` otherwise. Tools randomizer pills: `?tab=coinflip|maproll` (`shitwheel` omitted). ODF browser: `?cat=` when the sidebar category is not Vehicle and no ODF or compare is selected. Build trees: `?faction=hadean|scion` (`isdf` omitted), and Back restores the faction. ELO pills push `?tab=` the same way the player pills do (`vtsr-t` / `leaderboard` stay omitted).
@@ -3086,6 +3091,10 @@ window.VTAggregate.build(contributions, fileIds, elo, opts)
 
 The dashboard's All Matches view still passes `undefined` (preserves the 5-match floor). `js/player.js` passes `0` so fresh players still get a career row. `meta.min_career_matches` echoes the effective threshold so downstream UI can label it correctly.
 
+`opts.rowFilter(row, entry) -> boolean` (Players hub + Performance tab) omits leaderboard rows the predicate rejects from every **per-player** tally — career rows, the commander-economy slice and the awards cabinet — with the same pure-omission semantics as the exclusion flags. Match-level rollups (`meta`, `faction_stats`, `meta_charts`, `global_weapon_meta`, `global_rivalries`) describe the match, not the player, and are **not** affected. The dashboard never passes one; `js/perf-axes.js::rowFilter(filters)` builds it from the faction / ship / weapon / role facets (period + format select `fileIds` instead).
+
+New `career_stats[]` fields: `perf_axes` (`{axis: {mean_z, mean_raw, n}}`), `award_counts` (`{category: {wins, runner_ups, last_win_id, last_win_date}}`), `format_counts`, `wins` / `losses` (`{total, as_commander, as_thug}`), `matches_with_determined_winner`. New `commander_stats.rows[]` fields: `avg_peak_pools`, `avg_scrap_income`, `avg_income_loose`, `avg_ships_built`, `avg_combat_ship_value`, `avg_scrap_spent` (the per-match averages the profile and hub show; the `total_*` siblings stay).
+
 ### 14.6 Cross-link helpers in `js/app.js`
 
 Three globals power the dashboard-wide cross-linking, all attached to `window` in `js/app.js`:
@@ -3098,28 +3107,52 @@ Three globals power the dashboard-wide cross-linking, all attached to `window` i
 
 The Steam64-bearing aggregator fields (`commander_stats.head_to_head[].a_steam64` / `.b_steam64` / `global_rivalries[].a_steam64` / `.b_steam64`) were added so the cross-link helpers can resolve names back to canonical URLs without per-call reverse-lookups. The aggregator builds a `nameToSid` map from `careerStatsKept` and joins it onto the rivalry rows before emit.
 
-Six cross-link locations in `js/app.js`:
+Cross-link locations in `js/app.js`:
 
 1. `renderLeaderboard()` — per-match leaderboard
 2. `renderKillFeed()` — killer + victim names (with `vtSteam64FromName` reverse lookup)
-3. `renderVtsrLeaderboard()` — VTSR-T leaderboard
-4. `renderCareerTable()` — All Matches career table
-5. `renderHighlights()` — winner + runner-up names on both match and career mode
-6. `renderCommanderH2H()` + per-match + global `renderGlobalRivalries()` — name pairs
+3. `js/highlights-render.js` — winner + runner-up names on the per-match Highlights card (it calls `window.vtPlayerLinkHtml` when the dashboard defines it, else `VTPlayer.playerHref` on `/player/`)
+4. the per-match rivalries / Economy-card thug rows
 
-`.vt-player-link` + `.vt-player-link-fallback` styles live in `css/vtstats-theme.css` (loaded by every dashboard page); they mirror the `.vt-odf-link` pattern.
+The career table, commander head-to-head and global rivalries now live on the Players hub (`js/players-hub.js`), which links through `VTPlayer.playerHref`. `.vt-player-link` + `.vt-player-link-fallback` styles live in `css/vtstats-theme.css` (loaded by every dashboard page); they mirror the `.vt-odf-link` pattern.
 
-### 14.7 OG image
+### 14.7 Players hub (`player/` directory landing)
+
+The directory landing is a **hub** for the player-centric half of what used to be the dashboard's All Matches view. One shared **perf filter bar** (`VTPerfUI.filterBarHtml`) sits above five tabs (`?tab=`; `players` omitted):
+
+| Tab | Contents |
+|---|---|
+| Players | The ranked-player card grid (unchanged) or, via the `Cards | Table` toggle, a sortable table: Player · VTSR-T band · VTSR-C · matches (format split in the tooltip) · W–L · K/D · PvP K/D · Acc · Dealt/m · Net/m · Awards · one 0–100 percentile cell per descriptive axis (vs players with `meta.min_career_matches`+ matches in scope). `Include unranked` adds players above that floor in scope. |
+| Leaderboards | The migrated **Career Leaderboard** (column-definition driven; `Per match | Totals | All` views; header sort; no VTSR-T column), **Ship specialists** (per-ship K/D · PvP K/D · damage / min · accuracy · time-in-ship from `career_per_ship_combat`, floors `SHIP_BOARD_MIN_MINUTES` 60 / `SHIP_BOARD_MIN_MATCHES` 5, metric picker + top-3-per-ship grid), **Role boards** (best commanders / best thugs by win % on 5+ decided games), the **VTSR-T ladder** teaser (highest bands, names A–Z, links to `/elo/`). |
+| Commanders | Commander cohort (top of the VTSR-C ladder with their scoped recorded W–L), the commander leaderboard (VTSR-C-ladder-gated, sortable), Economy leaders (per-match averages, `ECON_LEADER_MIN_MATCHES` 2), head-to-head, faction picks chart (`renderCommanderFactionPicks` from `js/charts.js`). |
+| Trends | **Stat trends by quarter** — median + interquartile band of an ABSOLUTE per-row stat (`VTPerfAxes.ABS_STATS`: accuracy, kills / min, damage / min, PvE share, damage trade, K/D, T-key, mobility, snipes) with an overlay-player picker; **Ship usage by quarter** (stacked share of active time, top 8 + Other, pilots excluded); **Faction picks & win rate** per quarter; **Player-base activity** per month (active / new / returning ≥ 90 d / lapsed ≥ 90 d, the ladder's inactivity window); then `js/players-tab.js` (schedule strength · quarterly form · climbers, corpus-wide, `?who=`). The lobby z axes cannot trend (their lobby mean is 0 by construction), hence absolute stats here. |
+| Highlights | Career Highlights cards via `VTHighlights.render(..., 'career', { cardId, gridId })` + the global rivalries table. |
+
+Period + format pick the match subset (`VTPerfAxes.fileIdsFor`); faction / ship / weapon / role go through `opts.rowFilter`. One `VTAggregate.build()` per filter change feeds every tab (`minMatchesThreshold: 0`; tabs apply `meta.min_career_matches` themselves). The hub is **corpus-wide and not match-picker aware**; ratings are never recomputed by its filters (the bar says so). URL keys: `tab`, `f`, `ship`, `wpn`, `role`, `fmt` (CSV), `period`, `who`. `js/player.js::buildPlayerRows()` reads the hub's scoped career rows so the roster narrows with the bar (a player with no matches in scope drops out). The dashboard's slim All Matches view (hero stats · Weapons · Meta) links here, and `?match=all&tab=commanders` / `&tab=players` redirect to `player/?tab=commanders` / `player/?tab=trends`.
+
+### 14.8 Descriptive performance axes (`scripts/perf_axes.py`, `perf_axes` on contributions)
+
+The axes VTSR-T used to score before it settled on `enemy_damage_share` (v2.14) are back as a **display-only** picture of how a player compared with their lobby. `scripts/perf_axes.py::compute_perf_axes(match_data)` runs in `_extract_contribution()` on the FULL cached per-match dict and stamps every rated row (`elo._rated_lobby`) with
+
+```json
+"perf_axes": { "<axis>": { "raw": 0.1843, "z": 0.607 }, ... }   // null on campod / partial / idle rows
+```
+
+where `z = clip(zscore_lobby(raw), -2, +2) / 2` — the same `[-1, +1]` convention as `axis_contributions`, with **no** commander shift and **no** low-tier lift (those are fairness adjustments the rating needs; the description scopes by role instead). Catalog (`PERF_AXES`, display order): `enemy_damage_share`, `net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy` (gated on `has_bullet_hit_data`), `pve_share`, `survivability` (port of `charts-radar.js` `_compositeSurvivability`, p95 inside the lobby), `mobility`, `target_lock_pct` and `snipe_bonus` (the v2.11 builders restored verbatim from `74adb9ece^`). An axis unavailable for the whole lobby is omitted from that match's dicts. Entry-level `perf_axes_version` (1) and `highlight_awards` (`[{category, winner_steam64, winner_name, runner_up_name, value}]`, the awards-cabinet slice) ride alongside. `data/processed/ship_names.json` (`{stem: unitName}`) labels the raw loadout stems.
+
+Contributions are rebuilt from the cache every run, so this needed **no `PIPELINE_VERSION` bump**; `elo_history.json` hashed byte-identical across the change. **Forbidden consumers**: `scripts/elo.py`, `elo_commander.py`, `elo_1v1.py`, `elo_2v2.py`, `js/balonce-meter.js`, `js/players-tab.js` — gated by `_investigation/check_perf_axes.py` (presence / range / recompute / lobby-centering / ship-name coverage) and `_investigation/check_perf_axes.mjs` (filter predicates reproduce `faction_match_count` and the role split, series means match the aggregator, percentile edges, URL round-trip). Two kinds of numbers: lobby z powers per-player means, radars and vs-player-base percentiles (`VTPerfAxes.percentileOf`, rank-based labels so #1 of 20 is "Top 5%"); the absolute per-row stats power the hub's time trends.
+
+### 14.9 OG image
 
 `data/og/player-card.png` (1200x630) is the single universal Open Graph image referenced by every stub. Built once from `img/isdf-logo.png` via `scripts/build_og_card.py` (Pillow dependency, not invoked by the pipeline). When opened in Discord / Slack / Twitter, the unfurl carries the universal image + the per-player OG title (`"<Name> — VT Stats"`) + OG description (`"<Tier> • VTSR-T <rating> • <matches> matches"`). Per-player custom images were deferred to keep generation time low and reduce repo churn; if added later, the per-player URL would slot into the `og:image` template marker without further changes.
 
-### 14.8 Production host
+### 14.10 Production host
 
 `SITE_URL = "https://vtstats.bz"` (module constant in `scripts/generate_player_pages.py`, per the project `CNAME`). Used for absolute OG URLs and the canonical link in each stub's `<head>`. If the host ever changes, this is the single place to update.
 
-### 14.9 Picker filter contract
+### 14.11 Picker filter contract
 
-Player profile pages are **picker-unaware** — they ignore the dashboard's match-picker filter entirely. The directory and per-player views always run against the **full corpus**. This is intentional: a player profile is a stable identity surface that shouldn't shift under filter chips chosen elsewhere. (The dashboard's All Matches view remains picker-aware as before.) The player-page directory has its own toolbar with chips that filter the displayed cards, but those chips never re-aggregate the underlying career stats.
+Player profile pages are **picker-unaware** — they ignore the dashboard's match-picker filter entirely. This is intentional: a player profile is a stable identity surface that shouldn't shift under filter chips chosen elsewhere. (The dashboard's slim All Matches view remains picker-aware as before.) The Players hub and the Performance tab carry their **own** filter bar (§14.7) which re-aggregates the career rows client-side through `VTAggregate.build(fileIds, { rowFilter })` — that scope is explicit in the URL and in the bar's summary line, and it never touches a rating.
 
 ## 15. Map Browser Pages (`map/`)
 

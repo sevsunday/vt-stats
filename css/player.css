@@ -1546,3 +1546,208 @@
 .vt-player-hero.card {
   background: color-mix(in oklab, var(--kb-bg-card) calc(var(--vt-glass-opacity) + 4%), transparent);
 }
+
+/* ---- 8. Single profile: title strip + Overview hero card ---- */
+.vt-player-title-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  padding: 0.85rem 1.1rem;
+}
+.vt-player-title-strip .vt-player-single-name {
+  font-size: clamp(1.35rem, 2.6vw, 1.9rem);
+  line-height: 1.1;
+}
+.vt-player-title-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+.vt-player-hero-card .vt-player-single-hero-body { padding: 0; }
+.vt-player-hero-card .vt-player-single-spark svg { width: 100%; max-width: 320px; height: 64px; }
+
+/* ---- 9. Performance axes: filter bar ---- */
+.vt-perf-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.1rem;
+}
+.vt-perf-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+.vt-perf-filter-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  margin-right: 0.2rem;
+}
+.vt-perf-filter-selects { gap: 0.6rem 1rem; }
+.vt-perf-filter-select {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+.vt-perf-filter-select .form-select { min-width: 10rem; max-width: 16rem; }
+.vt-perf-filter-clear { margin-left: auto; }
+.vt-chip-count {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+  color: var(--kb-text-secondary);
+}
+.vt-chip[data-selected="true"] .vt-chip-count {
+  background: color-mix(in oklab, var(--kb-primary-fg, #fff) 25%, transparent);
+  color: inherit;
+}
+
+/* ---- 10. Performance axes: cards, chips, sparklines ---- */
+.vt-perf-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.45rem;
+}
+.vt-perf-axis-row .vt-perf-zbar { flex: 1 1 auto; min-width: 0; }
+.vt-perf-zbar {
+  position: relative;
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-text-muted) 14%, transparent);
+  overflow: visible;
+}
+.vt-perf-zbar .vt-axis-bar-center {
+  position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px;
+  background: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+}
+.vt-perf-zbar .vt-axis-bar-fill {
+  position: absolute; top: 0; bottom: 0;
+  border-radius: 999px;
+  background: var(--kb-text-muted);
+}
+.vt-perf-zbar.is-positive .vt-axis-bar-fill { background: var(--kb-success); }
+.vt-perf-zbar.is-negative .vt-axis-bar-fill { background: var(--kb-danger); }
+.vt-perf-zbar .vt-axis-bar-median {
+  position: absolute; top: -4px; bottom: -4px; width: 2px;
+  transform: translateX(-1px);
+  background: var(--kb-warning);
+  border-radius: 1px;
+}
+.vt-perf-pct-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.vt-perf-pct-n { font-weight: 400; font-size: 0.68rem; opacity: 0.8; }
+.vt-perf-pct-chip--top    { background: color-mix(in oklab, var(--kb-success) 22%, transparent); color: var(--kb-success); border-color: color-mix(in oklab, var(--kb-success) 40%, transparent); }
+.vt-perf-pct-chip--upper  { background: color-mix(in oklab, var(--kb-info) 18%, transparent);    color: var(--kb-info); }
+.vt-perf-pct-chip--lower  { background: color-mix(in oklab, var(--kb-warning) 18%, transparent); color: var(--kb-warning); }
+.vt-perf-pct-chip--bottom { background: color-mix(in oklab, var(--kb-danger) 18%, transparent);  color: var(--kb-danger); }
+.vt-perf-pct-chip--na     { background: color-mix(in oklab, var(--kb-text-muted) 14%, transparent); color: var(--kb-text-muted); font-weight: 400; }
+.vt-perf-spark { display: block; width: 100%; height: 44px; margin-top: 0.5rem; }
+.vt-perf-spark .vt-spark-pos { fill: var(--kb-success); }
+.vt-perf-spark .vt-spark-neg { fill: var(--kb-danger); }
+.vt-perf-spark .vt-spark-mid { stroke: color-mix(in oklab, var(--kb-text-muted) 35%, transparent); stroke-width: 1; }
+.vt-perf-axis-desc { line-height: 1.35; }
+.vt-perf-axis-card .vt-axis-card-head { display: flex; align-items: center; gap: 0.45rem; }
+.vt-perf-axis-card .vt-axis-card-mean { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ---- 11. Overview rivalry tiles + awards cabinet ---- */
+.vt-rival-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.vt-rival-tile {
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--vt-radius, 0.75rem);
+  background: color-mix(in oklab, var(--kb-text-muted) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+.vt-rival-tile-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--kb-text-muted); }
+.vt-rival-tile-name { font-size: 1.05rem; font-weight: 600; margin-top: 0.2rem; }
+.vt-rival-tile-value { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vt-award-tile {
+  height: 100%;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--vt-radius, 0.75rem);
+  background: color-mix(in oklab, var(--kb-warning) 9%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-warning) 28%, transparent);
+}
+.vt-award-tile--runnerup-only {
+  background: color-mix(in oklab, var(--kb-text-muted) 8%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+.vt-award-tile-head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600; }
+.vt-award-tile-head i { color: var(--kb-warning); }
+.vt-award-tile--runnerup-only .vt-award-tile-head i { color: var(--kb-text-muted); }
+.vt-award-tile-count { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 0.2rem; }
+.vt-award-tile-x { font-size: 0.9rem; font-weight: 400; color: var(--kb-text-muted); margin-left: 0.1rem; }
+.vt-award-tile-sub { line-height: 1.3; }
+
+/* ---- 12. Trends format chips + compare extras ---- */
+.vt-trends-format .vt-chip i { font-size: 0.85em; }
+.vt-compare-stat-section th {
+  padding-top: 0.75rem !important;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  border-bottom: none !important;
+}
+.vt-compare-pct { margin-left: 0.3rem; white-space: nowrap; }
+
+/* ---- 13. Players hub ---- */
+.vt-player-unranked-switch { display: flex; align-items: center; gap: 0.4rem; padding-left: 2.6rem; margin: 0; }
+.vt-hub-players-table th.sort-active, #vt-hub-career-table th.sort-active, #vt-hub-cmdr-table th.sort-active { color: var(--kb-primary); }
+.vt-hub-players-table th[data-hub-sort], #vt-hub-career-table th[data-career-sort] { cursor: pointer; white-space: nowrap; }
+.vt-hub-players-table td { white-space: nowrap; }
+.vt-hub-players-table td:nth-child(2) { white-space: normal; min-width: 8rem; }
+.vt-hub-players-table .vt-hub-pct-th { min-width: 2.6rem; }
+.vt-hub-pct { text-align: center; font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+.vt-hub-pct--top    { background: color-mix(in oklab, var(--kb-success) 22%, transparent); color: var(--kb-success); }
+.vt-hub-pct--upper  { background: color-mix(in oklab, var(--kb-info) 14%, transparent); }
+.vt-hub-pct--lower  { background: color-mix(in oklab, var(--kb-warning) 12%, transparent); }
+.vt-hub-pct--bottom { background: color-mix(in oklab, var(--kb-danger) 16%, transparent); color: var(--kb-danger); }
+.vt-hub-pct--na     { color: var(--kb-text-muted); }
+.vt-hub-row-unranked td { opacity: 0.7; }
+.vt-hub-ship-tile {
+  height: 100%;
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--vt-radius, 0.75rem);
+  background: color-mix(in oklab, var(--kb-text-muted) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.vt-hub-ship-tile:hover, .vt-hub-ship-tile.is-active {
+  border-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+  background: color-mix(in oklab, var(--kb-primary) 10%, transparent);
+}
+.vt-hub-ship-tile-head { display: flex; align-items: center; gap: 0.3rem; font-weight: 600; font-size: 0.9rem; }
+.vt-hub-ship-tile-list { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.82rem; }
+.vt-hub-ship-tile-list li { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.1rem 0; }
+
+@media (max-width: 768px) {
+  .vt-perf-filter-clear { margin-left: 0; }
+  .vt-player-title-strip .ms-auto { margin-left: 0 !important; }
+}
