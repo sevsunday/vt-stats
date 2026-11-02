@@ -917,9 +917,10 @@ body::before {
     color: var(--kb-primary-fg);
 }
 
-/* Primary-tinted variant of .vt-nav-icon-btn — used for high-emphasis
-   actions in the topnav (e.g. #record-stats-btn).
-   Mirrors the visual weight of .btn-primary while keeping the topnav's
+/* Primary-tinted variant of .vt-nav-icon-btn — for a high-emphasis
+   action in the topnav. No shell uses it today (the Record button it
+   was built for now lives inside the Tools dropdown); kept for the
+   next one. Mirrors the visual weight of .btn-primary while keeping the topnav's
    sizing and typography. Specificity matches the base .vt-nav-icon-btn
    hover/focus rules above; defined later in source so it wins. */
 .vt-nav-icon-btn--primary {
@@ -7424,6 +7425,26 @@ html.vt-cursor-active * {
 .vt-settings-navitem .vt-settings-navitem-label {
     display: inline;
     margin-left: 0.5rem;
+}
+
+/* The relocated page controls keep their .vt-nav-icon-btn class, whose
+   justify-content: center would centre them in the panel; everything
+   in the gear reads as a left-aligned list. Same for the cursor switch. */
+.vt-settings-panel .vt-settings-navitem,
+.vt-settings-panel .vt-nav-icon-btn.vt-settings-navitem {
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.vt-settings-panel .form-check.form-switch {
+    justify-content: flex-start;
+    padding-left: 0;
+    min-height: 0;
+}
+
+.vt-settings-panel .form-check.form-switch .form-check-input {
+    float: none;
+    margin-left: 0;
 }
 
 

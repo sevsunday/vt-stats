@@ -133,6 +133,7 @@
   box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--kb-primary) 18%, transparent);
 }
 
+.vt-player-filter-actions .form-label { white-space: nowrap; }
 .vt-player-sort-select {
   min-width: 12.5rem;
   background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
@@ -423,14 +424,110 @@
 }
 .vt-player-card-tier-wrap { flex: 0 0 auto; }
 
-.vt-player-card-rating {
+/* Two rating rows, one skeleton: key | value. VTSR-C (top) shows its
+   number; VTSR-T shows the band chip + position bar. The last-10
+   above/below bars live in their own block under the rows. */
+.vt-player-card-ratings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.1rem 0 0.4rem;
+}
+.vt-player-card-rating-row {
+  display: grid;
+  grid-template-columns: 3.9rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.55rem;
+  border-radius: 0;
+  background: color-mix(in oklab, var(--kb-bg-primary) 22%, transparent);
+  border-left: 2px solid transparent;
+}
+.vt-player-card-rating-row--c { border-left-color: color-mix(in oklab, var(--vt-tier-1) 55%, transparent); }
+.vt-player-card-rating-row--t { border-left-color: color-mix(in oklab, var(--kb-primary) 45%, transparent); }
+.vt-player-card-rating-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--kb-text-muted);
+  white-space: nowrap;
+}
+.vt-player-card-rating-key .bi { font-size: 0.7rem; }
+.vt-player-card-rating-row--c .vt-player-card-rating-key .bi { color: var(--vt-tier-1); }
+.vt-player-card-rating-row--t .vt-player-card-rating-key .bi { color: var(--kb-primary); }
+.vt-player-card-rating-value {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  margin: 0.15rem 0 0.6rem;
+  gap: 0.45rem;
+  min-width: 0;
 }
-.vt-player-card-rating .vt-band-bar { flex: 1 1 5rem; }
+.vt-player-card-rating-value .vt-band-bar { flex: 1 1 2.5rem; min-width: 2rem; }
+.vt-player-card-rating-value .vt-band-chip { flex: 0 0 auto; }
+.vt-player-card-vtsrc {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: var(--vt-tier-1);
+}
+.vt-player-card-vtsrc .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 1.02rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.vt-player-card-vtsrc.is-provisional .num {
+  opacity: 0.75;
+  text-decoration: underline dashed color-mix(in oklab, var(--vt-tier-1) 55%, transparent);
+  text-underline-offset: 3px;
+}
+.vt-player-card-vtsrc-prov {
+  font-size: 0.62rem;
+  color: var(--kb-text-muted);
+  letter-spacing: 0.02em;
+}
+.vt-player-card-vtsrc--none {
+  color: var(--kb-text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+/* Last-10 form bars, under the rating rows and above the role/ship
+   pills. C over T, matching the rows above them, full card width. */
+.vt-player-card-sparks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0 0 0.55rem;
+}
+.vt-player-card-spark-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 16px;
+}
+.vt-player-card-spark-label {
+  flex: 0 0 auto;
+  width: 0.7rem;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--kb-text-muted);
+}
+.vt-player-card-spark {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+.vt-player-card-spark svg { display: block; width: 100%; height: 100%; }
+.vt-player-card-spark-none {
+  font-size: 0.8rem;
+  color: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+}
 
 .vt-player-card-meta {
   display: flex;
@@ -454,37 +551,11 @@
   color: var(--kb-text-primary);
   font-weight: 600;
 }
-.vt-player-card-pill--vtsrc { color: var(--vt-tier-1); }
-.vt-player-card-pill--vtsrc.is-provisional { opacity: 0.7; border-style: dashed; }
 .vt-player-card-pill--role-c { color: var(--vt-tier-1); }
 .vt-player-card-pill--role-t { color: var(--vt-tier-2); }
 
-/* T (VTSR-T) and C (VTSR-C) sparklines, stacked; C only for commanders. */
-.vt-player-card-sparks {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: auto;
-  margin-bottom: 0.5rem;
-}
-.vt-player-card-spark-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.vt-player-card-spark-label {
-  flex: 0 0 auto;
-  width: 0.8rem;
-  font-family: 'Geist Mono', ui-monospace, monospace;
-  font-size: 0.64rem;
-  font-weight: 700;
-  color: var(--kb-text-muted);
-}
-.vt-player-card-spark {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: var(--vt-player-spark-h);
-}
+/* Legacy spark block (the hero / compare add-picker still use the
+   empty-state class). */
 .vt-player-card-spark svg { display: block; width: 100%; height: 100%; }
 .vt-player-card-spark-empty {
   font-size: 0.72rem;
@@ -573,14 +644,31 @@
   overflow-wrap: normal;
   font-size: 0.98rem;
 }
-[data-player-view="list"] .vt-player-card-rating {
-  flex: 0 0 11rem;
-  width: 11rem;
-  flex-wrap: nowrap;
-  align-items: center;
-  margin: 0;
+[data-player-view="list"] .vt-player-card-ratings {
+  flex: 0 1 26rem;
+  flex-direction: row;
   gap: 0.5rem;
+  margin: 0;
+  min-width: 0;
 }
+[data-player-view="list"] .vt-player-card-rating-row {
+  flex: 1 1 0;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.4rem;
+  padding: 0.15rem 0.4rem 0.15rem 0.45rem;
+  min-height: 1.7rem;
+}
+/* Icon-only keys in the row layout (the text would eat the value cell). */
+[data-player-view="list"] .vt-player-card-rating-key { font-size: 0; }
+[data-player-view="list"] .vt-player-card-rating-key .bi { font-size: 0.72rem; }
+[data-player-view="list"] .vt-player-card-sparks {
+  flex: 0 1 9rem;
+  width: 9rem;
+  margin: 0;
+  gap: 0.1rem;
+}
+[data-player-view="list"] .vt-player-card-spark-row { height: 14px; }
 [data-player-view="list"] .vt-player-card-meta {
   flex: 0 0 auto;
   width: auto;
@@ -601,26 +689,8 @@
   white-space: nowrap;
 }
 [data-player-view="list"] .vt-player-card-pill--ship { display: none; }
-[data-player-view="list"] .vt-player-card-sparks {
-  flex: 0 1 16rem;
-  width: auto;
-  min-width: 8rem;
-  max-width: 16rem;
-  margin: 0 0 0 auto;
-  gap: 0.15rem;
-}
-[data-player-view="list"] .vt-player-card-spark {
-  height: 18px;
-}
-[data-player-view="list"] .vt-player-card-spark .vt-player-card-spark-empty {
-  line-height: 1.2;
-  text-align: left;
-  white-space: normal;
-  display: flex;
-  align-items: center;
-  height: 100%;
-}
 [data-player-view="list"] .vt-player-card-foot {
+  margin-left: auto;
   flex: 0 0 9.25rem;
   width: 9.25rem;
   gap: 0.5rem;
@@ -941,9 +1011,17 @@
   height: clamp(240px, 38vh, 420px);
 }
 .vt-rating-chart-wrap canvas { width: 100%; height: 100%; }
-.vt-rating-zoom-chips .vt-chip {
+.vt-rating-zoom-chips .vt-chip,
+.vt-rating-mode-chips .vt-chip {
   padding: 0.15rem 0.55rem;
   font-size: 0.74rem;
+}
+/* Trend | Exact | By date on the left of the range chips, split by a hairline. */
+.vt-rating-chart-controls-sep {
+  display: inline-block;
+  width: 1px;
+  height: 1.1rem;
+  background: color-mix(in oklab, var(--kb-text-primary) 14%, transparent);
 }
 
 /* Match log table */
@@ -1612,6 +1690,104 @@
   color: inherit;
 }
 
+/* Scope pills under the hub filter bar: one removable pill per active
+   filter (value over context, × on the right), counts + info to the
+   right. Shapes after a marketplace filter bar: rounded rectangles in
+   the primary tint so they read as "applied", not as more buttons. */
+.vt-scope-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.6rem;
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 7%, transparent);
+}
+.vt-scope-pills-label {
+  color: var(--kb-text-muted);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.vt-scope-pills-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.vt-scope-pill {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--kb-primary) 16%, var(--kb-bg-card));
+  border: 1px solid color-mix(in oklab, var(--kb-primary) 38%, transparent);
+  color: var(--kb-text-primary);
+  overflow: hidden;
+  max-width: 16rem;
+}
+.vt-scope-pill-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.25rem 0.6rem 0.25rem 0.65rem;
+  min-width: 0;
+  line-height: 1.15;
+}
+.vt-scope-pill-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vt-scope-pill-ctx {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in oklab, var(--kb-text-primary) 62%, transparent);
+}
+.vt-scope-pill-x {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.5rem;
+  border: none;
+  border-left: 1px solid color-mix(in oklab, var(--kb-primary) 28%, transparent);
+  background: transparent;
+  color: color-mix(in oklab, var(--kb-text-primary) 70%, transparent);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vt-scope-pill-x:hover,
+.vt-scope-pill-x:focus-visible {
+  background: color-mix(in oklab, var(--kb-danger) 22%, transparent);
+  color: var(--kb-text-primary);
+  outline: none;
+}
+.vt-scope-pill--all {
+  background: color-mix(in oklab, var(--kb-bg-primary) 30%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  color: var(--kb-text-secondary);
+}
+.vt-scope-pill--all .vt-scope-pill-ctx { color: var(--kb-text-muted); }
+.vt-scope-pills-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--kb-text-secondary);
+}
+.vt-scope-summary strong { color: var(--kb-text-primary); font-variant-numeric: tabular-nums; }
+.vt-scope-note {
+  color: var(--kb-text-muted);
+  cursor: help;
+}
+.vt-scope-note:hover,
+.vt-scope-note:focus-visible { color: var(--kb-primary); outline: none; }
+@media (max-width: 575.98px) {
+  .vt-scope-pills-meta { margin-left: 0; width: 100%; }
+}
+
 /* ---- 10. Performance axes: cards, chips, sparklines ---- */
 .vt-perf-axis-row {
   display: flex;
@@ -1670,6 +1846,59 @@
 .vt-perf-axis-desc { line-height: 1.35; }
 .vt-perf-axis-card .vt-axis-card-head { display: flex; align-items: center; gap: 0.45rem; }
 .vt-perf-axis-card .vt-axis-card-mean { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* "How to read this": one <details> per axis in a two-column grid on
+   wide cards (a grid, not multicol, so an opened entry never hops columns). */
+.vt-perf-axis-explainer {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.15rem 1rem;
+  align-items: start;
+}
+.vt-perf-axis-explainer-title {
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kb-text-muted);
+  margin-bottom: 0.2rem;
+}
+.vt-perf-axis-detail {
+  font-size: 0.8rem;
+  border-radius: 6px;
+}
+.vt-perf-axis-detail > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.25rem 0.4rem;
+  color: var(--kb-text-secondary);
+  border-radius: 6px;
+  user-select: none;
+}
+.vt-perf-axis-detail > summary::-webkit-details-marker { display: none; }
+.vt-perf-axis-detail > summary::before {
+  content: '\25B8';
+  display: inline-block;
+  width: 0.9rem;
+  color: var(--kb-text-muted);
+  transition: transform 120ms ease;
+}
+.vt-perf-axis-detail[open] > summary::before { transform: rotate(90deg); }
+.vt-perf-axis-detail > summary:hover,
+.vt-perf-axis-detail[open] > summary {
+  color: var(--kb-text-primary);
+  background: color-mix(in oklab, var(--kb-bg-muted) 55%, transparent);
+}
+.vt-perf-axis-detail-body {
+  padding: 0.3rem 0.5rem 0.5rem 1.3rem;
+  color: var(--kb-text-secondary);
+  line-height: 1.45;
+}
+.vt-perf-axis-detail-higher { color: var(--kb-text-muted); }
 
 /* ---- 11. Overview rivalry tiles + awards cabinet ---- */
 .vt-rival-tiles {

@@ -86,10 +86,12 @@
   // ---- Filter bar --------------------------------------------------------------------------
 
   // opts: { contributions, fileIds, filters, show: {faction, ship, weapon, role, format, period},
-  //         counts: {faction: {code: n}, format: {id: n}} (optional) }
+  //         counts: {faction: {code: n}, format: {id: n}} (optional),
+  //         defaults: the surface's starting scope (optional; Clear returns
+  //         to it and the button hides while the filters equal it) }
   function filterBarHtml(id, opts) {
     const A = P();
-    const f = opts.filters || A.emptyFilters();
+    const f = opts.filters || opts.defaults || A.emptyFilters();
     const show = Object.assign({ faction: true, ship: true, weapon: true, role: true, format: true, period: true }, opts.show || {});
     const counts = opts.counts || {};
     const chip = (attr, value, label, selected, count) => `
@@ -155,7 +157,8 @@
       }
       html += '</div>';
     }
-    html += `<button type="button" class="btn btn-sm btn-outline-secondary vt-perf-filter-clear${A.isEmptyFilters(f) ? ' d-none' : ''}" data-perf-clear>
+    const atDefaults = A.isEmptyFilters(f, opts.defaults || null);
+    html += `<button type="button" class="btn btn-sm btn-outline-secondary vt-perf-filter-clear${atDefaults ? ' d-none' : ''}" data-perf-clear title="${opts.defaults ? 'Back to the default scope' : 'Clear every filter'}">
       <i class="bi bi-x-lg me-1"></i>Clear
     </button>`;
     html += '</div>';
@@ -164,14 +167,16 @@
 
   // Wires a rendered bar. onChange(newFilters) is called with a fresh
   // filters object; the caller re-renders (and usually re-renders the bar).
-  function wireFilterBar(root, filters, onChange) {
+  // opts.defaults: what Clear returns to (default: the empty scope).
+  function wireFilterBar(root, filters, onChange, opts) {
     if (!root) return;
     const A = P();
+    const defaults = opts && opts.defaults ? JSON.parse(JSON.stringify(opts.defaults)) : null;
     const next = () => JSON.parse(JSON.stringify(filters));
     root.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn || !root.contains(btn)) return;
-      if (btn.hasAttribute('data-perf-clear')) { onChange(A.emptyFilters()); return; }
+      if (btn.hasAttribute('data-perf-clear')) { onChange(defaults ? JSON.parse(JSON.stringify(defaults)) : A.emptyFilters()); return; }
       const f = next();
       if (btn.hasAttribute('data-perf-faction')) {
         f.faction = btn.getAttribute('data-perf-faction') || null;
@@ -213,6 +218,84 @@
     if (f.formats && f.formats.length) parts.push(f.formats.map(x => (A.FORMATS.find(y => y.id === x) || {}).label || x).join(' / '));
     if (f.period && f.period !== 'all') parts.push(((A.PERIODS.find(x => x.id === f.period) || {}).label || f.period).toLowerCase());
     return parts.join(' \u00b7 ');
+  }
+
+  // ---- Scope pills -----------------------------------------------------------------------
+  //
+  // One removable pill per active filter — the value on top, what it is
+  // underneath ("Tank" / Ship, "3v3+" / Format) — with an × that drops
+  // just that filter. Every selected format is its own pill. With
+  // nothing active, a single muted "All matches" pill with no ×.
+  // opts.summary: trailing text (match / player counts); opts.note: the
+  // info-icon tooltip.
+
+  function scopePillDefs(f) {
+    const A = P();
+    const defs = [];
+    if (!f) return defs;
+    if (f.faction) defs.push({ kind: 'faction', value: (A.FACTIONS.find(x => x.code === f.faction) || {}).label || f.faction, ctx: 'Faction' });
+    if (f.ship) defs.push({ kind: 'ship', value: shipLabel(f.ship), ctx: 'Ship' });
+    if (f.weapon) defs.push({ kind: 'weapon', value: f.weapon, ctx: 'Weapon' });
+    if (f.role && f.role !== 'all') defs.push({ kind: 'role', value: f.role === 'commander' ? 'Commander' : 'Thug', ctx: 'Role' });
+    for (const id of (f.formats || [])) {
+      defs.push({ kind: 'format', id, value: (A.FORMATS.find(x => x.id === id) || {}).label || id, ctx: 'Format' });
+    }
+    if (f.period && f.period !== 'all') defs.push({ kind: 'period', value: (A.PERIODS.find(x => x.id === f.period) || {}).label || f.period, ctx: 'Period' });
+    return defs;
+  }
+
+  function scopePillsHtml(id, f, opts) {
+    opts = opts || {};
+    const defs = scopePillDefs(f);
+    const pills = defs.length
+      ? defs.map(d => `<span class="vt-scope-pill" data-scope-kind="${esc(d.kind)}"${d.id ? ` data-scope-id="${esc(d.id)}"` : ''}>
+          <span class="vt-scope-pill-text">
+            <span class="vt-scope-pill-value">${esc(d.value)}</span>
+            <span class="vt-scope-pill-ctx">${esc(d.ctx)}</span>
+          </span>
+          <button type="button" class="vt-scope-pill-x" data-scope-remove aria-label="Remove ${esc(d.ctx.toLowerCase())} filter ${esc(d.value)}" title="Remove">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </span>`).join('')
+      : `<span class="vt-scope-pill vt-scope-pill--all">
+          <span class="vt-scope-pill-text">
+            <span class="vt-scope-pill-value">All matches</span>
+            <span class="vt-scope-pill-ctx">Scope</span>
+          </span>
+        </span>`;
+    const summary = opts.summary ? `<span class="vt-scope-summary">${opts.summary}</span>` : '';
+    const note = opts.note
+      ? `<i class="bi bi-info-circle vt-scope-note" tabindex="0" role="img" aria-label="${esc(opts.note)}" title="${esc(opts.note)}"></i>`
+      : '';
+    return `<div class="vt-scope-pills" id="${esc(id)}" data-scope-pills>
+      <span class="vt-scope-pills-label"><i class="bi bi-funnel"></i></span>
+      <div class="vt-scope-pills-list">${pills}</div>
+      ${summary || note ? `<div class="vt-scope-pills-meta">${summary}${note}</div>` : ''}
+    </div>`;
+  }
+
+  // Each × drops its own filter and calls onChange(newFilters).
+  function wireScopePills(root, filters, onChange) {
+    if (!root) return;
+    const A = P();
+    root.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-scope-remove]');
+      if (!btn || !root.contains(btn)) return;
+      const pill = btn.closest('.vt-scope-pill');
+      if (!pill) return;
+      const f = JSON.parse(JSON.stringify(filters || A.emptyFilters()));
+      const kind = pill.getAttribute('data-scope-kind');
+      if (kind === 'faction') f.faction = null;
+      else if (kind === 'ship') f.ship = null;
+      else if (kind === 'weapon') f.weapon = null;
+      else if (kind === 'role') f.role = 'all';
+      else if (kind === 'period') f.period = 'all';
+      else if (kind === 'format') {
+        const id = pill.getAttribute('data-scope-id');
+        f.formats = (f.formats || []).filter(x => x !== id);
+      } else return;
+      onChange(f);
+    });
   }
 
   // ---- Radar -----------------------------------------------------------------------------------
@@ -414,6 +497,8 @@
     filterBarHtml,
     wireFilterBar,
     filterSummary,
+    scopePillsHtml,
+    wireScopePills,
     renderRadar,
     zToRadius,
     percentileChipHtml,

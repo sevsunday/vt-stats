@@ -73,22 +73,31 @@
     pillar:  { min: 40, label: 'Zoner (40+)' },
   };
 
-  // Sort comparators keyed by select value. VTSR-T is never a sort key
-  // (it is shown as a band, not a number); VTSR-C is, because it is a
-  // win/loss rating. Players without a VTSR-C rating sort last.
+  // Sort comparators keyed by select value. VTSR-C is the default (a
+  // win/loss rating with a number). VTSR-T sorts on the raw value like
+  // Balonce and the ladder do — the ORDER is fine, the NUMBER is what
+  // never shows (DEVELOPER_GUIDE §13.8). Unrated players sort last.
   const byName = (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase());
+  const byRatedDesc = (field) => (a, b) => {
+    const ha = Number.isFinite(a[field]), hb = Number.isFinite(b[field]);
+    if (ha !== hb) return ha ? -1 : 1;
+    if (ha && a[field] !== b[field]) return b[field] - a[field];
+    return byName(a, b);
+  };
   const SORT_COMPARATORS = {
-    'name-asc':     byName,
-    'vtsrc-desc':   (a, b) => {
-      const ha = Number.isFinite(a.vtsr_c), hb = Number.isFinite(b.vtsr_c);
-      if (ha !== hb) return ha ? -1 : 1;
-      if (ha && a.vtsr_c !== b.vtsr_c) return b.vtsr_c - a.vtsr_c;
-      return byName(a, b);
+    'vtsrc-desc':   byRatedDesc('vtsr_c'),
+    'vtsrt-desc':   (a, b) => {
+      // Provisional VTSR-T rows carry a number too; keep them below the
+      // established ladder so the top of the list is the real ladder.
+      const pa = !!a.provisional, pb = !!b.provisional;
+      if (pa !== pb) return pa ? 1 : -1;
+      return byRatedDesc('vtsr')(a, b);
     },
+    'name-asc':     byName,
     'matches-desc': (a, b) => (safeNum(b.matches_played) - safeNum(a.matches_played)) || byName(a, b),
     'last-desc':    (a, b) => String(b.last_match_id || '').localeCompare(String(a.last_match_id || '')) || byName(a, b),
   };
-  const DEFAULT_SORT = 'name-asc';
+  const DEFAULT_SORT = 'vtsrc-desc';
 
   function safeNum(v) { return Number.isFinite(+v) ? +v : 0; }
 
@@ -662,28 +671,107 @@
     }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS[DEFAULT_SORT]);
   }
 
-  function vtsrCChipHtml(row) {
-    if (!Number.isFinite(row.vtsr_c)) return '';
+  // How many recent games the directory-card form bars draw. The stored
+  // win_history is the last 10 (the profile's "Last 10" tile); the cards
+  // walk the rating histories for a longer run so the bars stay narrow
+  // enough to read as a streak instead of ten fat blocks.
+  const CARD_SPARK_GAMES = 40;
+
+  function pushSpark(map, id, delta) {
+    if (id == null || id === '' || !Number.isFinite(+delta)) return;
+    const key = String(id);
+    let arr = map.get(key);
+    if (!arr) { arr = []; map.set(key, arr); }
+    arr.push(+delta);
+    if (arr.length > CARD_SPARK_GAMES) arr.shift();
+  }
+
+  // steam64 -> last CARD_SPARK_GAMES rating changes, oldest first.
+  // Rated rows only: an excluded match carries an empty deltas list.
+  function sparkSeriesFromThugHistory(history) {
+    const map = new Map();
+    for (const entry of (history && history.history) || []) {
+      for (const d of entry.deltas || []) pushSpark(map, d.steam64, d.delta);
+    }
+    return map;
+  }
+
+  function sparkSeriesFromCmdrHistory(history) {
+    const map = new Map();
+    for (const duel of (history && history.duels) || []) {
+      const sides = duel.commanders || {};
+      for (const side of ['1', '2']) {
+        const row = sides[side];
+        if (row) pushSpark(map, row.steam64, row.delta);
+      }
+    }
+    return map;
+  }
+
+  // Started at boot so it overlaps the contributions fetch. Directory
+  // render awaits it; a 404 leaves the maps null and the cards fall
+  // back to the stored last-10 win_history.
+  function startSparkHistories() {
+    if (state.sparkHistoryPromise) return state.sparkHistoryPromise;
+    const prefix = state.dataPrefix || '';
+    state.sparkHistoryPromise = Promise.all([
+      fetchJson(`${prefix}data/processed/elo_history.json`).catch(() => null),
+      fetchJson(`${prefix}data/processed/elo_commander_history.json`).catch(() => null),
+    ]).then(([thug, cmdr]) => {
+      state.sparkT = thug ? sparkSeriesFromThugHistory(thug) : null;
+      state.sparkC = cmdr ? sparkSeriesFromCmdrHistory(cmdr) : null;
+    }).catch(() => {});
+    return state.sparkHistoryPromise;
+  }
+
+  function cardSparkSeries(row, kind) {
+    const map = kind === 'c' ? state.sparkC : state.sparkT;
+    const series = map && map.get(String(row.steam64));
+    if (series && series.length) return series;
+    return kind === 'c' ? (row.vtsr_c_history || []) : (row.win_history || []);
+  }
+
+  // Compact sparkline cell for a card; a short dash when the player has
+  // no games on that ladder (sparkSvg's long empty text would not fit).
+  function cardSparkHtml(history) {
+    if (!Array.isArray(history) || !history.length) {
+      return '<span class="vt-player-card-spark-none" aria-hidden="true">&mdash;</span>';
+    }
+    return sparkSvg(history, 240, 28);
+  }
+
+  // The card's VTSR-C row value: the number (muted + dashed when
+  // provisional) or an em-dash for players never rated as commander.
+  function cardVtsrCValueHtml(row) {
+    if (!Number.isFinite(row.vtsr_c)) {
+      return `<span class="vt-player-card-vtsrc vt-player-card-vtsrc--none" title="Not rated as a commander">&mdash;</span>`;
+    }
     const prov = row.vtsr_c_provisional;
     const games = row.vtsr_c_games || 0;
     const tip = `VTSR-C ${Math.round(row.vtsr_c)}: commander win/loss rating over ${games} rated commander game${games === 1 ? '' : 's'}${prov ? ' (provisional)' : ''}`;
-    return `<span class="vt-player-card-pill vt-player-card-pill--vtsrc${prov ? ' is-provisional' : ''}" title="${escapeHtml(tip)}">
-         <i class="bi bi-shield-fill"></i>C <span class="num">${Math.round(row.vtsr_c)}</span>
-       </span>`;
+    return `<span class="vt-player-card-vtsrc${prov ? ' is-provisional' : ''}" title="${escapeHtml(tip)}">
+      <span class="num">${Math.round(row.vtsr_c)}</span>${prov ? '<span class="vt-player-card-vtsrc-prov">prov.</span>' : ''}
+    </span>`;
   }
 
+  // Card layout: name, then the two rating rows (VTSR-C on top with its
+  // number, VTSR-T under it with its band chip + position bar), then the
+  // last-10 above/below bars for each rating, then role + ship pills
+  // and the footer. The bars sit on their own so they get the row's
+  // full width instead of a sliver beside the number.
   function renderCard(row) {
     const band = VTSRDisplay.bandFor(row);
     const t = { id: band.provisional ? 'provisional' : band.tier };
     const role = roleLabel(row);
     const href = playerHref(row.steam64);
     const selected = state.selection.has(String(row.steam64));
-    const peakHtml = vtsrCChipHtml(row);
     const shipHtml = row.primary_ship
       ? `<span class="vt-player-card-pill vt-player-card-pill--ship" title="Primary ship (by time)">
            <i class="bi bi-fuel-pump"></i><span>${escapeHtml(row.primary_ship)}</span>
          </span>`
       : '';
+    const cSeries = cardSparkSeries(row, 'c');
+    const tSeries = cardSparkSeries(row, 't');
     return `<a class="vt-player-card" href="${href}"
               data-steam64="${escapeHtml(row.steam64)}"
               data-tier="${t.id}"
@@ -695,29 +783,40 @@
         <div class="vt-player-card-name">${escapeHtml(row.name)}</div>
       </div>
 
-      <div class="vt-player-card-rating">
-        ${VTSRDisplay.bandChipHtml(band, { bsTooltip: false })}
-        ${VTSRDisplay.positionBarHtml(row, ratingNoiseSigma(), { band, bsTooltip: false })}
+      <div class="vt-player-card-ratings">
+        <div class="vt-player-card-rating-row vt-player-card-rating-row--c">
+          <span class="vt-player-card-rating-key" title="VTSR-C: commander win/loss rating">
+            <i class="bi bi-shield-fill"></i>VTSR-C
+          </span>
+          <span class="vt-player-card-rating-value">${cardVtsrCValueHtml(row)}</span>
+        </div>
+        <div class="vt-player-card-rating-row vt-player-card-rating-row--t">
+          <span class="vt-player-card-rating-key" title="VTSR-T: thug form rating, shown as a band">
+            <i class="bi bi-lightning-charge-fill"></i>VTSR-T
+          </span>
+          <span class="vt-player-card-rating-value">
+            ${VTSRDisplay.bandChipHtml(band, { compact: true, bsTooltip: false })}
+            ${VTSRDisplay.positionBarHtml(row, ratingNoiseSigma(), { band, bsTooltip: false })}
+          </span>
+        </div>
+      </div>
+
+      <div class="vt-player-card-sparks">
+        <div class="vt-player-card-spark-row" title="${cSeries.length ? `Last ${cSeries.length} VTSR-C commander games: rating won or lost` : 'No rated commander games'}">
+          <span class="vt-player-card-spark-label">C</span>
+          <div class="vt-player-card-spark">${cardSparkHtml(cSeries)}</div>
+        </div>
+        <div class="vt-player-card-spark-row" title="${tSeries.length ? `Last ${tSeries.length} VTSR-T games: above or below what the rating expected` : 'No rated games yet'}">
+          <span class="vt-player-card-spark-label">T</span>
+          <div class="vt-player-card-spark">${cardSparkHtml(tSeries)}</div>
+        </div>
       </div>
 
       <div class="vt-player-card-meta">
-        ${peakHtml}
         <span class="vt-player-card-pill ${role.class}" title="${role.label} (${(commanderShare(row) * 100).toFixed(0)}% as commander)">
           <i class="bi bi-${role.code === 'c' ? 'shield-fill' : 'lightning-charge-fill'}"></i>${role.label}
         </span>
         ${shipHtml}
-      </div>
-
-      <div class="vt-player-card-sparks">
-        <div class="vt-player-card-spark-row" title="Last 10 VTSR-T games: above or below what the rating expected">
-          <span class="vt-player-card-spark-label">T</span>
-          <div class="vt-player-card-spark">${sparkSvg(row.win_history, 240, 28)}</div>
-        </div>
-        ${row.vtsr_c_history && row.vtsr_c_history.length ? `
-        <div class="vt-player-card-spark-row" title="Last 10 VTSR-C commander games: rating won or lost">
-          <span class="vt-player-card-spark-label">C</span>
-          <div class="vt-player-card-spark">${sparkSvg(row.vtsr_c_history, 240, 28)}</div>
-        </div>` : ''}
       </div>
 
       <div class="vt-player-card-foot">
@@ -1367,18 +1466,22 @@
     return `
       <div class="card mb-3">
         <div class="card-body">
-          <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
             <h2 class="h6 mb-0 text-secondary text-uppercase" style="letter-spacing:0.08em;">
               <i class="bi bi-graph-up me-1"></i>VTSR-T history
             </h2>
-            <div class="ms-auto vt-rating-zoom-chips d-flex gap-1" id="vt-rating-zoom-chips">
-              <button type="button" class="vt-chip" data-range="all" data-selected="true">All time</button>
-              <button type="button" class="vt-chip" data-range="90d">90d</button>
-              <button type="button" class="vt-chip" data-range="30d">30d</button>
-              <button type="button" class="vt-chip" data-range="last10">Last 10</button>
-              <button type="button" class="vt-chip" data-range="reset">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
+            <div class="ms-auto d-flex flex-wrap align-items-center gap-2 vt-rating-chart-controls">
+              ${ratingChartModeChipsHtml()}
+              <span class="vt-rating-chart-controls-sep" aria-hidden="true"></span>
+              <div class="vt-rating-zoom-chips d-flex gap-1" id="vt-rating-zoom-chips" role="group" aria-label="Range">
+                <button type="button" class="vt-chip" data-range="all" data-selected="true">All</button>
+                <button type="button" class="vt-chip" data-range="90d" hidden>90d</button>
+                <button type="button" class="vt-chip" data-range="30d" hidden>30d</button>
+                <button type="button" class="vt-chip" data-range="last10">Last 10</button>
+                <button type="button" class="vt-chip" data-range="reset" title="Reset zoom">
+                  <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+              </div>
             </div>
           </div>
           <div class="vt-rating-chart-wrap">
@@ -1388,8 +1491,27 @@
             </div>
           </div>
           <p class="text-secondary small mb-0 mt-2">
-            Wheel to zoom; click + drag to pan. Click any point to scroll to the matching row below.
-            Tier bands are colored to match the leaderboard.
+            <strong>Trend</strong> smooths the line over a handful of games and ignores dates; <strong>Exact</strong> shows
+            every game; <strong>By date</strong> puts them on a calendar. Wheel to zoom, drag to pan; in Exact or By date,
+            click a point to jump to its row in the match log. Tier bands are colored to match the leaderboard.
+          </p>
+        </div>
+      </div>
+
+      <div class="card mb-3" id="vt-axis-trend-card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <h2 class="h6 mb-0 text-secondary text-uppercase" style="letter-spacing:0.08em;">
+              <i class="bi bi-activity me-1"></i>Axis over time
+            </h2>
+            <select class="form-select form-select-sm ms-auto" id="vt-axis-trend-pick" style="width:auto;" aria-label="Axis"></select>
+          </div>
+          <div style="position:relative;height:220px;">
+            <canvas id="vt-axis-trend-chart"></canvas>
+          </div>
+          <p class="text-secondary small mb-0 mt-2" id="vt-axis-trend-note">
+            Each bar is one 3v3+ match's lobby z on the picked axis (\u22121\u2026+1); the line is the
+            trailing 5-match mean. These are descriptive axes, not the rating.
           </p>
         </div>
       </div>
@@ -1427,24 +1549,6 @@
               </table>
             </div>
           </div>
-        </div>
-      </div>
-
-      <div class="card mt-3" id="vt-axis-trend-card">
-        <div class="card-body">
-          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-            <h2 class="h6 mb-0 text-secondary text-uppercase" style="letter-spacing:0.08em;">
-              <i class="bi bi-activity me-1"></i>Axis over time
-            </h2>
-            <select class="form-select form-select-sm ms-auto" id="vt-axis-trend-pick" style="width:auto;" aria-label="Axis"></select>
-          </div>
-          <div style="position:relative;height:220px;">
-            <canvas id="vt-axis-trend-chart"></canvas>
-          </div>
-          <p class="text-secondary small mb-0 mt-2" id="vt-axis-trend-note">
-            Each bar is one 3v3+ match's lobby z on the picked axis (\u22121\u2026+1); the line is the
-            trailing 5-match mean. These are descriptive axes, not the rating.
-          </p>
         </div>
       </div>
     `;
@@ -1619,7 +1723,231 @@
     return tf ? tf.code : null;
   }
 
-  // -- Rating chart ------------------------------------------------------
+  // -- Rating series charts (VTSR-T / VTSR-C / VTSR-1v1) -----------------
+  //
+  // Three views over one chronological series of {date, after, delta}:
+  //   trend — x = game number, y = a centered moving average of `after`.
+  //           Dates are ignored (a two-month gap and a two-day gap read
+  //           the same) and the line is the direction of travel, not
+  //           the games. The default.
+  //   exact — x = game number, every game's `after`, point colours by
+  //           verdict (VTSR-T) or win / loss (VTSR-C, 1v1).
+  //   date  — the time axis (ms), wheel zoom + drag pan, 90d / 30d chips.
+  // One shared preference (localStorage) so every rating chart on the
+  // profile flips together.
+
+  const RATING_CHART_MODES = [
+    { id: 'trend', label: 'Trend',   title: 'Smoothed line over games, dates ignored' },
+    { id: 'exact', label: 'Exact',   title: 'Every game, dates ignored' },
+    { id: 'date',  label: 'By date', title: 'Games on a time axis; wheel to zoom, drag to pan' },
+  ];
+  const RATING_CHART_MODE_KEY = 'vt.player.ratingChartMode';
+  const RATING_CHART_MODE_DEFAULT = 'trend';
+
+  function ratingChartMode() {
+    try {
+      const v = localStorage.getItem(RATING_CHART_MODE_KEY);
+      if (RATING_CHART_MODES.some(m => m.id === v)) return v;
+    } catch (_) {}
+    return RATING_CHART_MODE_DEFAULT;
+  }
+
+  function setRatingChartMode(mode) {
+    if (!RATING_CHART_MODES.some(m => m.id === mode)) return;
+    try { localStorage.setItem(RATING_CHART_MODE_KEY, mode); } catch (_) {}
+  }
+
+  function ratingChartModeChipsHtml() {
+    const mode = ratingChartMode();
+    return `<div class="vt-rating-mode-chips d-flex gap-1" role="group" aria-label="Chart view">
+      ${RATING_CHART_MODES.map(m => `<button type="button" class="vt-chip" data-mode="${m.id}" data-selected="${mode === m.id ? 'true' : 'false'}" title="${escapeHtml(m.title)}">${m.label}</button>`).join('')}
+    </div>`;
+  }
+
+  // Redraw callbacks registered by each chart when it draws, keyed by
+  // chart id, so a mode flip repaints whichever charts are on screen.
+  const ratingChartRedraws = Object.create(null);
+
+  function bindRatingChartModeChips() {
+    if (state.ratingModeBound) return;
+    state.ratingModeBound = true;
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.vt-rating-mode-chips .vt-chip');
+      if (!btn) return;
+      const mode = btn.dataset.mode;
+      if (!mode || mode === ratingChartMode()) return;
+      setRatingChartMode(mode);
+      document.querySelectorAll('.vt-rating-mode-chips').forEach(group => {
+        group.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.mode === mode ? 'true' : 'false'));
+      });
+      for (const key in ratingChartRedraws) {
+        try { ratingChartRedraws[key](); } catch (err) { console.warn('player.js: rating chart redraw failed', key, err); }
+      }
+    });
+  }
+
+  // Odd window for the trend line: about a sixth of the series, 5..15.
+  function trendWindow(n) {
+    let w = Math.max(5, Math.min(15, Math.round(n / 6)));
+    if (w % 2 === 0) w += 1;
+    return w;
+  }
+
+  // Centered moving average; the window clamps to the series at both
+  // ends (so the last point averages the last half-window of games).
+  // Returns [{mean, a, b}] with a..b the 0-based games averaged.
+  function centeredMovingAverage(values, w) {
+    const n = values.length;
+    const half = Math.floor(w / 2);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = Math.max(0, i - half), b = Math.min(n - 1, i + half);
+      let s = 0;
+      for (let j = a; j <= b; j++) s += values[j];
+      out[i] = { mean: s / (b - a + 1), a, b };
+    }
+    return out;
+  }
+
+  function dateTickFormatter(firstTs, lastTs) {
+    return (val) => {
+      const d = new Date(val);
+      if (Number.isNaN(d.getTime())) return '';
+      const opts = (lastTs - firstTs) > 90 * 86400000
+        ? { month: 'short', year: '2-digit' }
+        : { month: 'short', day: 'numeric' };
+      return d.toLocaleDateString(undefined, opts);
+    };
+  }
+
+  // points: chronological, every `after` finite. opts:
+  //   label, mode (defaults to the stored preference),
+  //   pointColor(p) -> colour for exact / date points,
+  //   tooltipTitle(p, i) / tooltipLines(p, i) for exact / date,
+  //   trendLine(mean) -> the one tooltip line in trend mode,
+  //   yScale -> Chart.js y-scale options,
+  //   plugins(ctx) -> inline plugins; ctx = {mode, data, peak, peakX},
+  //   onPointClick(p), yTitle.
+  // Returns the Chart; chart.$vt carries {mode, points} for the range chips.
+  function ratingSeriesChart(canvas, points, opts) {
+    const mode = opts.mode || ratingChartMode();
+    const themePrimary = opts.color || getCSSVar('--kb-primary') || '#36a2eb';
+    const themeMuted   = getCSSVar('--kb-text-muted') || '#888';
+    const n = points.length;
+    const byDate = mode === 'date';
+    const isTrend = mode === 'trend';
+    const xOf = (p, i) => (byDate ? new Date(p.date).getTime() : i + 1);
+
+    let data, pointColors = undefined, windows = null;
+    if (isTrend) {
+      windows = centeredMovingAverage(points.map(p => p.after), trendWindow(n));
+      data = windows.map((w, i) => ({ x: i + 1, y: w.mean }));
+    } else {
+      data = points.map((p, i) => ({ x: xOf(p, i), y: p.after }));
+      if (typeof opts.pointColor === 'function') pointColors = points.map(opts.pointColor);
+    }
+    const peak = points.reduce((acc, p) => (p.after > acc.after ? p : acc), points[0]);
+    const peakIdx = points.indexOf(peak);
+    const peakX = byDate ? new Date(peak.date).getTime() : peakIdx + 1;
+
+    const xScale = byDate ? {
+      type: 'linear',
+      min: data[0].x,
+      max: data[n - 1].x,
+      ticks: { color: themeMuted, autoSkip: true, maxTicksLimit: 8, callback: dateTickFormatter(data[0].x, data[n - 1].x) },
+      grid: { color: 'rgba(255,255,255,0.04)' },
+    } : {
+      type: 'linear',
+      min: 0.5,
+      max: n + 0.5,
+      ticks: {
+        color: themeMuted, autoSkip: true, maxTicksLimit: 10, precision: 0,
+        callback: (v) => (Number.isInteger(v) && v >= 1 && v <= n ? `#${v}` : ''),
+      },
+      grid: { color: 'rgba(255,255,255,0.04)' },
+      title: { display: true, text: 'Game', color: themeMuted, font: { size: 10 } },
+    };
+
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: opts.label || '',
+          data,
+          parsing: false,
+          borderColor: themePrimary,
+          borderWidth: isTrend ? 3 : 2,
+          tension: isTrend ? 0.35 : 0.18,
+          pointRadius: isTrend ? 0 : 3,
+          pointHoverRadius: isTrend ? 0 : 6,
+          pointHitRadius: isTrend ? 0 : 6,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          fill: false,
+          spanGaps: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                if (!items.length) return '';
+                const i = items[0].dataIndex;
+                if (isTrend) {
+                  const w = windows[i];
+                  return w.a === w.b ? `Game #${w.a + 1}` : `Games #${w.a + 1}\u2013#${w.b + 1}`;
+                }
+                const p = points[i];
+                const when = p.date ? new Date(p.date) : null;
+                const dateStr = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : '';
+                if (typeof opts.tooltipTitle === 'function') return opts.tooltipTitle(p, i, dateStr);
+                return byDate ? dateStr : `Game #${i + 1}${dateStr ? ' \u00b7 ' + dateStr : ''}`;
+              },
+              label: (item) => {
+                const i = item.dataIndex;
+                if (isTrend) {
+                  return typeof opts.trendLine === 'function' ? opts.trendLine(windows[i].mean) : '';
+                }
+                return typeof opts.tooltipLines === 'function' ? opts.tooltipLines(points[i], i) : '';
+              },
+            },
+          },
+          // chartjs-plugin-zoom (registered via the UMD bundle).
+          zoom: {
+            pan:  { enabled: true, mode: 'x', modifierKey: null },
+            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+            limits: { x: { min: 'original', max: 'original' } },
+          },
+        },
+        scales: { x: xScale, y: opts.yScale },
+        onClick: (evt, items) => {
+          if (isTrend || !items.length || typeof opts.onPointClick !== 'function') return;
+          const idx = (items[0].index !== undefined) ? items[0].index : items[0].dataIndex;
+          const p = points[idx];
+          if (p) opts.onPointClick(p);
+        },
+      },
+      plugins: typeof opts.plugins === 'function' ? opts.plugins({ mode, data, peak, peakX }) : [],
+    });
+    chart.$vt = { mode, points };
+    return chart;
+  }
+
+  // Shows / hides the calendar-only range chips for the current mode.
+  function syncRatingRangeChips(root) {
+    if (!root) return;
+    const byDate = ratingChartMode() === 'date';
+    root.querySelectorAll('.vt-chip[data-range="90d"], .vt-chip[data-range="30d"]').forEach(b => { b.hidden = !byDate; });
+    const sel = root.querySelector('.vt-chip[data-selected="true"]');
+    if (sel && sel.hidden) {
+      root.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.range === 'all' ? 'true' : 'false'));
+    }
+  }
 
   function renderRatingChart(rating, matchLog) {
     const canvas = $('vt-rating-chart');
@@ -1631,148 +1959,77 @@
       state.ratingChart = null;
     }
 
-    // Filter to rows that actually contributed to the rating. Use
-    // `after` as the y-coordinate -- the rating line. Anchor an
-    // explicit 1500 baseline at the start of the first rated match so
-    // the line begins where it should even if delta is small.
+    // Rows that actually contributed to the rating; `after` is the line.
     const points = matchLog.filter(r => Number.isFinite(r.after));
     if (!points.length) {
       emptyEl.textContent = 'No rated matches yet for this player.';
       emptyEl.hidden = false;
       canvas.hidden = true;
+      delete ratingChartRedraws.t;
       return;
     }
     emptyEl.hidden = true;
     canvas.hidden = false;
 
-    const peak = points.reduce((acc, p) => (p.after > acc.after ? p : acc), points[0]);
-    const themePrimary = getCSSVar('--kb-primary') || '#36a2eb';
     const themeText    = getCSSVar('--kb-text-primary') || '#e5e5e5';
     const themeMuted   = getCSSVar('--kb-text-muted')   || '#888';
     const themeSuccess = getCSSVar('--kb-success')      || '#2ecc71';
     const themeDanger  = getCSSVar('--kb-danger')       || '#e74c3c';
 
-    // Per-point colour: Beat / On par / Below so a glance at the trail
-    // tells you which games beat expectation.
-    const pointColors = points.map(p => {
-      const v = VTSRDisplay.deltaVerdict(p.delta);
-      if (!v || v.key === 'par') return themeMuted;
-      return v.key === 'beat' ? themeSuccess : themeDanger;
-    });
-
-    // Use {x, y} pairs with a linear-scale x-axis (timestamps in
-    // milliseconds). Avoids needing a chartjs date adapter vendor
-    // (chartjs-adapter-date-fns isn't shipped). Ticks are formatted
-    // manually in the scale config.
-    const scatterData = points.map(p => ({
-      x: new Date(p.date).getTime(),
-      y: p.after,
-    }));
-
-    state.ratingChart = new Chart(canvas, {
-      type: 'line',
-      data: {
-        datasets: [{
-          label: rating.name,
-          data: scatterData,
-          parsing: false,
-          borderColor: themePrimary,
-          borderWidth: 2,
-          tension: 0.18,
-          pointRadius: 3,
-          pointHoverRadius: 6,
-          pointBackgroundColor: pointColors,
-          pointBorderColor: pointColors,
-          fill: false,
-          spanGaps: false,
-        }],
+    state.ratingChart = ratingSeriesChart(canvas, points, {
+      label: rating.name,
+      // Per-point colour: Beat / On par / Below so a glance at the trail
+      // tells you which games beat expectation.
+      pointColor: (p) => {
+        const v = VTSRDisplay.deltaVerdict(p.delta);
+        if (!v || v.key === 'par') return themeMuted;
+        return v.key === 'beat' ? themeSuccess : themeDanger;
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                if (!items.length) return '';
-                const i = items[0].dataIndex;
-                const p = points[i];
-                return new Date(p.date).toLocaleString();
-              },
-              label: (item) => {
-                const i = item.dataIndex;
-                const p = points[i];
-                const v = VTSRDisplay.deltaVerdict(p.delta);
-                const b = VTSRDisplay.rawBandFor(p.after);
-                const m = (p.map || '').replace(/\.bzn$/i, '');
-                return [
-                  `Band: ${b ? b.label : '—'}`,
-                  `Game: ${v ? v.label : '—'}`,
-                  `Match: ${m || p.match_id}`,
-                ];
-              },
-            },
-          },
-          // chartjs-plugin-zoom (registered via the UMD bundle).
-          zoom: {
-            pan:  { enabled: true, mode: 'x', modifierKey: null },
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
-            limits: {
-              x: { min: 'original', max: 'original' },
-            },
-          },
-        },
-        scales: {
-          x: {
-            type: 'linear',
-            min: scatterData[0].x,
-            max: scatterData[scatterData.length - 1].x,
-            ticks: {
-              color: themeMuted,
-              autoSkip: true,
-              maxTicksLimit: 8,
-              callback: (val) => {
-                const d = new Date(val);
-                if (Number.isNaN(d.getTime())) return '';
-                const opts = (scatterData[scatterData.length - 1].x - scatterData[0].x) > 90 * 86400000
-                  ? { month: 'short', year: '2-digit' }
-                  : { month: 'short', day: 'numeric' };
-                return d.toLocaleDateString(undefined, opts);
-              },
-            },
-            grid:  { color: 'rgba(255,255,255,0.04)' },
-          },
-          y: VTSRDisplay.applyTierAxis({
-            beginAtZero: false,
-            min: 1000,
-            ticks: { color: themeMuted },
-            grid:  { display: false },
-            title: { display: true, text: 'VTSR-T band', color: themeText },
-          }),
-        },
-        onClick: (evt, items) => {
-          if (!items.length) return;
-          const idx = (items[0].index !== undefined) ? items[0].index : items[0].dataIndex;
-          const p = points[idx];
-          if (p && p.match_id) {
-            const row = $('vt-matchlog-tbody').querySelector(`tr[data-match-id="${CSS.escape(p.match_id)}"]`);
-            if (row) {
-              row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              row.classList.add('vt-matchlog-row-flash');
-              setTimeout(() => row.classList.remove('vt-matchlog-row-flash'), 1400);
-            }
-          }
-        },
+      tooltipLines: (p) => {
+        const v = VTSRDisplay.deltaVerdict(p.delta);
+        const b = VTSRDisplay.rawBandFor(p.after);
+        const m = (p.map || '').replace(/\.bzn$/i, '');
+        return [
+          `Band: ${b ? b.label : '\u2014'}`,
+          `Game: ${v ? v.label : '\u2014'}`,
+          `Match: ${m || p.match_id}`,
+        ];
       },
-      plugins: [
-        ratingTierBandPlugin(),
-        ratingNoiseBandPlugin(scatterData),
-        ratingPeakPlugin(peak),
-        ratingReferenceLinesPlugin(themeMuted, themeText),
-      ],
+      trendLine: (mean) => {
+        const b = VTSRDisplay.rawBandFor(mean);
+        return `Trend: ${b ? b.label : '\u2014'}`;
+      },
+      yScale: VTSRDisplay.applyTierAxis({
+        beginAtZero: false,
+        min: 1000,
+        ticks: { color: themeMuted },
+        grid:  { display: false },
+        title: { display: true, text: 'VTSR-T band', color: themeText },
+      }),
+      plugins: (ctx) => {
+        const list = [
+          ratingTierBandPlugin(),
+          ratingNoiseBandPlugin(ctx.data),
+          ratingReferenceLinesPlugin(themeMuted, themeText),
+        ];
+        // The peak is a raw value; it would float above a smoothed line.
+        if (ctx.mode !== 'trend') list.push(ratingPeakPlugin(ctx.peak, ctx.peakX));
+        return list;
+      },
+      onPointClick: (p) => {
+        if (!p.match_id) return;
+        const tbody = $('vt-matchlog-tbody');
+        const row = tbody && tbody.querySelector(`tr[data-match-id="${CSS.escape(p.match_id)}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('vt-matchlog-row-flash');
+          setTimeout(() => row.classList.remove('vt-matchlog-row-flash'), 1400);
+        }
+      },
     });
+    ratingChartRedraws.t = () => renderRatingChart(rating, matchLog);
+    syncRatingRangeChips($('vt-rating-zoom-chips'));
+    bindRatingChartModeChips();
   }
 
   // Bootstrap resampling noise sigma (median per-player ±points) from
@@ -1847,13 +2104,16 @@
     };
   }
 
-  function ratingPeakPlugin(peak) {
+  // `peakX` is the peak's x in the chart's own units (ms by date, game
+  // number otherwise); defaults to the date for the legacy callers.
+  function ratingPeakPlugin(peak, peakX) {
     return {
       id: 'vt-rating-peak',
       afterDatasetsDraw(chart) {
         const { ctx, chartArea, scales } = chart;
         if (!chartArea || !peak || !Number.isFinite(peak.after)) return;
-        const x = scales.x.getPixelForValue(new Date(peak.date).getTime());
+        const xv = Number.isFinite(peakX) ? peakX : new Date(peak.date).getTime();
+        const x = scales.x.getPixelForValue(xv);
         const y = scales.y.getPixelForValue(peak.after);
         if (x < chartArea.left - 4 || x > chartArea.right + 4) return;
 
@@ -1966,36 +2226,34 @@
   function applyRatingChartRange(range) {
     const chart = state.ratingChart;
     if (!chart) return;
-    const log = (state.matchLogState && state.matchLogState.rows) || [];
-    const points = log.filter(r => Number.isFinite(r.after));
+    const points = (chart.$vt && chart.$vt.points) || [];
     if (!points.length) return;
-    const firstTs = new Date(points[0].date).getTime();
-    const lastTs  = new Date(points[points.length - 1].date).getTime();
+    const byDate = chart.$vt && chart.$vt.mode === 'date';
+    const n = points.length;
+    const firstX = byDate ? new Date(points[0].date).getTime() : 0.5;
+    const lastX  = byDate ? new Date(points[n - 1].date).getTime() : n + 0.5;
 
-    if (range === 'reset' || range === 'all') {
+    const reset = () => {
       // resetZoom() rewinds plugin-induced zoom but won't unwind a
       // manual `options.scales.x.min/max` rewrite. Cover both bases.
       try { chart.resetZoom(); } catch (_) {}
-      chart.options.scales.x.min = firstTs;
-      chart.options.scales.x.max = lastTs;
+      chart.options.scales.x.min = firstX;
+      chart.options.scales.x.max = lastX;
       chart.update();
-      return;
-    }
+    };
+    if (range === 'reset' || range === 'all') { reset(); return; }
+
     let min;
-    if (range === '30d') min = lastTs - 30 * 86400000;
-    else if (range === '90d') min = lastTs - 90 * 86400000;
-    else if (range === 'last10') {
-      const n = Math.max(0, points.length - 10);
-      min = new Date(points[n].date).getTime();
-    } else {
-      try { chart.resetZoom(); } catch (_) {}
-      chart.options.scales.x.min = firstTs;
-      chart.options.scales.x.max = lastTs;
-      chart.update();
-      return;
-    }
-    chart.options.scales.x.min = Math.max(min, firstTs);
-    chart.options.scales.x.max = lastTs;
+    if (range === 'last10') {
+      const from = Math.max(0, n - 10);
+      min = byDate ? new Date(points[from].date).getTime() : from + 0.5;
+    } else if (byDate && range === '30d') {
+      min = lastX - 30 * 86400000;
+    } else if (byDate && range === '90d') {
+      min = lastX - 90 * 86400000;
+    } else { reset(); return; }
+    chart.options.scales.x.min = Math.max(min, firstX);
+    chart.options.scales.x.max = lastX;
     chart.update();
   }
 
@@ -2436,21 +2694,29 @@
                 <i class="bi bi-info-circle me-1"></i>How to read this
               </h2>
               <p class="small text-secondary mb-2">
-                Every axis is a <strong>lobby z-score</strong>: how far this player sat from the average of the
-                players in that match, clipped to \u22121\u2026+1. +0.50 means roughly a standard deviation above
-                the lobby; 0 is the lobby average. These are the descriptive axes VTSR-T used to score before it
-                settled on enemy damage share \u2014 restored here as a <strong>picture, not a rating</strong>.
+                Every axis compares the player with the other players <strong>in that same match</strong>:
+                0 is the lobby average, +0.5 is clearly above it, \u22120.5 clearly below (the scale stops at \u00b11).
+                A career value is the average of those per-match scores. It is a <strong>picture, not a rating</strong>
+                \u2014 none of it feeds VTSR-T.
               </p>
               <p class="small text-secondary mb-2">
-                The percentile chip ranks the player's career mean on each axis against every other player
-                with ${minN}+ matches under the same filter, so "Top 18% of 42" with Scion \u00b7 Tank selected
-                means top 18% of Scion Tank players.
+                The percentile chip ranks that career average against every other player with ${minN}+ matches
+                under the same filter, so "Top 18% of 42" with Scion \u00b7 Tank selected means top 18% of Scion
+                Tank players. Filters narrow the player's own matches <em>and</em> the comparison group; a weapon
+                counts for a match when it carried at least ${Math.round(P.PERF_WEAPON_MIN_SHARE * 100)}% of that
+                match's damage.
               </p>
-              <p class="small text-secondary mb-0">
-                Filters narrow the player's own matches <em>and</em> the comparison group. Role scopes games played
-                as commander or as thug; a weapon counts for a match when it carried at least
-                ${Math.round(P.PERF_WEAPON_MIN_SHARE * 100)}% of that match's damage.
-              </p>
+              <div class="vt-perf-axis-explainer">
+                <div class="vt-perf-axis-explainer-title">What each axis means</div>
+                ${P.AXES.map(a => `
+                  <details class="vt-perf-axis-detail">
+                    <summary><i class="bi ${escapeHtml(a.icon)} me-1"></i>${escapeHtml(a.label)}</summary>
+                    <div class="vt-perf-axis-detail-body">
+                      <p class="mb-1">${escapeHtml(a.explain || a.desc)}</p>
+                      <p class="mb-0 vt-perf-axis-detail-higher"><strong>Higher means:</strong> ${escapeHtml(a.higher || '')}</p>
+                    </div>
+                  </details>`).join('')}
+              </div>
             </div>
           </div>
         </div>
@@ -3048,6 +3314,7 @@
       map.set(String(o.steam64), {
         steam64: String(o.steam64), name: o.name,
         faced: o.faced, wins: o.wins, losses: o.losses, draws: o.draws,
+        f9Faced: 0,
         lastDate: o.lastDate || '',
       });
     }
@@ -3059,11 +3326,12 @@
       if (!map.has(oid)) {
         map.set(oid, {
           steam64: oid, name: p.opponent || oid,
-          faced: 0, wins: 0, losses: 0, draws: 0, lastDate: '',
+          faced: 0, wins: 0, losses: 0, draws: 0, f9Faced: 0, lastDate: '',
         });
       }
       const t = map.get(oid);
       t.faced += 1;
+      t.f9Faced += 1;
       const date = p.date || '';
       if (date > t.lastDate) {
         t.lastDate = date;
@@ -3076,6 +3344,82 @@
     const opponents = Array.from(map.values())
       .sort((a, b) => b.faced - a.faced || (b.lastDate > a.lastDate ? 1 : -1));
     return { opponents, f9Count };
+  }
+
+  // Opposing-commanders source: recorded games only, or recorded plus
+  // F9bomber's community ledger. One preference across profiles.
+  const CMDR_OPP_SOURCE_KEY = 'vt.player.cmdrOppSource';
+  function cmdrOppSource() {
+    try { if (localStorage.getItem(CMDR_OPP_SOURCE_KEY) === 'f9') return 'f9'; } catch (_) {}
+    return 'recorded';
+  }
+  function setCmdrOppSource(v) {
+    try { localStorage.setItem(CMDR_OPP_SOURCE_KEY, v === 'f9' ? 'f9' : 'recorded'); } catch (_) {}
+  }
+
+  function f9ProviderLinkHtml() {
+    const prov = (state.cmdrElo && state.cmdrElo.external_provider) || {};
+    const url = prov.url || 'https://f9bomber.com';
+    const pname = prov.name || 'F9bomber';
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(pname)}</a>`;
+  }
+
+  // The Opposing commanders card body for one source. `withF9` rows
+  // carry the F9 tag with the number of community duels in them.
+  function cmdrOpponentsBodyHtml(name, riv, combined, withF9) {
+    const rows = withF9 ? combined.opponents : riv.opponents;
+    const oppVtsrC = (oid) => {
+      const l = cmdrLadderRowFor(oid);
+      return l ? Math.round(l.row.vtsr_c) : null;
+    };
+    const vtsrBit = (oid) => {
+      const tv = oppVtsrC(oid);
+      return tv != null ? `&middot; their VTSR-C <strong>${tv}</strong>` : '';
+    };
+    const top = rows[0];
+    let html = `<p class="text-secondary small mb-3">
+      Commanders ${escapeHtml(name)} faced while leading a team. W-L-D counts verified outcomes only.
+      ${withF9
+        ? `Includes <strong>${combined.f9Count}</strong> community duel${combined.f9Count === 1 ? '' : 's'} from ${f9ProviderLinkHtml()}; a game in both sources is counted once, as recorded.`
+        : 'Recorded games only.'}
+    </p>`;
+    if (top) {
+      const f9Bit = withF9 && top.f9Faced
+        ? `&middot; <span class="vt-cmdr-riv-tag" title="Community duels from F9bomber">F9 \u00d7${top.f9Faced}</span>` : '';
+      html += topOpponentCalloutHtml(top, 'Top opponent', `${vtsrBit(top.steam64)} ${f9Bit}`);
+    }
+    if (rows.length) {
+      html += `<div class="table-responsive vt-cmdr-scroll">
+        <table class="table table-sm align-middle mb-2">
+          <thead><tr>
+            <th>Opposing commander</th>
+            <th class="text-end">Faced</th>
+            <th class="text-end" title="Head-to-head record in matches with a verified outcome">W-L-D</th>
+            <th class="text-end">Their VTSR-C</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(o => {
+              const det = o.wins + o.losses + o.draws;
+              const recCls = det === 0 ? 'text-secondary'
+                : o.wins > o.losses ? 'vt-vtsr-delta-positive'
+                : o.wins < o.losses ? 'vt-vtsr-delta-negative' : '';
+              const tv = oppVtsrC(o.steam64);
+              const tag = withF9 && o.f9Faced
+                ? `<span class="vt-cmdr-riv-tag" title="${o.f9Faced} of ${o.faced} from F9bomber's community ledger">F9 \u00d7${o.f9Faced}</span>` : '';
+              return `<tr>
+                <td><a href="${playerHref(o.steam64)}"><strong>${escapeHtml(o.name)}</strong></a>${tag}</td>
+                <td class="text-end vt-matchlog-num">${o.faced}</td>
+                <td class="text-end vt-matchlog-num ${recCls}">${det ? `${o.wins}-${o.losses}-${o.draws}` : '\u2014'}</td>
+                <td class="text-end vt-matchlog-num">${tv != null ? tv : '\u2014'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    } else {
+      html += '<p class="text-secondary small mb-0">No opposing commanders in this source yet.</p>';
+    }
+    return html;
   }
 
   function topOpponentCalloutHtml(top, title, detailExtra) {
@@ -3133,60 +3477,18 @@
       </div>
     </div>`;
 
-    // Top opponent callout (most-faced enemy commander).
-    const oppVtsrC = (oid) => {
-      const l = cmdrLadderRowFor(oid);
-      return l ? Math.round(l.row.vtsr_c) : null;
-    };
-    const vtsrBit = (oid) => {
-      const tv = oppVtsrC(oid);
-      return tv != null ? `&middot; their VTSR-C <strong>${tv}</strong>` : '';
-    };
-    let topOppHtml = '';
-    const top = riv.opponents[0];
-    if (top) {
-      topOppHtml = topOpponentCalloutHtml(top, 'Top opponent (recorded)', vtsrBit(top.steam64));
-    }
+    // Opposing commanders: recorded games, or recorded + F9bomber's
+    // community ledger behind a toggle (only offered when the ladder
+    // has F9 duels for this commander). The body re-renders in place.
     const combined = buildCombinedOpponents(sid, riv.opponents);
-    const communityTop = combined.opponents[0];
-    const sameAsRecorded = top && communityTop
-      && String(communityTop.steam64) === String(top.steam64)
-      && communityTop.faced === top.faced;
-    if (combined.f9Count > 0 && communityTop && !sameAsRecorded) {
-      const prov = (state.cmdrElo && state.cmdrElo.external_provider) || {};
-      const url = prov.url || 'https://f9bomber.com';
-      const pname = prov.name || 'F9bomber';
-      const credit = `&middot; includes community duels from <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(pname)}</a>`;
-      topOppHtml += topOpponentCalloutHtml(
-        communityTop, 'Top opponent (with F9Stats)', `${vtsrBit(communityTop.steam64)} ${credit}`);
-    }
-
-    // Every opposing commander. The card scrolls when the list is long.
-    const tableHtml = riv.opponents.length ? `<div class="table-responsive vt-cmdr-scroll">
-      <table class="table table-sm align-middle mb-2">
-        <thead><tr>
-          <th>Opposing commander</th>
-          <th class="text-end">Faced</th>
-          <th class="text-end" title="Head-to-head record in matches with a verified outcome">W-L-D</th>
-          <th class="text-end">Their VTSR-C</th>
-        </tr></thead>
-        <tbody>
-          ${riv.opponents.map(o => {
-            const det = o.wins + o.losses + o.draws;
-            const recCls = det === 0 ? 'text-secondary'
-              : o.wins > o.losses ? 'vt-vtsr-delta-positive'
-              : o.wins < o.losses ? 'vt-vtsr-delta-negative' : '';
-            const tv = oppVtsrC(o.steam64);
-            return `<tr>
-              <td><a href="${playerHref(o.steam64)}"><strong>${escapeHtml(o.name)}</strong></a></td>
-              <td class="text-end vt-matchlog-num">${o.faced}</td>
-              <td class="text-end vt-matchlog-num ${recCls}">${det ? `${o.wins}-${o.losses}-${o.draws}` : '\u2014'}</td>
-              <td class="text-end vt-matchlog-num">${tv != null ? tv : '\u2014'}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>` : '';
+    const hasF9 = combined.f9Count > 0;
+    const withF9 = hasF9 && cmdrOppSource() === 'f9';
+    const sourceToggleHtml = hasF9 ? `
+      <div class="vt-cmdr-opp-source d-flex gap-1 ms-auto" id="vt-cmdr-opp-source" role="group" aria-label="Source">
+        <button type="button" class="vt-chip" data-source="recorded" data-selected="${withF9 ? 'false' : 'true'}" title="Recorded games only">Recorded</button>
+        <button type="button" class="vt-chip" data-source="f9" data-selected="${withF9 ? 'true' : 'false'}" title="Recorded games plus F9bomber's community ledger">With F9bomber <span class="vt-chip-count">+${combined.f9Count}</span></button>
+      </div>` : '';
+    const opponentsBodyHtml = cmdrOpponentsBodyHtml(name, riv, combined, withF9);
 
     // VTSR-C rating time-series (c3 quick win): only when the duel
     // history is loaded and this commander has >= 2 rated duels (a
@@ -3195,22 +3497,24 @@
     const cmdrSeries = buildCmdrRatingSeries(sid);
     const chartHtml = cmdrSeries.length >= 2 ? `
       <div class="vt-cmdr-riv-chart-block">
-        <h3 class="vt-cmdr-riv-subhead"><i class="bi bi-graph-up me-1"></i>VTSR-C over time</h3>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h3 class="vt-cmdr-riv-subhead mb-0"><i class="bi bi-graph-up me-1"></i>VTSR-C history</h3>
+          <div class="ms-auto">${ratingChartModeChipsHtml()}</div>
+        </div>
         <div class="vt-cmdr-riv-chart-wrap">
           <canvas id="vt-cmdr-rating-chart" aria-label="VTSR-C rating time-series"></canvas>
         </div>
       </div>` : '';
 
-    const opponentsHtml = (topOppHtml || tableHtml) ? `<div class="card mb-3">
+    const opponentsHtml = (riv.opponents.length || hasF9) ? `<div class="card mb-3" id="vt-cmdr-opponents-card">
       <div class="card-body">
-        <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-          <i class="bi bi-crosshair me-1"></i>Opposing commanders
-        </h2>
-        <p class="text-secondary small mb-3">
-          Commanders ${escapeHtml(name)} faced while leading a team. W-L-D counts verified outcomes only.
-        </p>
-        ${topOppHtml}
-        ${tableHtml}
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h2 class="h6 text-secondary text-uppercase mb-0" style="letter-spacing:0.08em;">
+            <i class="bi bi-crosshair me-1"></i>Opposing commanders
+          </h2>
+          ${sourceToggleHtml}
+        </div>
+        <div id="vt-cmdr-opponents-body">${opponentsBodyHtml}</div>
       </div>
     </div>` : '';
 
@@ -3292,105 +3596,49 @@
     </div>`;
   }
 
-  /** Draw the VTSR-C time-series into #vt-cmdr-rating-chart (if present).
-      Mirrors the Rating tab's renderRatingChart visual language: theme
-      line, delta-tinted points, linear-ms x-axis (no date adapter). */
+  /** Draw the VTSR-C series into #vt-cmdr-rating-chart (if present)
+      through the shared ratingSeriesChart (Trend | Exact | By date). */
   function drawCmdrRatingChart(rating, sid) {
     const canvas = document.getElementById('vt-cmdr-rating-chart');
-    if (!canvas || !window.Chart) return;
     if (state.cmdrRatingChart) {
       try { state.cmdrRatingChart.destroy(); } catch (_) {}
       state.cmdrRatingChart = null;
     }
+    if (!canvas || !window.Chart) { delete ratingChartRedraws.c; return; }
     const points = buildCmdrRatingSeries(sid).filter(p => Number.isFinite(p.after));
-    if (points.length < 2) return;
+    if (points.length < 2) { delete ratingChartRedraws.c; return; }
 
-    const themePrimary = getCSSVar('--kb-primary') || '#36a2eb';
     const themeMuted   = getCSSVar('--kb-text-muted') || '#888';
     const themeText    = getCSSVar('--kb-text-primary') || '#e5e5e5';
     const themeSuccess = getCSSVar('--kb-success') || '#2ecc71';
     const themeDanger  = getCSSVar('--kb-danger')  || '#e74c3c';
-    const pointColors = points.map(p =>
-      (Number.isFinite(p.delta) && p.delta < 0) ? themeDanger : themeSuccess);
-    const data = points.map(p => ({ x: new Date(p.date).getTime(), y: p.after }));
 
-    state.cmdrRatingChart = new Chart(canvas, {
-      type: 'line',
-      data: {
-        datasets: [{
-          label: 'VTSR-C',
-          data,
-          parsing: false,
-          borderColor: themePrimary,
-          borderWidth: 2,
-          tension: 0.18,
-          pointRadius: 3,
-          pointHoverRadius: 6,
-          pointBackgroundColor: pointColors,
-          pointBorderColor: pointColors,
-          fill: false,
-          spanGaps: false,
-        }],
+    state.cmdrRatingChart = ratingSeriesChart(canvas, points, {
+      label: 'VTSR-C',
+      pointColor: p => ((Number.isFinite(p.delta) && p.delta < 0) ? themeDanger : themeSuccess),
+      tooltipLines: (p) => {
+        const dStr = Number.isFinite(p.delta)
+          ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
+        const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+        const lines = [
+          `VTSR-C: ${p.after.toFixed(0)} (${dStr})`,
+          `${res} vs ${p.opponent || 'unknown'}`,
+        ];
+        if (p.source === 'f9') {
+          lines.push(`Community duel (F9 ledger)${p.map ? ' \u2014 ' + p.map : ''}`);
+        }
+        return lines;
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                if (!items.length) return '';
-                const p = points[items[0].dataIndex];
-                return new Date(p.date).toLocaleString();
-              },
-              label: (item) => {
-                const p = points[item.dataIndex];
-                const dStr = Number.isFinite(p.delta)
-                  ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
-                const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
-                const lines = [
-                  `VTSR-C: ${p.after.toFixed(0)} (${dStr})`,
-                  `${res} vs ${p.opponent || 'unknown'}`,
-                ];
-                if (p.source === 'f9') {
-                  lines.push(`Community duel (F9 ledger)${p.map ? ' \u2014 ' + p.map : ''}`);
-                }
-                return lines;
-              },
-            },
-          },
-        },
-        scales: {
-          x: {
-            type: 'linear',
-            min: data[0].x,
-            max: data[data.length - 1].x,
-            ticks: {
-              color: themeMuted,
-              autoSkip: true,
-              maxTicksLimit: 8,
-              callback: (val) => {
-                const d = new Date(val);
-                if (Number.isNaN(d.getTime())) return '';
-                const opts = (data[data.length - 1].x - data[0].x) > 90 * 86400000
-                  ? { month: 'short', year: '2-digit' }
-                  : { month: 'short', day: 'numeric' };
-                return d.toLocaleDateString(undefined, opts);
-              },
-            },
-            grid: { color: 'rgba(255,255,255,0.04)' },
-          },
-          y: {
-            beginAtZero: false,
-            ticks: { color: themeMuted, maxTicksLimit: 6 },
-            grid:  { color: 'rgba(255,255,255,0.05)' },
-            title: { display: true, text: 'VTSR-C', color: themeText },
-          },
-        },
+      trendLine: mean => `Trend: VTSR-C ${Math.round(mean)}`,
+      yScale: {
+        beginAtZero: false,
+        ticks: { color: themeMuted, maxTicksLimit: 6 },
+        grid:  { color: 'rgba(255,255,255,0.05)' },
+        title: { display: true, text: 'VTSR-C', color: themeText },
       },
     });
+    ratingChartRedraws.c = () => drawCmdrRatingChart(rating, sid);
+    bindRatingChartModeChips();
   }
 
   function renderRivalsTable(rivals) {
@@ -3737,7 +3985,11 @@
     }).join('');
 
     const chart = series.length >= 2
-      ? `<div style="position: relative; height: 200px;" class="mb-3"><canvas id="vt-v1-rating-chart"></canvas></div>`
+      ? `<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+           <h3 class="vt-cmdr-riv-subhead mb-0"><i class="bi bi-graph-up me-1"></i>VTSR-1v1 history</h3>
+           <div class="ms-auto">${ratingChartModeChipsHtml()}</div>
+         </div>
+         <div style="position: relative; height: 200px;" class="mb-3"><canvas id="vt-v1-rating-chart"></canvas></div>`
       : '';
     return `<div class="card mb-3" id="vt-player-1v1"><div class="card-body">
       <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
@@ -3886,61 +4138,36 @@
       state.v1RatingChart = null;
     }
     const canvas = document.getElementById('vt-v1-rating-chart');
-    if (!canvas || !window.Chart) return;
-    const points = buildV1Series(sid).filter(p => Number.isFinite(p.after));
-    if (points.length < 2) return;
-    const themePrimary = getCSSVar('--kb-primary') || '#36a2eb';
+    if (!canvas || !window.Chart) { delete ratingChartRedraws.v1; return; }
+    // The 1v1 history is day-stamped; sort so the series is chronological.
+    const points = buildV1Series(sid).filter(p => Number.isFinite(p.after))
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    if (points.length < 2) { delete ratingChartRedraws.v1; return; }
     const themeMuted   = getCSSVar('--kb-text-muted') || '#888';
     const themeText    = getCSSVar('--kb-text-primary') || '#e5e5e5';
     const themeSuccess = getCSSVar('--kb-success') || '#2ecc71';
     const themeDanger  = getCSSVar('--kb-danger')  || '#e74c3c';
-    const pointColors = points.map(p => (p.delta < 0 ? themeDanger : themeSuccess));
-    state.v1RatingChart = new Chart(canvas, {
-      type: 'line',
-      data: {
-        labels: points.map(p => cmdrDateLabel(p.date)),
-        datasets: [{
-          label: 'VTSR-1v1',
-          data: points.map(p => p.after),
-          borderColor: themePrimary,
-          borderWidth: 2,
-          tension: 0.18,
-          pointRadius: 3,
-          pointHoverRadius: 6,
-          pointBackgroundColor: pointColors,
-          pointBorderColor: pointColors,
-          fill: false,
-        }],
+    state.v1RatingChart = ratingSeriesChart(canvas, points, {
+      label: 'VTSR-1v1',
+      pointColor: p => (p.delta < 0 ? themeDanger : themeSuccess),
+      tooltipLines: (p) => {
+        const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+        const dStr = Number.isFinite(p.delta) ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
+        return [
+          `VTSR-1v1: ${p.after.toFixed(0)} (${dStr})`,
+          `${res} vs ${p.opponent || 'unknown'}${p.map ? ' \u2014 ' + p.map : ''}`,
+        ];
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (item) => {
-                const p = points[item.dataIndex];
-                const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
-                return [
-                  `VTSR-1v1: ${p.after.toFixed(0)} (${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)})`,
-                  `${res} vs ${p.opponent || 'unknown'}${p.map ? ' \u2014 ' + p.map : ''}`,
-                ];
-              },
-            },
-          },
-        },
-        scales: {
-          x: { ticks: { color: themeMuted, autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-          y: {
-            beginAtZero: false,
-            ticks: { color: themeMuted, maxTicksLimit: 6 },
-            grid:  { color: 'rgba(255,255,255,0.05)' },
-            title: { display: true, text: 'VTSR-1v1', color: themeText },
-          },
-        },
+      trendLine: mean => `Trend: VTSR-1v1 ${Math.round(mean)}`,
+      yScale: {
+        beginAtZero: false,
+        ticks: { color: themeMuted, maxTicksLimit: 6 },
+        grid:  { color: 'rgba(255,255,255,0.05)' },
+        title: { display: true, text: 'VTSR-1v1', color: themeText },
       },
     });
+    ratingChartRedraws.v1 = () => drawV1RatingChart(sid);
+    bindRatingChartModeChips();
   }
 
   function renderCommanderTab(rating) {
@@ -3983,6 +4210,26 @@
       ${renderCmdrFactionsHtml(sid)}
       ${renderCmdrDuelLogHtml(series)}`;
     drawCmdrRatingChart(rating, sid);
+    wireCmdrOpponentsSource(rating, sid);
+  }
+
+  // Recorded | With F9bomber chips on the Opposing commanders card:
+  // swap the body in place, remember the choice.
+  function wireCmdrOpponentsSource(rating, sid) {
+    const bar = document.getElementById('vt-cmdr-opp-source');
+    if (!bar) return;
+    bar.addEventListener('click', (e) => {
+      const btn = e.target.closest('.vt-chip');
+      if (!btn) return;
+      const src = btn.dataset.source === 'f9' ? 'f9' : 'recorded';
+      setCmdrOppSource(src);
+      bar.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
+      const body = document.getElementById('vt-cmdr-opponents-body');
+      if (!body) return;
+      const riv = buildCommanderRivalries(sid);
+      const combined = buildCombinedOpponents(sid, riv.opponents);
+      body.innerHTML = cmdrOpponentsBodyHtml(rating.name, riv, combined, src === 'f9');
+    });
   }
 
   // ---- Phase 6d: Loadout & ships tab -----------------------------------
@@ -5657,6 +5904,9 @@
     hydrateViewMode();
 
     state.dataPrefix = detectDataPrefix();
+    // Form bars on the directory cards. In flight alongside the corpus
+    // fetches below; awaited before the first render.
+    const sparkPromise = startSparkHistories();
     try {
       const [elo, slugMap, validation, , , shipNames] = await Promise.all([
         fetchJson(`${state.dataPrefix}data/processed/elo_current.json`).catch(() => null),
@@ -5701,6 +5951,9 @@
     } catch (e) {
       console.warn('player.js boot: career aggregation failed', e);
     }
+
+    try { await sparkPromise; }
+    catch (e) { console.warn('player.js boot: spark histories failed', e); }
 
     // Mount toolbar chips
     dom.tierChips.innerHTML = buildTierChips();

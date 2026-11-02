@@ -82,10 +82,21 @@
 
   // ---- Filters + aggregate ------------------------------------------------------
 
+  // The hub opens on 3v3+ (the team format both main ladders rate).
+  // `Clear` returns here, an absent `fmt` URL key reads as this, and
+  // `fmt=any` is the explicit all-formats scope.
+  function defaultFilters() {
+    return Object.assign(P().emptyFilters(), { formats: ['team'] });
+  }
+
   function filters() {
-    if (!hub.filters && P()) hub.filters = P().emptyFilters();
+    if (!hub.filters && P()) hub.filters = defaultFilters();
     return hub.filters;
   }
+
+  // "No scope beyond the hub's own default" — the Clear button and the
+  // scope pills key off this, not off the all-matches empty set.
+  function atDefaults(f) { return !!P() && P().isEmptyFilters(f, defaultFilters()); }
 
   function filterKey(f) { return JSON.stringify(f || {}); }
 
@@ -95,6 +106,7 @@
     const f = filters();
     const key = filterKey(f);
     if (hub.aggregate && hub.aggregateKey === key) return hub.aggregate;
+    // Only the true all-matches scope can reuse the page's own aggregate.
     if (P().isEmptyFilters(f) && s.aggregate) {
       hub.aggregate = s.aggregate;
     } else {
@@ -108,8 +120,8 @@
     return hub.aggregate;
   }
 
-  // Career rows under the current filter, or null when no filter is set
-  // (so js/player.js keeps reading its own all-time rows).
+  // Career rows under the current filter, or null when the scope is the
+  // all-matches set (so js/player.js keeps reading its own all-time rows).
   function careerStats() {
     if (!P() || P().isEmptyFilters(filters())) return null;
     const agg = aggregate();
@@ -131,7 +143,7 @@
     const params = PL().currentParams();
     const tab = params.get('tab');
     hub.tab = TABS.includes(tab) ? tab : 'players';
-    hub.filters = P().filtersFromParams(params);
+    hub.filters = P().filtersFromParams(params, defaultFilters());
     hub.aggregate = null;
     hub.aggregateKey = '';
     hub.rendered = Object.create(null);
@@ -149,7 +161,7 @@
   function applyToParams(params) {
     if (!P()) return params;
     if (hub.tab && hub.tab !== 'players') params.set('tab', hub.tab); else params.delete('tab');
-    P().applyFiltersToParams(params, filters());
+    P().applyFiltersToParams(params, filters(), defaultFilters());
     if (hub.tab === 'trends' && global.VTPlayersTab && typeof global.VTPlayersTab.selectedSlug === 'function') {
       const who = global.VTPlayersTab.selectedSlug();
       if (who) params.set('who', who); else params.delete('who');
@@ -179,7 +191,7 @@
 
   function clearFilters(opts) {
     if (!P()) return;
-    setFilters(P().emptyFilters(), opts);
+    setFilters(defaultFilters(), opts);
   }
 
   // ---- Filter bar ------------------------------------------------------------------
@@ -212,14 +224,16 @@
       const k = m.match_format || 'other';
       if (fmtCounts[k] != null) fmtCounts[k] += 1;
     }
+    const defaults = defaultFilters();
     mount.innerHTML = `
-      ${UI().filterBarHtml('vt-hub-filterbar', { contributions: all, fileIds: Object.keys(all), filters: f, counts: { faction: facCounts, format: fmtCounts } })}
-      <div class="text-secondary small mt-1">
-        <i class="bi bi-funnel me-1"></i>Scope: <strong>${esc(scope)}</strong> \u00b7 ${ids.length} match${ids.length === 1 ? '' : 'es'}
-        \u00b7 ${players} player${players === 1 ? '' : 's'} with ${minN()}+ in scope.
-        Ratings (VTSR) are corpus-wide and never recomputed by these filters.
-      </div>`;
-    UI().wireFilterBar($('vt-hub-filterbar'), f, next => setFilters(next));
+      ${UI().filterBarHtml('vt-hub-filterbar', { contributions: all, fileIds: Object.keys(all), filters: f, defaults, counts: { faction: facCounts, format: fmtCounts } })}
+      ${UI().scopePillsHtml('vt-hub-scope', f, {
+        summary: `<strong>${ids.length}</strong> match${ids.length === 1 ? '' : 'es'} \u00b7 <strong>${players}</strong> player${players === 1 ? '' : 's'} with ${minN()}+ in scope`,
+        note: 'Ratings (VTSR) are corpus-wide and never recomputed by these filters. The scope narrows which matches and rows the stats on this page are summed over.',
+      })}`;
+    mount.setAttribute('aria-label', `Scope: ${scope}`);
+    UI().wireFilterBar($('vt-hub-filterbar'), f, next => setFilters(next), { defaults });
+    UI().wireScopePills($('vt-hub-scope'), f, next => setFilters(next));
   }
 
   // ---- Tab plumbing ---------------------------------------------------------------

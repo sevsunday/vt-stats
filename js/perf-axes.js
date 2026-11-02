@@ -31,11 +31,17 @@
   'use strict';
 
   // Must match scripts/perf_axes.py PERF_AXES (display order).
+  //   desc    — the one-line card copy (what is measured).
+  //   explain — the plain-English version for the "How to read this"
+  //             accordion: what the axis means in play.
+  //   higher  — what a high value says about the player.
   const AXES = [
     {
       key: 'enemy_damage_share', label: 'Enemy Damage Share', short: 'Enemy dmg',
       icon: 'bi-fire',
       desc: 'Share of the lobby\'s damage to enemy players, AI and buildings this player dealt. The one axis VTSR-T scores today.',
+      explain: 'Of all the damage everyone in the match dealt to the enemy side (their ships, their AI units, their buildings), how much of it was yours. In a 4v4 the even share is 12.5%, so anything above that means you carried more than your seat.',
+      higher: 'You did more of your lobby\'s fighting than the average player in it.',
       rawFmt: v => `${(v * 100).toFixed(1)}% of lobby`,
       stat: 'enemy_damage_share',
     },
@@ -43,6 +49,8 @@
       key: 'net_damage_share', label: 'Net Damage', short: 'Net dmg',
       icon: 'bi-arrow-left-right',
       desc: 'Damage dealt minus damage taken, as a share of everything the lobby dealt. Positive means the player traded up.',
+      explain: 'Damage you dealt minus damage you took, as a slice of the whole match. Dealing a lot while soaking a lot nets out near zero; dealing a lot while rarely getting hit is a big positive.',
+      higher: 'You traded up: more damage went out than came in.',
       rawFmt: v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}% of lobby`,
       stat: 'net_share',
     },
@@ -50,6 +58,8 @@
       key: 'thug_kill_rate', label: 'Kill Rate', short: 'Kills/min',
       icon: 'bi-crosshair',
       desc: 'Assist-aware PvP kills plus half credit for AI kills, per minute of the match.',
+      explain: 'How often you finish things off. Kills on human players count in full (shared when several of you did the damage), kills on AI units count half, and the total is spread over the minutes you played so a long game and a short game compare fairly.',
+      higher: 'You close out fights more often than your lobby.',
       rawFmt: v => `${v.toFixed(2)} / min`,
       stat: 'kills_per_min',
     },
@@ -57,6 +67,8 @@
       key: 'thug_efficiency', label: 'Efficiency', short: 'Efficiency',
       icon: 'bi-speedometer2',
       desc: 'How much of the player\'s damage landed on players and mobile AI rather than buildings (PvP + half of mobile-AI damage over non-structure damage).',
+      explain: 'Of the damage you dealt to things that move, how much went into things that shoot back. Hitting enemy players counts in full, hitting mobile AI (scavengers, turrets on the move) counts half, and damage to buildings is left out entirely. A player who only shoots recyclers and extractors scores low here, however much damage they do.',
+      higher: 'Your damage went into live targets, not structures.',
       rawFmt: v => `${(v * 100).toFixed(0)}%`,
       stat: 'efficiency',
     },
@@ -64,6 +76,8 @@
       key: 'thug_accuracy', label: 'Accuracy', short: 'Accuracy',
       icon: 'bi-bullseye',
       desc: 'Weapon-normalized hit rate: the player\'s accuracy on each weapon against the lobby\'s accuracy on that weapon, weighted by shots. 1.0 = the lobby baseline.',
+      explain: 'Your hit rate compared with how the rest of the lobby shot the same weapons. A mortar and a chaingun have very different natural hit rates, so each weapon is judged against itself: 1.0x means you landed shots at the lobby\'s rate, 1.3x means a third more often.',
+      higher: 'You land shots more often than the lobby did with the same weapons.',
       rawFmt: v => `${v.toFixed(2)}x lobby`,
       stat: 'accuracy',
     },
@@ -71,6 +85,8 @@
       key: 'pve_share', label: 'PvE Share', short: 'PvE share',
       icon: 'bi-buildings',
       desc: 'Share of the player\'s own damage that went into AI units and structures. High = base-busting / scav hunting; low = dogfighting.',
+      explain: 'What fraction of your own damage went into AI units and buildings rather than other players. This is a style axis, not a quality axis: a high value is the base-buster and scav hunter, a low value is the dogfighter. Neither is better.',
+      higher: 'You spent your damage on the economy and the base, not on duels.',
       rawFmt: v => `${(v * 100).toFixed(0)}% of own dmg`,
       stat: 'pve_share',
     },
@@ -78,6 +94,8 @@
       key: 'survivability', label: 'Survivability', short: 'Survival',
       icon: 'bi-shield-check',
       desc: '60/40 blend of damage traded (dealt / received) and K/D, each clipped at the lobby\'s 95th percentile.',
+      explain: 'How well you stay alive while fighting. Sixty percent of it is damage traded (what you dealt for every point you took), forty percent is kills per death; both are capped at the lobby\'s 95th percentile so one monster game does not swamp the rest.',
+      higher: 'You dealt more than you took and died less than you killed.',
       rawFmt: v => `${(v * 100).toFixed(0)} / 100`,
       stat: 'trade_ratio',
     },
@@ -85,6 +103,8 @@
       key: 'mobility', label: 'Mobility', short: 'Mobility',
       icon: 'bi-geo-alt',
       desc: 'Positioning activity score: time away from base, map reach and distance covered, relative to the lobby.',
+      explain: 'How much of the map you used. Time spent away from your own base, how far across the map you went, and the total distance you covered, rolled into one score against the lobby. Camping the base scores low; roaming scores high.',
+      higher: 'You were out on the map more than your lobby.',
       rawFmt: v => `${Math.round(v * 100)} / 100`,
       stat: 'activity_score',
     },
@@ -92,6 +112,8 @@
       key: 'target_lock_pct', label: 'T-Key Usage', short: 'T-key',
       icon: 'bi-eye',
       desc: 'Share of the match the player held an active target lock. A display stat, never a rating input.',
+      explain: 'How much of the match you had a target locked with the T key. Pure habit tracking: it says how you play, not how well. It never fed the rating.',
+      higher: 'You keep a target locked most of the time.',
       rawFmt: v => `${(v * 100).toFixed(0)}% of match`,
       stat: 'target_lock_pct',
     },
@@ -99,6 +121,8 @@
       key: 'snipe_bonus', label: 'Snipes', short: 'Snipes',
       icon: 'bi-person-x',
       desc: 'Pilot snipes this match, capped at five before the lobby comparison. Only matches where someone sniped count.',
+      explain: 'How many enemy pilots you sniped out of their ships, up to five a match. Only matches where somebody in the lobby sniped count, so a quiet match does not drag this down.',
+      higher: 'You snipe pilots more often than your lobby.',
       rawFmt: v => `${Math.round(v * 5)} snipe${Math.round(v * 5) === 1 ? '' : 's'}`,
       stat: 'snipes',
     },
@@ -144,8 +168,26 @@
     return { faction: null, ship: null, weapon: null, role: 'all', formats: [], period: 'all' };
   }
 
-  function isEmptyFilters(f) {
+  function normFormats(list) {
+    return FORMATS.map(x => x.id).filter(id => (list || []).includes(id));
+  }
+
+  // Same scope? Field-by-field, formats as a set.
+  function sameFilters(a, b) {
+    a = a || emptyFilters(); b = b || emptyFilters();
+    return (a.faction || null) === (b.faction || null)
+      && (a.ship || null) === (b.ship || null)
+      && (a.weapon || null) === (b.weapon || null)
+      && (a.role || 'all') === (b.role || 'all')
+      && (a.period || 'all') === (b.period || 'all')
+      && normFormats(a.formats).join(',') === normFormats(b.formats).join(',');
+  }
+
+  // True when `f` is the no-op scope. With `defaults` (a surface's own
+  // starting scope, e.g. the hub's 3v3+), true when `f` equals them.
+  function isEmptyFilters(f, defaults) {
     if (!f) return true;
+    if (defaults) return sameFilters(f, defaults);
     return !f.faction && !f.ship && !f.weapon
       && (!f.role || f.role === 'all')
       && (!f.formats || f.formats.length === 0)
@@ -153,8 +195,13 @@
   }
 
   // URL <-> filters. Keys: f (faction), ship, wpn, role, fmt (csv), period.
-  function filtersFromParams(params) {
-    const f = emptyFilters();
+  // `defaults` is the surface's starting scope: a missing key reads as
+  // the default, and `fmt=any` is an explicitly cleared format (needed
+  // when the default format is non-empty, since an absent `fmt` means
+  // "the default", not "all formats").
+  function filtersFromParams(params, defaults) {
+    const base = defaults || emptyFilters();
+    const f = Object.assign(emptyFilters(), base, { formats: normFormats(base.formats) });
     if (!params) return f;
     const get = k => (typeof params.get === 'function' ? params.get(k) : params[k]);
     const fac = (get('f') || '').toLowerCase();
@@ -166,25 +213,31 @@
     const role = (get('role') || '').toLowerCase();
     if (ROLES.some(r => r.id === role)) f.role = role;
     const fmt = get('fmt');
-    if (fmt) {
-      f.formats = String(fmt).split(',').map(s => s.trim()).filter(s => FORMATS.some(x => x.id === s));
+    if (fmt != null && fmt !== '') {
+      f.formats = String(fmt).toLowerCase() === 'any'
+        ? []
+        : normFormats(String(fmt).split(',').map(s => s.trim()));
     }
     const period = (get('period') || '').toLowerCase();
     if (PERIODS.some(p => p.id === period)) f.period = period;
     return f;
   }
 
-  function applyFiltersToParams(params, f) {
+  function applyFiltersToParams(params, f, defaults) {
     const set = (k, v) => {
       if (v == null || v === '' || (Array.isArray(v) && !v.length)) params.delete(k);
       else params.set(k, Array.isArray(v) ? v.join(',') : String(v));
     };
-    f = f || emptyFilters();
+    f = f || defaults || emptyFilters();
     set('f', f.faction);
     set('ship', f.ship);
     set('wpn', f.weapon);
     set('role', f.role && f.role !== 'all' ? f.role : null);
-    set('fmt', f.formats && f.formats.length ? f.formats : null);
+    const fmts = normFormats(f.formats);
+    const defFmts = normFormats(defaults && defaults.formats);
+    if (fmts.join(',') === defFmts.join(',')) set('fmt', null);
+    else if (!fmts.length) set('fmt', 'any');
+    else set('fmt', fmts);
     set('period', f.period && f.period !== 'all' ? f.period : null);
     return params;
   }
@@ -690,6 +743,7 @@
     DEFAULT_MIN_N,
     emptyFilters,
     isEmptyFilters,
+    sameFilters,
     filtersFromParams,
     applyFiltersToParams,
     factionOfRow,

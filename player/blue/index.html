@@ -43,7 +43,7 @@
       steam64: "76561198043392032",
       slug:    "blue",
       name:    "blue",
-      template_version: 25
+      template_version: 26
     };
   </script>
 </head>
@@ -99,12 +99,12 @@
           </a>
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn active" type="button" data-bs-toggle="dropdown"
-                    data-bs-auto-close="true" aria-label="Ratings and players" aria-current="page">
-              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+                    data-bs-auto-close="true" aria-label="Players and ratings" aria-current="page">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="../../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
               <li><a class="dropdown-item active" href="../" aria-current="page"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
               <li><a class="dropdown-item" href="../../elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
             </ul>
           </div>
@@ -123,6 +123,11 @@
               </a></li>
               <li><a class="dropdown-item" href="../../time/">
                 <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="../../record/"
+                     title="How to record your own stats">
+                <i class="bi bi-record-circle me-2"></i>Record
               </a></li>
             </ul>
           </div>
@@ -276,10 +281,11 @@
                 </div>
 
                 <div class="vt-player-filter-actions ms-md-auto d-flex gap-2 align-items-center">
-                  <label for="vt-player-sort" class="form-label mb-0 small text-secondary">Sort</label>
+                  <label for="vt-player-sort" class="form-label mb-0 small text-secondary">Sort by</label>
                   <select id="vt-player-sort" class="form-select form-select-sm vt-player-sort-select">
-                    <option value="name-asc" selected>Name (A–Z)</option>
-                    <option value="vtsrc-desc">VTSR-C (highest)</option>
+                    <option value="vtsrc-desc" selected>VTSR-C (highest)</option>
+                    <option value="vtsrt-desc">VTSR-T (highest)</option>
+                    <option value="name-asc">Name (A–Z)</option>
                     <option value="matches-desc">Matches played</option>
                     <option value="last-desc">Most recent activity</option>
                   </select>

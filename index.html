@@ -66,14 +66,10 @@
       </button>
 
       <!-- Single shared cluster. Dashboard omits a Dashboard link (the
-           brand is home). Docs / Raw / LEGO / Players are not in the bar. -->
+           brand is home). Docs / Raw / Record are not bar items (Docs is
+           in the gear, Record is the last Tools item). -->
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a class="vt-nav-icon-btn vt-nav-icon-btn--primary"
-             id="record-stats-btn" href="record/"
-             title="How to record your own stats" aria-label="How to record your own stats">
-            <i class="bi bi-record-circle me-1"></i>Record
-          </a>
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn" id="nav-matches-toggle" type="button"
                     data-bs-toggle="dropdown" data-bs-auto-close="true" aria-label="Matches">
@@ -117,12 +113,12 @@
           </a>
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
-                    data-bs-auto-close="true" aria-label="Ratings and players">
-              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+                    data-bs-auto-close="true" aria-label="Players and ratings">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
               <li><a class="dropdown-item" href="player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
               <li><a class="dropdown-item" href="elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
             </ul>
           </div>
@@ -141,6 +137,11 @@
               </a></li>
               <li><a class="dropdown-item" href="time/">
                 <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="record/"
+                     title="How to record your own stats">
+                <i class="bi bi-record-circle me-2"></i>Record
               </a></li>
             </ul>
           </div>
