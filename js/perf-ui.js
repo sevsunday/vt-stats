@@ -227,7 +227,9 @@
   // just that filter. Every selected format is its own pill. With
   // nothing active, a single muted "All matches" pill with no ×.
   // opts.summary: trailing text (match / player counts); opts.note: the
-  // info-icon tooltip.
+  // info-icon tooltip; opts.shipHero: a render URL the ship pill leads
+  // with (the ODF browser's hero shot), opts.shipHref: where that image
+  // links. A broken image removes itself and the pill stays text.
 
   function scopePillDefs(f) {
     const A = P();
@@ -247,8 +249,17 @@
   function scopePillsHtml(id, f, opts) {
     opts = opts || {};
     const defs = scopePillDefs(f);
+    const heroFor = (d) => {
+      if (d.kind !== 'ship' || !opts.shipHero) return '';
+      const img = `<img class="vt-scope-pill-hero" src="${esc(opts.shipHero)}" alt="" loading="lazy" decoding="async"
+          onerror="this.closest('.vt-scope-pill').classList.remove('has-hero'); this.remove()">`;
+      return opts.shipHref
+        ? `<a class="vt-scope-pill-hero-link" href="${esc(opts.shipHref)}" target="_blank" rel="noopener" title="Open ${esc(d.value)} in the ODF browser">${img}</a>`
+        : img;
+    };
     const pills = defs.length
-      ? defs.map(d => `<span class="vt-scope-pill" data-scope-kind="${esc(d.kind)}"${d.id ? ` data-scope-id="${esc(d.id)}"` : ''}>
+      ? defs.map(d => `<span class="vt-scope-pill${d.kind === 'ship' && opts.shipHero ? ' has-hero' : ''}" data-scope-kind="${esc(d.kind)}"${d.id ? ` data-scope-id="${esc(d.id)}"` : ''}>
+          ${heroFor(d)}
           <span class="vt-scope-pill-text">
             <span class="vt-scope-pill-value">${esc(d.value)}</span>
             <span class="vt-scope-pill-ctx">${esc(d.ctx)}</span>

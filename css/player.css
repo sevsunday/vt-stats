@@ -1732,6 +1732,38 @@
   min-width: 0;
   line-height: 1.15;
 }
+/* Ship pill: the hull's hero shot (the ODF browser's render) leads the
+   text. Square slot, image fit inside, no chrome of its own. */
+.vt-scope-pill.has-hero { max-width: 20rem; }
+.vt-scope-pill-hero-link {
+  display: flex;
+  flex: 0 0 auto;
+  align-self: stretch;
+  align-items: center;
+  border-right: 1px solid color-mix(in oklab, var(--kb-primary) 28%, transparent);
+  /* The render's own backdrop, so the slot and the PNG read as one tile. */
+  background: #14171c;
+  transition: filter 120ms ease;
+}
+.vt-scope-pill-hero-link:hover,
+.vt-scope-pill-hero-link:focus-visible {
+  filter: brightness(1.25);
+  outline: none;
+}
+/* The hero PNG is a 512px square with the hull in the lower-middle band
+   and an opaque backdrop; cover + a low anchor crops to the hull so it
+   reads at pill size instead of shrinking to a sliver. */
+.vt-scope-pill-hero {
+  display: block;
+  width: 6rem;
+  height: 3.2rem;
+  object-fit: cover;
+  object-position: 50% 58%;
+}
+.vt-scope-pill > .vt-scope-pill-hero {
+  border-right: 1px solid color-mix(in oklab, var(--kb-primary) 28%, transparent);
+  background: #14171c;
+}
 .vt-scope-pill-value {
   font-size: 0.82rem;
   font-weight: 600;

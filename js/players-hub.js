@@ -194,6 +194,46 @@
     setFilters(defaultFilters(), opts);
   }
 
+  // ---- Ship hero shot ----------------------------------------------------------------
+  //
+  // The ship scope pill leads with that hull's render from the ODF browser:
+  // data/models/shots/<mesh>/hero.png. The models manifest's odf_index maps
+  // each ODF basename to its mesh stem (fvscout_vsr.odf -> fvscout_skel).
+  // Fetched once, the first time a ship filter is on; 404 -> text pill.
+
+  let odfIndex;          // undefined = unfetched, null = unavailable, else {odf: mesh}
+  let odfIndexPromise = null;
+
+  function ensureOdfIndex() {
+    if (odfIndexPromise) return odfIndexPromise;
+    const s = st();
+    const prefix = (s && s.dataPrefix) || '';
+    odfIndexPromise = fetch(`${prefix}data/models/index.json`, { cache: 'force-cache' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { odfIndex = (j && j.odf_index) || null; })
+      .catch(() => { odfIndex = null; });
+    return odfIndexPromise;
+  }
+
+  // Hero shot URL for the current ship filter, or null while the index is
+  // loading / when the ship has no mesh. Kicks off the fetch and re-renders
+  // the bar once it lands (if that ship is still the one selected).
+  function shipHeroUrl(f) {
+    if (!f || !f.ship || !P()) return null;
+    const stem = P().shipStem(f.ship);
+    if (odfIndex === undefined) {
+      ensureOdfIndex().then(() => {
+        const cur = filters();
+        if (cur && cur.ship && P().shipStem(cur.ship) === stem) renderFilterBar();
+      });
+      return null;
+    }
+    const mesh = odfIndex && odfIndex[`${stem}.odf`];
+    if (!mesh) return null;
+    const s = st();
+    return `${(s && s.dataPrefix) || ''}data/models/shots/${encodeURIComponent(mesh)}/hero.png`;
+  }
+
   // ---- Filter bar ------------------------------------------------------------------
 
   function renderFilterBar() {
@@ -230,6 +270,8 @@
       ${UI().scopePillsHtml('vt-hub-scope', f, {
         summary: `<strong>${ids.length}</strong> match${ids.length === 1 ? '' : 'es'} \u00b7 <strong>${players}</strong> player${players === 1 ? '' : 's'} with ${minN()}+ in scope`,
         note: 'Ratings (VTSR) are corpus-wide and never recomputed by these filters. The scope narrows which matches and rows the stats on this page are summed over.',
+        shipHero: shipHeroUrl(f),
+        shipHref: f.ship ? `${s.dataPrefix || ''}odf/index.html?odf=${encodeURIComponent(P().shipStem(f.ship))}` : null,
       })}`;
     mount.setAttribute('aria-label', `Scope: ${scope}`);
     UI().wireFilterBar($('vt-hub-filterbar'), f, next => setFilters(next), { defaults });
