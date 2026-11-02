@@ -73,7 +73,9 @@ SITE_URL = "https://vtstats.bz"
 # v26 renames the ELO topnav dropdown to Players (Players, ELO, Analysis),
 # adds Record as the last Tools item, and ships the VTSR-C-first
 # "Sort by" select (VTSR-T sort added).
-PLAYER_TEMPLATE_VERSION = 26
+# v27 makes VTSR-T the default "Sort by" option and adds Net damage / match
+# (the automatic sort once the hub scope narrows).
+PLAYER_TEMPLATE_VERSION = 27
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

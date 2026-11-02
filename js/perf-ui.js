@@ -165,8 +165,9 @@
     return html;
   }
 
-  // Wires a rendered bar. onChange(newFilters) is called with a fresh
+  // Wires a rendered bar. onChange(newFilters, info) is called with a fresh
   // filters object; the caller re-renders (and usually re-renders the bar).
+  // info.cleared is true when the change came from the Clear button.
   // opts.defaults: what Clear returns to (default: the empty scope).
   function wireFilterBar(root, filters, onChange, opts) {
     if (!root) return;
@@ -176,7 +177,7 @@
     root.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn || !root.contains(btn)) return;
-      if (btn.hasAttribute('data-perf-clear')) { onChange(defaults ? JSON.parse(JSON.stringify(defaults)) : A.emptyFilters()); return; }
+      if (btn.hasAttribute('data-perf-clear')) { onChange(defaults ? JSON.parse(JSON.stringify(defaults)) : A.emptyFilters(), { cleared: true }); return; }
       const f = next();
       if (btn.hasAttribute('data-perf-faction')) {
         f.faction = btn.getAttribute('data-perf-faction') || null;

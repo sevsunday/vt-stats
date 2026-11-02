@@ -73,9 +73,8 @@
     pillar:  { min: 40, label: 'Zoner (40+)' },
   };
 
-  // Sort comparators keyed by select value. VTSR-C is the default (a
-  // win/loss rating with a number). VTSR-T sorts on the raw value like
-  // Balonce and the ladder do — the ORDER is fine, the NUMBER is what
+  // Sort comparators keyed by select value. VTSR-T sorts on the raw value
+  // like Balonce and the ladder do — the ORDER is fine, the NUMBER is what
   // never shows (DEVELOPER_GUIDE §13.8). Unrated players sort last.
   const byName = (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase());
   const byRatedDesc = (field) => (a, b) => {
@@ -93,11 +92,37 @@
       if (pa !== pb) return pa ? 1 : -1;
       return byRatedDesc('vtsr')(a, b);
     },
+    'net-desc':     (a, b) => {
+      const na = netPerMatch(a), nb = netPerMatch(b);
+      if ((na == null) !== (nb == null)) return na == null ? 1 : -1;
+      if (na != null && na !== nb) return nb - na;
+      return byName(a, b);
+    },
     'name-asc':     byName,
     'matches-desc': (a, b) => (safeNum(b.matches_played) - safeNum(a.matches_played)) || byName(a, b),
     'last-desc':    (a, b) => String(b.last_match_id || '').localeCompare(String(a.last_match_id || '')) || byName(a, b),
   };
-  const DEFAULT_SORT = 'vtsrc-desc';
+  // `state.filters.sort` holds only an explicit pick (null = automatic).
+  // The automatic sort is VTSR-T at the hub's default scope and Net/m once
+  // the scope narrows (ship, weapon, faction, role, period, format): a
+  // rating is corpus-wide, so it cannot rank play inside a filtered scope.
+  const DEFAULT_SORT = 'vtsrt-desc';
+  const SCOPED_SORT = 'net-desc';
+
+  function netPerMatch(r) {
+    const c = r.career;
+    return c && c.matches_played ? (safeNum(c.total_dealt) - safeNum(c.total_received)) / c.matches_played : null;
+  }
+  function hubAtDefaultScope() {
+    const hub = window.VTPlayersHub;
+    return !hub || typeof hub.atDefaultScope !== 'function' || hub.atDefaultScope();
+  }
+  function autoSort() { return hubAtDefaultScope() ? DEFAULT_SORT : SCOPED_SORT; }
+  function effectiveSort() { return state.filters.sort || autoSort(); }
+  function resetSort() {
+    state.filters.sort = null;
+    if (dom.sortSelect) dom.sortSelect.value = effectiveSort();
+  }
 
   function safeNum(v) { return Number.isFinite(+v) ? +v : 0; }
 
@@ -194,7 +219,7 @@
     if (state.filters.activity && state.filters.activity !== 'active') {
       params.set('activity', state.filters.activity);
     }
-    if (state.filters.sort && state.filters.sort !== DEFAULT_SORT) params.set('sort', state.filters.sort);
+    if (state.filters.sort) params.set('sort', state.filters.sort);
     // Layout rides on the URL only when it differs from the stored preference.
     const prefList = storedViewPref() === 'list';
     if (state.viewMode === 'list' && !prefList) params.set('view', 'table');
@@ -255,8 +280,8 @@
     paintChipGroup(dom.activityChips, 'activity', state.filters.activity);
 
     const sort = params.get('sort');
-    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : DEFAULT_SORT;
-    if (dom.sortSelect) dom.sortSelect.value = state.filters.sort;
+    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : null;
+    if (dom.sortSelect) dom.sortSelect.value = effectiveSort();
 
     if (!writesSuppressed()) syncDirectoryUrl('replace');
   }
@@ -379,7 +404,7 @@
       query:     '',
       tiers:     new Set(),    // Set<string> of tier keys ('0'..'5', 'p'); empty = all
       activity:  'active',
-      sort:      DEFAULT_SORT,
+      sort:      null,
       includeUnranked: false,  // hub Players tab: also list unranked players above the career floor
     },
     compareMode: false,
@@ -668,7 +693,7 @@
         if (bucket && safeNum(r.matches_played) < bucket.min) return false;
       }
       return true;
-    }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS[DEFAULT_SORT]);
+    }).sort(SORT_COMPARATORS[effectiveSort()] || SORT_COMPARATORS[DEFAULT_SORT]);
   }
 
   // How many recent games the directory-card form bars draw. The stored
@@ -831,6 +856,7 @@
   function renderDirectoryGrid() {
     const rows = buildPlayerRows();
     const visible = applyFilters(rows);
+    if (dom.sortSelect) dom.sortSelect.value = effectiveSort();
     dom.heroStats.innerHTML = buildHeroStats(rows);
     const who = state.filters.includeUnranked ? 'players' : 'ranked players';
 
@@ -969,9 +995,8 @@
     state.filters.query = '';
     state.filters.tiers.clear();
     state.filters.activity = 'active';
-    state.filters.sort = DEFAULT_SORT;
     dom.searchInput.value = '';
-    if (dom.sortSelect) dom.sortSelect.value = DEFAULT_SORT;
+    resetSort();
     dom.tierChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
     dom.activityChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.activity === 'active' ? 'true' : 'false'));
     // The hub owns the perf filter bar; clearing the directory also clears it.
@@ -5843,7 +5868,8 @@
     });
 
     dom.sortSelect.addEventListener('change', (e) => {
-      state.filters.sort = e.target.value;
+      // Picking whatever the automatic sort would show hands control back.
+      state.filters.sort = e.target.value === autoSort() ? null : e.target.value;
       renderDirectoryGrid();
       syncDirectoryUrl('push');
     });
@@ -6033,6 +6059,8 @@
     writeHistory,
     writesSuppressed,
     renderDirectoryGrid,
+    applyDirectoryToParams,
+    resetSort,
     perfMinN,
     populationMedians,
     MATCH_AWARD_CATALOG,

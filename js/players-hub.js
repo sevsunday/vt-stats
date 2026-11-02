@@ -55,7 +55,7 @@
     careerCols: 'per-match',          // 'per-match' | 'totals' | 'all'
     shipBoard: { stem: null, metric: 'kd' },
     cmdrSort: { key: 'win_pct_as_commander', asc: false },
-    tableSort: { key: 'name', asc: true },
+    tableSort: null,                  // explicit header pick; null = automatic (tableSortState)
     trend: { stat: 'accuracy', overlay: null },
   };
 
@@ -174,6 +174,7 @@
   function writeUrl(mode) {
     if (!PL()) return;
     const params = PL().currentParams();
+    if (typeof PL().applyDirectoryToParams === 'function') PL().applyDirectoryToParams(params);
     applyToParams(params);
     PL().writeHistory(params, mode || 'push');
   }
@@ -191,7 +192,15 @@
 
   function clearFilters(opts) {
     if (!P()) return;
+    resetSorts();
     setFilters(defaultFilters(), opts);
+  }
+
+  // Clear also drops an explicit card / table sort, so the view returns
+  // to the automatic VTSR-T order.
+  function resetSorts() {
+    hub.tableSort = null;
+    if (PL() && typeof PL().resetSort === 'function') PL().resetSort();
   }
 
   // ---- Ship hero shot ----------------------------------------------------------------
@@ -274,7 +283,10 @@
         shipHref: f.ship ? `${s.dataPrefix || ''}odf/index.html?odf=${encodeURIComponent(P().shipStem(f.ship))}` : null,
       })}`;
     mount.setAttribute('aria-label', `Scope: ${scope}`);
-    UI().wireFilterBar($('vt-hub-filterbar'), f, next => setFilters(next), { defaults });
+    UI().wireFilterBar($('vt-hub-filterbar'), f, (next, info) => {
+      if (info && info.cleared) resetSorts();
+      setFilters(next);
+    }, { defaults });
     UI().wireScopePills($('vt-hub-scope'), f, next => setFilters(next));
   }
 
@@ -353,7 +365,7 @@
 
   const PLAYER_TABLE_COLS = [
     { key: 'name', label: 'Player', cls: '', get: r => r.name, fmt: r => link(r.name, r.steam64) },
-    { key: 'band', label: 'VTSR-T', cls: '', get: r => global.VTSRDisplay.bandFor(r).index, fmt: r => global.VTSRDisplay.bandChipHtml(global.VTSRDisplay.bandFor(r), { bsTooltip: false }) },
+    { key: 'band', label: 'VTSR-T', cls: '', get: r => global.VTSRDisplay.bandFor(r).index, tie: r => (Number.isFinite(r.vtsr) ? r.vtsr : null), fmt: r => global.VTSRDisplay.bandChipHtml(global.VTSRDisplay.bandFor(r), { bsTooltip: false }) },
     { key: 'vtsr_c', label: 'VTSR-C', cls: 'text-end', get: r => (Number.isFinite(r.vtsr_c) ? r.vtsr_c : null), fmt: r => (Number.isFinite(r.vtsr_c) ? `<span class="num">${Math.round(r.vtsr_c)}</span>${r.vtsr_c_provisional ? ' <span class="text-secondary small">prov</span>' : ''}` : '\u2014') },
     { key: 'matches', label: 'Matches', cls: 'text-end', get: r => (r.career ? r.career.matches_played : r.matches_played), fmt: r => {
       const c = r.career; const fc = (c && c.format_counts) || {};
@@ -409,24 +421,31 @@
 
   // HTML for the Players tab table. `rows` are the directory rows after
   // the search / tier / activity filters; the career rows are hub-scoped.
+  // Automatic table sort, mirroring the cards: VTSR-T at the default
+  // scope, Net/m once the scope narrows.
+  function autoTableSort() {
+    return atDefaults(filters()) ? { key: 'band', asc: false } : { key: 'net_pm', asc: false };
+  }
+  function tableSortState() { return hub.tableSort || autoTableSort(); }
+
   function playersTableHtml(rows) {
     const pop = careerStats() || (st() && st().careerStats) || [];
     const axes = P() ? P().AXES : [];
-    const sortKey = hub.tableSort.key;
-    const col = PLAYER_TABLE_COLS.find(c => c.key === sortKey);
-    const axisSort = axes.find(a => `axis:${a.key}` === sortKey);
+    const ts = tableSortState();
+    const col = PLAYER_TABLE_COLS.find(c => c.key === ts.key);
+    const axisSort = axes.find(a => `axis:${a.key}` === ts.key);
     const sorted = rows.slice().sort((a, b) => {
       let r = 0;
-      if (col) r = cmp(col.get(a), col.get(b), hub.tableSort.asc);
+      if (col) r = cmp(col.get(a), col.get(b), ts.asc) || (col.tie ? cmp(col.tie(a), col.tie(b), ts.asc) : 0);
       else if (axisSort) {
         const da = a.career && a.career.perf_axes && a.career.perf_axes[axisSort.key];
         const db = b.career && b.career.perf_axes && b.career.perf_axes[axisSort.key];
-        r = cmp(da ? da.mean_z : null, db ? db.mean_z : null, hub.tableSort.asc);
+        r = cmp(da ? da.mean_z : null, db ? db.mean_z : null, ts.asc);
       }
       return r || String(a.name || '').localeCompare(String(b.name || ''));
     });
-    const head = PLAYER_TABLE_COLS.map(c => `<th class="${c.cls} ${hub.tableSort.key === c.key ? 'sort-active' : ''}" data-hub-sort="${c.key}">${c.label}${sortArrow(hub.tableSort, c.key)}</th>`).join('')
-      + axes.map(a => `<th class="text-center vt-hub-pct-th ${hub.tableSort.key === `axis:${a.key}` ? 'sort-active' : ''}" data-hub-sort="axis:${a.key}" title="${esc(a.label)}: percentile vs players with ${minN()}+ matches in scope"><i class="bi ${esc(a.icon)}"></i><span class="d-none d-xxl-inline ms-1">${esc(a.short)}</span>${sortArrow(hub.tableSort, `axis:${a.key}`)}</th>`).join('');
+    const head = PLAYER_TABLE_COLS.map(c => `<th class="${c.cls} ${ts.key === c.key ? 'sort-active' : ''}" data-hub-sort="${c.key}">${c.label}${sortArrow(ts, c.key)}</th>`).join('')
+      + axes.map(a => `<th class="text-center vt-hub-pct-th ${ts.key === `axis:${a.key}` ? 'sort-active' : ''}" data-hub-sort="axis:${a.key}" title="${esc(a.label)}: percentile vs players with ${minN()}+ matches in scope"><i class="bi ${esc(a.icon)}"></i><span class="d-none d-xxl-inline ms-1">${esc(a.short)}</span>${sortArrow(ts, `axis:${a.key}`)}</th>`).join('');
     const body = sorted.map((r, i) => `<tr${r.ranked === false ? ' class="vt-hub-row-unranked"' : ''}>
       <td class="text-secondary">${i + 1}</td>
       ${PLAYER_TABLE_COLS.map(c => `<td class="${c.cls}">${c.fmt(r)}</td>`).join('')}
@@ -452,8 +471,10 @@
       const th = e.target.closest('th[data-hub-sort]');
       if (!th) return;
       const key = th.getAttribute('data-hub-sort');
-      if (hub.tableSort.key === key) hub.tableSort.asc = !hub.tableSort.asc;
-      else { hub.tableSort.key = key; hub.tableSort.asc = key === 'name'; }
+      const cur = tableSortState();
+      const next = cur.key === key ? { key, asc: !cur.asc } : { key, asc: key === 'name' };
+      const auto = autoTableSort();
+      hub.tableSort = next.key === auto.key && next.asc === auto.asc ? null : next;
       if (PL()) PL().renderDirectoryGrid();
     });
   }
@@ -1074,6 +1095,7 @@
     hydrateFromUrl,
     applyToParams,
     clearFilters,
+    atDefaultScope: () => !P() || atDefaults(filters()),
     render,
     careerStats,
     playersTableHtml,
