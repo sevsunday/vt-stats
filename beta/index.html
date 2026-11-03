@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to join VSR Games — VT Stats</title>
+  <meta name="description" content="Switch Battlezone: Combat Commander to the devtest beta branch in Steam so you can join VSR Vet Strat games.">
+
+  <link rel="canonical" href="https://vtstats.bz/beta/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="How to join VSR Games — VT Stats">
+  <meta property="og:description" content="Switch Battlezone: Combat Commander to the devtest beta branch in Steam so you can join VSR Vet Strat games.">
+  <meta property="og:url" content="https://vtstats.bz/beta/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/guides.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../weapons/"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Players and ratings">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
+                    data-bs-toggle="dropdown" data-bs-auto-close="true"
+                    data-vt-tools-link data-vt-tools-live="0" aria-current="page"
+                    title="Lobby tools and Discord timestamps"
+                    aria-label="Tools">
+              <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../tools/" data-vt-tools-item
+                     title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
+                <i class="bi bi-controller me-2"></i>Live Lobby
+              </a></li>
+              <li><a class="dropdown-item" href="../time/">
+                <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><a class="dropdown-item" href="../record/"
+                     title="How to record your own stats">
+                <i class="bi bi-record-circle me-2"></i>Record
+              </a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"
+                     title="Switch to the devtest beta to join VSR games">
+                <i class="bi bi-steam me-2"></i>Join VSR Games
+              </a></li>
+              <li><a class="dropdown-item" href="../ports/"
+                     title="Router setup for hosting games (Full Cone NAT)">
+                <i class="bi bi-router me-2"></i>Port Forwarding
+              </a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4 py-md-5 flex-grow-1">
+    <div class="row justify-content-center">
+      <div class="col-12 col-lg-10 col-xl-8">
+        <article class="card">
+          <div class="card-header">
+            <h1 class="h5 mb-0">
+              <i class="bi bi-steam me-2"></i>How to join VSR Games
+            </h1>
+          </div>
+          <div class="card-body">
+            <p class="mb-4">
+              Almost all VSR Vet Strat games are played on the <code>devtest</code> branch.
+              To join these games, switch to that branch in Steam using a custom beta password:
+            </p>
+
+            <ol class="vt-guide-steps">
+              <li>
+                In Steam, right-click <strong>Battlezone</strong> and select <strong>Properties</strong>.
+                <figure class="vt-guide-figure">
+                  <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                          aria-label="Expand screenshot: Steam library right-click menu">
+                    <img src="img/steam-properties.png" width="265" height="219" loading="lazy"
+                         alt="Steam library right-click menu for Battlezone: Combat Commander, with Properties at the bottom">
+                    <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                  </button>
+                </figure>
+              </li>
+
+              <li>
+                In Properties, select <strong>Game Versions &amp; Betas</strong>.
+                <figure class="vt-guide-figure">
+                  <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                          aria-label="Expand screenshot: Properties sidebar">
+                    <img src="img/game-versions-betas.png" width="201" height="194" loading="lazy"
+                         alt="Steam Properties sidebar with Game Versions and Betas highlighted">
+                    <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                  </button>
+                </figure>
+              </li>
+
+              <li>
+                At the bottom, in the <strong>Private Versions</strong> field, enter the code below
+                and click <strong>Check Code</strong>.
+                <figure class="vt-guide-figure">
+                  <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                          aria-label="Expand screenshot: Private Versions field">
+                    <img src="img/private-versions-code.png" width="642" height="181" loading="lazy"
+                         alt="Steam Private Versions field with the beta code entered and the devtest branch listed above it">
+                    <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                  </button>
+                </figure>
+                <div class="vt-guide-copy-row">
+                  <span class="vt-guide-copy-mask" aria-hidden="true">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+                  <button type="button" class="btn btn-sm btn-primary"
+                          data-vt-copy-enc="140e410611061602110000081a14"
+                          data-vt-copy-status="beta-copy-status">
+                    <i class="bi bi-clipboard me-1" aria-hidden="true"></i><span data-vt-copy-label>Copy beta code</span>
+                  </button>
+                  <span id="beta-copy-status" class="visually-hidden" role="status" aria-live="polite"></span>
+                </div>
+              </li>
+
+              <li>
+                Select the <code>devtest</code> branch and close the dialog window.
+              </li>
+
+              <li>
+                Steam should auto-update and show the active version as <code>devtest</code>.
+                <figure class="vt-guide-figure">
+                  <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                          aria-label="Expand screenshot: Steam Play button with version devtest">
+                    <img src="img/steam-version-devtest.png" width="226" height="53" loading="lazy"
+                         alt="Steam Play button with the version label reading devtest">
+                    <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                  </button>
+                </figure>
+              </li>
+
+              <li>
+                The game version shown in the main menu should now match the version reported for live games,
+                which you'll typically see on game watcher sites like <a href="../gw/">GameWatch</a> and the Discord watchbot.
+                <div class="row g-3 mt-0">
+                  <div class="col-12 col-md-6">
+                    <figure class="vt-guide-figure">
+                      <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                              aria-label="Expand screenshot: Discord watchbot">
+                        <img src="img/watchbot-version.png" width="555" height="327" loading="lazy"
+                             alt="Discord watchbot map details card, with the Vet Strat Recycler Variant version 2.0.206.10 highlighted">
+                        <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                      </button>
+                      <figcaption>Discord watchbot</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <figure class="vt-guide-figure">
+                      <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                              aria-label="Expand screenshot: GameWatch">
+                        <img src="img/gamewatch-version.png" width="417" height="353" loading="lazy"
+                             alt="GameWatch lobby card with an arrow pointing at the game version 2.0.206.10">
+                        <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                      </button>
+                      <figcaption>GameWatch</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-12">
+                    <figure class="vt-guide-figure mt-0">
+                      <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                              aria-label="Expand screenshot: in-game main menu">
+                        <img src="img/ingame-version.png" width="619" height="187" loading="lazy"
+                             alt="Battlezone main menu with the version label BZCC 2.0.206.10">
+                        <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                      </button>
+                      <figcaption>In-game main menu</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </li>
+            </ol>
+          </div>
+          <div class="card-footer small text-muted">
+            <i class="bi bi-router me-1"></i>Hosting games?
+            <a href="../ports/">Set up port forwarding</a>.
+          </div>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <!-- Screenshot lightbox, opened by js/guides.js. -->
+  <div class="modal fade" id="vt-guide-lightbox" tabindex="-1" aria-labelledby="vt-guide-lightbox-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h6" id="vt-guide-lightbox-title">Screenshot</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-guide-lightbox-body">
+          <img class="vt-guide-lightbox-img" alt="">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+  <script src="../js/guides.js"></script>
+</body>
+</html>
