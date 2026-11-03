@@ -77,7 +77,9 @@ SITE_URL = "https://vtstats.bz"
 # (the automatic sort once the hub scope narrows).
 # v28 reshapes the Tools dropdown (Live Lobby, Discord Time, Record,
 # Join VSR Games, Port Forwarding; no divider).
-PLAYER_TEMPLATE_VERSION = 28
+# v29 renames two Tools items: Record -> Record Stats, Join VSR Games ->
+# Beta Versions.
+PLAYER_TEMPLATE_VERSION = 29
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

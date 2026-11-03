@@ -101,11 +101,11 @@
               </a></li>
               <li><a class="dropdown-item" href="../record/"
                      title="How to record your own stats">
-                <i class="bi bi-record-circle me-2"></i>Record
+                <i class="bi bi-record-circle me-2"></i>Record Stats
               </a></li>
               <li><a class="dropdown-item active" href="./" aria-current="page"
                      title="Switch to the devtest beta to join VSR games">
-                <i class="bi bi-steam me-2"></i>Join VSR Games
+                <i class="bi bi-steam me-2"></i>Beta Versions
               </a></li>
               <li><a class="dropdown-item" href="../ports/"
                      title="Router setup for hosting games (Full Cone NAT)">
@@ -177,13 +177,25 @@
                   </button>
                 </figure>
                 <div class="vt-guide-copy-row">
-                  <span class="vt-guide-copy-mask" aria-hidden="true">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
+                  <span class="vt-guide-copy-mask" id="beta-copy-mask" aria-hidden="true">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
                   <button type="button" class="btn btn-sm btn-primary"
                           data-vt-copy-enc="140e410611061602110000081a14"
-                          data-vt-copy-status="beta-copy-status">
+                          data-vt-copy-status="beta-copy-status"
+                          data-vt-copy-mask="beta-copy-mask"
+                          data-vt-copy-fallback="beta-copy-fallback">
                     <i class="bi bi-clipboard me-1" aria-hidden="true"></i><span data-vt-copy-label>Copy beta code</span>
                   </button>
                   <span id="beta-copy-status" class="visually-hidden" role="status" aria-live="polite"></span>
+                </div>
+                <div class="vt-guide-copy-fallback" id="beta-copy-fallback" hidden>
+                  <div class="input-group input-group-sm">
+                    <label class="input-group-text" for="beta-copy-fallback-input">Copy it manually:</label>
+                    <input type="text" class="form-control" id="beta-copy-fallback-input"
+                           readonly spellcheck="false" autocomplete="off">
+                  </div>
+                  <div class="vt-guide-copy-fallback-hint">
+                    The code is selected. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>Cmd</kbd>+<kbd>C</kbd> on a Mac).
+                  </div>
                 </div>
               </li>
 

@@ -71,7 +71,9 @@ SITE_URL = "https://vtstats.bz"
 # adds Record as the last Tools item.
 # v18 reshapes the Tools dropdown (Live Lobby, Discord Time, Record,
 # Join VSR Games, Port Forwarding; no divider).
-MAP_TEMPLATE_VERSION = 18
+# v19 renames two Tools items: Record -> Record Stats, Join VSR Games ->
+# Beta Versions.
+MAP_TEMPLATE_VERSION = 19
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently

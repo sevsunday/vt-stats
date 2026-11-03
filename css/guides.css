@@ -35,10 +35,10 @@
 }
 
 .vt-guide-section-title {
-    font-size: 1rem;
-    font-weight: 600;
-    margin: 0 0 1rem;
-    color: var(--kb-text-primary);
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0 0 1.25rem;
+    color: var(--kb-primary);
 }
 
 .vt-guide-section + .vt-guide-section {
@@ -167,6 +167,8 @@
 }
 
 .vt-guide-copy-mask {
+    display: inline-block;
+    min-width: calc(14ch + 14 * 0.15em + 1.2rem);
     font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     letter-spacing: 0.15em;
     padding: 0.3rem 0.6rem;
@@ -175,4 +177,51 @@
     border: 1px solid var(--kb-border-subtle);
     color: var(--kb-text-secondary);
     user-select: none;
+}
+
+.vt-guide-copy-mask .is-scrambling {
+    color: var(--kb-text-muted);
+}
+
+.vt-guide-copy-mask .is-locked {
+    color: var(--kb-primary);
+    font-weight: 600;
+}
+
+.vt-guide-copy-mask.is-cracked {
+    user-select: text;
+    animation: vt-guide-cracked 0.6s ease-out;
+}
+
+@keyframes vt-guide-cracked {
+    0% {
+        border-color: var(--kb-primary);
+        box-shadow: 0 0 0 0 color-mix(in oklab, var(--kb-primary) 60%, transparent);
+    }
+    100% {
+        border-color: var(--kb-border-subtle);
+        box-shadow: 0 0 0 0.5rem color-mix(in oklab, var(--kb-primary) 0%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-guide-copy-mask.is-cracked {
+        animation: none;
+    }
+}
+
+.vt-guide-copy-fallback {
+    max-width: 22rem;
+    margin-top: 0.75rem;
+}
+
+.vt-guide-copy-fallback .form-control {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.05em;
+}
+
+.vt-guide-copy-fallback-hint {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--kb-text-muted);
 }
