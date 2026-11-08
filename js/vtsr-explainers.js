@@ -478,7 +478,7 @@
       'E_A \\;=\\; \\frac{1}{1 + 10^{-\\left(R_A - R_B\\right) / 400}}'
     ) || '';
     return `<p class="mb-2">Head-to-head games get a <strong>third, separate rating</strong>: VTSR-1v1. In a 1v1 both players are commanders and nobody else is on the field, so neither of the other ladders fits. VTSR-T needs a lobby of at least six to grade thug form, and VTSR-C weighs each commander&rsquo;s thugs. Both already leave 1v1s out, so this ladder never changes either of them.</p>
-      <p class="mb-2">It is plain chess Elo. A game counts when exactly one player sits on each side (camera pods don&rsquo;t count), it ran at least four minutes, and it has a verified winner. Draws give each player half a win.</p>
+      <p class="mb-2">It is plain chess Elo. A game counts when exactly one player sits on each side (camera pods don&rsquo;t count) and it has a verified winner. Game length does not matter. Draws are not rated.</p>
       ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
       <p class="mb-2">There is no handicap term, because there are no thugs. Both players in a game use the same K (the average of their two schedules, 40 for a debut falling to 20 after five games), so the points one player gains are exactly the points the other loses.</p>
       <p class="mb-2">Only recorded games count. F9bomber&rsquo;s spreadsheet logs only the two commanders on every game before 2025, so a 1v1 and a team game look the same there, and none of its later roster-less rows can be confirmed as a 1v1.</p>
@@ -501,7 +501,7 @@
     return `<p class="mb-2">A 2v2 is two commanders, each with one thug. It gets its <strong>own ladders</strong>, separate from VTSR-C, VTSR-T and VTSR-1v1: VTSR-T needs at least six players to grade a thug against the lobby, and VTSR-C only rates games VTSR-T rated, so both already leave 2v2s out.</p>
       <p class="mb-2"><strong>VTSR-2v2C</strong> rates the commanders on wins and losses. The win chance counts all four players: <em>C</em> is each commander&rsquo;s 2v2C, <em>T</em> is each thug&rsquo;s 2v2T (win/loss), and <em>&lambda;</em> is 1, as in VTSR-C.</p>
       ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
-      <p class="mb-2">Thugs get <strong>two ratings for now</strong>, shown side by side. <strong>Win/loss</strong> moves with the result in the same update as the commanders. <strong>Performance</strong> is a duel between the two thugs: your share of the two thugs&rsquo; damage to the enemy, against the share your ratings predicted. Performance only uses recorded games and moves even when the winner is unknown. Once 30 recorded 2v2s with a verified winner exist, a rule written in advance picks the one that predicts winners better, or keeps both if neither wins.</p>
+      <p class="mb-2">Thugs get <strong>two ratings for now</strong>, shown side by side. <strong>Win/loss</strong> moves with the result in the same update as the commanders. <strong>Performance</strong> is a duel between the two thugs: your share of the two thugs&rsquo; damage to the enemy, against the share your ratings predicted. Performance only uses recorded games with a verified winner, like the other ladders. Once 30 recorded 2v2s with a verified winner exist, a rule written in advance picks the one that predicts winners better, or keeps both if neither wins.</p>
       <p class="mb-2">Every rating starts at 1500 with K falling from 40 to 20 over a player&rsquo;s first five games on that ladder. Both players in a role share one K, so each game is zero-sum. Only recorded games count: a recording shows who was active and who commanded, which a hand-kept result can&rsquo;t. Ratings show as numbers, like VTSR-1v1.</p>
       <p class="mb-0 text-muted small">Real example: on Oasis (2026-10-27), mort (1520) and HappyOtter (1481) faced VTrider and DraconisMarch, both in their first 2v2 (1500 each). mort&rsquo;s higher rating and HappyOtter&rsquo;s lower one cancelled out, so the game was a <strong>coin flip (50%)</strong>. VTrider&rsquo;s side won: <strong>+19.1</strong> to VTrider and DraconisMarch, <strong>&minus;19.1</strong> to mort and HappyOtter. On performance, HappyOtter was expected to deal 49% of the two thugs&rsquo; damage and dealt 38%, so he lost <strong>3.9</strong> to DraconisMarch. Players stay <strong>provisional</strong> below 5 games on a ladder; a ranked <code>#</code> needs 5 and a game within 90 days of the newest match.</p>`;
   }
@@ -520,7 +520,7 @@
           <tr><td>Anything else</td><td>None</td><td>2v1, 3v1, 3v2, 4v2, or a 2v2 with an idle or departed player.</td></tr>
         </tbody>
       </table>
-      <p class="mb-0 text-muted small">Each ladder still needs at least four minutes of play and its own outcome rules, so a format match is not a guarantee of a rating.</p>
+      <p class="mb-0 text-muted small">Every ladder also needs a verified winner (host result, recycler/factory loss, or reviewer sign-off); draws and games with no winner are not rated. Game length does not matter.</p>
     </div>`;
   }
 

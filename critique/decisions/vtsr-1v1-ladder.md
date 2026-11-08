@@ -103,3 +103,21 @@ two Mojave games (223 s, 227 s) are under 240 s and stay out.
 
 Forbidden consumers: `scripts/elo.py`, `scripts/elo_commander.py`,
 `js/all-matches-aggregator.js`, `js/balonce-meter.js`.
+
+## Amendment (2026-11-08): no minimum length
+
+Operator decision: the 240 s floor is removed from every ladder, so
+gate 3 above no longer applies (`ONE_V_ONE_MIN_DURATION_SEC = 0`). The
+rest of the math is unchanged. On that day it added no rated game: the
+two short Mojave 1v1s (223 s, 227 s) are unclear, so they are now
+skipped as undetermined instead of short. `ELO_1V1_SCHEMA_VERSION`
+stays 1.
+
+## Amendment (2026-11-08): draws are not rated
+
+Operator decision, applied to every ladder: a game rates only with a
+recorded team winner (`attested`, `clean_win`, `contested` or
+`adjudicated`). Gate 4 above loses its draw clause; a drawn 1v1 is now
+skipped and counted in `skipped_draw` instead of scoring 0.5 each. No
+1v1 draw had been rated, so ratings are unchanged.
+`ELO_1V1_SCHEMA_VERSION` 1 → 2.

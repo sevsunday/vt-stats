@@ -273,7 +273,7 @@
                   >Position</th>
                   <th data-sort="win_rate" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Win%</strong><br>How often this player's team won in rated matches with a decided result. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T. Hover a cell for the W&ndash;L record."
+                      title="<strong>Win%</strong><br>How often this player's team won in rated matches. Only matches with a recorded winner are rated. Camera-pod, partial, and idle rows are left out. This does not move VTSR-T. Hover a cell for the W&ndash;L record."
                   >Win%</th>
                   <th data-sort="pvp_kd" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
@@ -289,7 +289,7 @@
                   >Peak</th>
                   <th data-sort="matches_played" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Matches</strong><br>Number of rated matches behind this band. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
+                      title="<strong>Matches</strong><br>Number of rated matches behind this band. Excludes matches with player_count &lt; 6 or no recorded winner. Match length does not matter."
                   >Matches</th>
                 </tr>
               </thead>
@@ -418,8 +418,8 @@
             <strong>January 2, 2025</strong> through <strong>September 7, 2026</strong>
             (a bit over 1,300 games). We kept only the <strong>3v3, 4v4, and 5v5</strong>
             games to maintain consistency with our current VTstats pipeline; dropped games
-            with stragglers to avoid ambiguity, games shorter than four minutes, and any game
-            we already had a recording of &mdash; which result in ~500 games left.</p>
+            with stragglers to avoid ambiguity and any game we already had a recording of
+            &mdash; which result in ~500 games left. Game length does not matter.</p>
           <p class="mb-0">Note that the imported F9 matches are wins-based only, but because
             VTSR-C is also currently a wins ladder &mdash; it&rsquo;s considered good data.
             F9 matches also include team thugs, so we still use each side&rsquo;s

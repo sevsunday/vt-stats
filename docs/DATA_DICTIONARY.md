@@ -3239,13 +3239,14 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "comeback_games_required": 3,
   "corpus_latest_date": "2026-09-18",
   "min_player_count": 6,
-  "min_duration_sec": 240,
+  "min_duration_sec": 0,                 // v20: no length floor (was 240)
   "computed_at": "2026-05-12T22:00:00Z",
   "match_count": 57,
   "matches_excluded_low_player_count": 4,
-  "matches_excluded_short_duration": 4,
-  "matches_excluded_no_winner": 0,
+  "matches_excluded_short_duration": 0,  // always 0 since v20 (no length floor)
+  "matches_excluded_no_winner": 0,       // v21: no recorded team winner (unclear, or signed off as unknown)
   "matches_excluded_cancelled": 0,       // v15: host-attested GAME_CANCELLED matches (visible on the dashboard, never rated)
+  "matches_excluded_draw": 0,            // v21: attested / adjudicated draws (never rated, what-if like cancelled)
   "rows_excluded_campod": 13,            // v2.5: leaderboard rows skipped for is_campod (>25% match in camera-pod)
   "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
   "rows_excluded_zero_damage": 0,        // schema 30: thug rows skipped for personal.dealt == 0
@@ -3293,7 +3294,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. **v2 (Phase 12)**: bumped 1 → 2 when the per-match comparison switched from $P_{\text{med}}$ to $E_i$ and `expected_score_logistic_scale` + per-delta `expected` joined the schema. **v2.2 (Phase 13)**: bumped 2 → 3 when the composite changed shape — `asset_multiplier` dropped, `structure_share` + `target_lock_pct` added. **v2.3**: bumped 3 → 4 — axis renames (`kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`); JSON field rename `combat_elo`→`thug_elo`; new `alpha_pve` constant in top-level constants block; new `axis_means` object on every rating row; new `axis_contributions` object on every non-excluded delta in `elo_history.json`. **v2.4**: bumped 4 → 5 — new top-level commander block (`commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`); new per-rating `matches_as_commander` / `matches_as_thug` fields; new optional per-delta `axis_contributions_meta` block on commander rows in `elo_history.json`. **v2.5**: bumped 5 → 6 (row-level `is_campod` / `is_low_activity` exclusion gates + `rows_excluded_*` counters). **v2.8**: bumped 7 → 8 (low-tier at-base lift: `lowtier_lift` block + per-rating `lowtier_lift_factor`). **v2.9**: bumped 8 → 9 (pilot-victim kill/death exclusion — input-only re-rate signal, no shape change). **v2.10**: bumped 9 → 10 — `snipe_bonus` / `target_lock_pct` weights cut to 0.005 each. **Output shape is unchanged** (still 8 weight keys); the bump is purely a re-rate / comparability signal (the `weights` field *values* changed and the corpus is re-rated, so **pre-v10 `peak_vtsr` is no longer comparable**). **v2.11**: bumped 14 → 15 — `snipe_bonus` and `target_lock_pct` leave the composite (6 keys). **v2.12**: bumped 15 → 16 — `thug_accuracy` leaves (5 keys); pre-v16 `peak_vtsr` is not comparable. **v2.13**: bumped 16 → 17 — `thug_efficiency` leaves (4 keys: `net_damage_share`, `thug_kill_rate`, `pve_share`, `mobility`); pre-v17 `peak_vtsr` is not comparable. **v2.14**: bumped 17 → 18 — one key, `enemy_damage_share`, replaces the four; pre-v18 `peak_vtsr` is not comparable. The JS reader never branches on this field. |
+| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. **v2 (Phase 12)**: bumped 1 → 2 when the per-match comparison switched from $P_{\text{med}}$ to $E_i$ and `expected_score_logistic_scale` + per-delta `expected` joined the schema. **v2.2 (Phase 13)**: bumped 2 → 3 when the composite changed shape — `asset_multiplier` dropped, `structure_share` + `target_lock_pct` added. **v2.3**: bumped 3 → 4 — axis renames (`kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`); JSON field rename `combat_elo`→`thug_elo`; new `alpha_pve` constant in top-level constants block; new `axis_means` object on every rating row; new `axis_contributions` object on every non-excluded delta in `elo_history.json`. **v2.4**: bumped 4 → 5 — new top-level commander block (`commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`); new per-rating `matches_as_commander` / `matches_as_thug` fields; new optional per-delta `axis_contributions_meta` block on commander rows in `elo_history.json`. **v2.5**: bumped 5 → 6 (row-level `is_campod` / `is_low_activity` exclusion gates + `rows_excluded_*` counters). **v2.8**: bumped 7 → 8 (low-tier at-base lift: `lowtier_lift` block + per-rating `lowtier_lift_factor`). **v2.9**: bumped 8 → 9 (pilot-victim kill/death exclusion — input-only re-rate signal, no shape change). **v2.10**: bumped 9 → 10 — `snipe_bonus` / `target_lock_pct` weights cut to 0.005 each. **Output shape is unchanged** (still 8 weight keys); the bump is purely a re-rate / comparability signal (the `weights` field *values* changed and the corpus is re-rated, so **pre-v10 `peak_vtsr` is no longer comparable**). **v2.11**: bumped 14 → 15 — `snipe_bonus` and `target_lock_pct` leave the composite (6 keys). **v2.12**: bumped 15 → 16 — `thug_accuracy` leaves (5 keys); pre-v16 `peak_vtsr` is not comparable. **v2.13**: bumped 16 → 17 — `thug_efficiency` leaves (4 keys: `net_damage_share`, `thug_kill_rate`, `pve_share`, `mobility`); pre-v17 `peak_vtsr` is not comparable. **v2.14**: bumped 17 → 18 — one key, `enemy_damage_share`, replaces the four; pre-v18 `peak_vtsr` is not comparable. **v19**: laid-mine damage enters `enemy_dealt`. **v20**: the 240 s minimum match length is gone (`min_duration_sec` 0), so games under four minutes rate; pre-v20 `peak_vtsr` is not comparable. The JS reader never branches on this field. |
 | `alpha` | float | Wins ELO blend weight. v1: 0.0 (Thug-only). |
 | `alpha_pve` | float | **v2.3** — PvE-credit fraction. Locked default `0.5`. **v2.14**: no scored axis uses it; it applies only to the retired `thug_kill_rate` axis (replayed by `scripts/vtsr_t_variants.py`). |
 | `anchor` | float | League anchor where every new player starts. 1500.0. |
@@ -3309,7 +3310,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `comeback_games_required` | int | Display-only. Games after a >window gap before rejoining the ranked table. 3. |
 | `corpus_latest_date` | ISO date | Newest corpus match date the clocks are measured against (not wall-clock). |
 | `band_config` | object | Display-only VTSR-T band rules from `scripts/vtsr_bands.py`: `edges` (the eleven band edges, ascending: tier lines 1300/1500/1700/1900/2100 plus the half splits 1150/1400/1600/1800/2000/2200), `tier_lines`, `splits`, `tier_width` (200; Tier 0 is open-ended and drawn this wide), `floor` (1000), `buffer_pts` (20 — points past an edge before the sticky band moves), `on_par_delta_pts` (3 — a per-game change smaller than this reads "On par"). `js/vtsr-display.js` reads it; do not hardcode. Canonical file only. |
-| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates. `min_player_count` is 6 non-campod leaderboard rows (camera-pod spectators do not count; idle thugs and partials do). `min_duration_sec` is 240. |
+| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates. `min_player_count` is 6 non-campod leaderboard rows (camera-pod spectators do not count; idle thugs and partials do). `min_duration_sec` is 0 since v20 (match length is not a gate; it was 240). |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
@@ -3327,10 +3328,11 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].thug_elo` | float | **v2.3** — pure Thug-ELO component (was `combat_elo` pre-v2.3). |
 | `ratings[].wins_elo` | float | Wins-ELO component ($R^W$). **Stage E (proto v4 overhaul): REAL ladder values** — updated on every rated match with a determined outcome (see the `wins_*` top-level constants below); anchor 1500 for players with zero wins-rated games. Consequence-free while `alpha = 0.0` (the published `vtsr` is bit-identical to `thug_elo`). The Tools resolver carries it; no page displays it. Pre-Stage-E files carried a flat 1500.0 stub. |
 | `ratings[].wins_games` | int | **Stage E** — count of wins-rated rows for this player (determined-outcome matches only; always ≤ `matches_played`). |
-| `ratings[].wins_record` | object | **Stage E** — `{w, l, d}` tallies over the wins-rated rows (draws = attested/adjudicated `decided_by == "draw"`). |
+| `ratings[].wins_record` | object | **Stage E** — `{w, l, d}` tallies over the wins-rated rows. `d` stays 0 since v21 (draws are not rated). |
 | `wins_k_base` / `wins_k_floor` / `wins_provisional_prior` / `wins_logistic_scale` | float | **Stage E** — wins-ladder constants: symmetric K decaying 24 → 12 over the first 10 wins-rated games; classic chess logistic scale 400; team-MEAN reference (Phase 2C rejected MAX/softmax for update rules); no loss aversion, no floor, no inactivity boost. |
-| `wins_matches_rated` | int | **Stage E** — rated matches that scored the wins ladder (determined team win or draw, both sides represented). |
-| `wins_matches_skipped_undetermined` | int | **Stage E** — rated matches whose outcome was unverifiable → wins ladder skipped, thug side still rated in full (`matches_excluded_no_winner` stays 0 by design). |
+| `wins_matches_rated` | int | **Stage E** — rated matches that scored the wins ladder (determined team win, both sides represented). |
+| `wins_matches_skipped_undetermined` | int | **Stage E** — guard counter; 0 since v21, because a match with no recorded winner is excluded at match level (`matches_excluded_no_winner`) before the wins ladder. |
+| `matches_excluded_no_winner` / `matches_excluded_draw` | int | **v21** — matches excluded because no team winner was recorded (`winner.decided_by` not in `attested` / `clean_win` / `contested` / `adjudicated`, or no `winner.team`), and attested / adjudicated draws. Both rate on no ladder. |
 | `wins_matches_skipped_one_sided` | int | **Stage E** — defensive counter: rated matches where every rated row landed on one side (no duel structure). |
 | `alpha` | float | The EFFECTIVE blend weight this file was computed with (`vtsr = alpha·wins_elo + (1−alpha)·thug_elo`). Canonical: the module `ALPHA` (0.0). |
 | `alpha_overridden` | bool | **Stage E** — `true` only on the forensic `elo_current_alpha{10,25,50}.json` pairs (emitted via `compute_elo(alpha_override=…)`, scored by `validate_elo.py --elo-mode alpha{10,25,50}` against the pre-registered promote rule in `critique/decisions/phase-5-wins-blend.md`). On those pairs the published `vtsr` is the real blend and `peak_vtsr` tracks the blended value per match. |
@@ -3399,15 +3401,15 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 | `history[].deltas[].axis_contributions_meta` | object \| absent | **v2.4** — optional sibling block, present ONLY on commander rows (`is_commander: true` on the source leaderboard row) AND only for axes that were both available for the lobby AND listed in `commander_axis_prior`. Shape: `{axis_name: {z_pre_shift, shift, z_post_shift}}` where `z_pre_shift` is the value before the v2.4 commander shift (post-clip space, range $[-1, +1]$), `shift = -baseline[axis]` (where `baseline` is `commander_shrunk_baseline()` evaluated at the start of this match — frozen at the prior for locked axes), and `z_post_shift` is the final value after re-clipping to $[-1, +1]$. **Audit invariant**: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` exactly (because the post-shift value IS what feeds the rating math). For thug rows, this block is OMITTED entirely. Forensics-only for now; not consumed by the dashboard renderer. |
 | `history[].deltas[].wins` | object \| absent | **Stage E** — per-row wins-ladder audit block, present only on rows of matches that scored the wins ladder: `{before, after, delta, s, e}` where `s` is the raw outcome score (1 / 0 / 0.5) and `e` the side-level expected score from the team-mean $R^W$ logistic. Absent on rows of undetermined / one-sided matches (the wins ladder didn't move). Top-level `alpha` / `alpha_overridden` mirror the current-file fields. |
 
-Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"cancelled"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
+Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"void"` / `"low_player_count"` / `"short_side"` / `"cancelled"` / `"draw"` / `"no_winner"` / `"empty_lobby"`; `"short_duration"` remains in the code but cannot fire since v20), and an empty `deltas[]` array. `"draw"` and `"no_winner"` are v21: a match rates only with a recorded team winner. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
 
-#### `history[].shadow` — never-applied scoring for cancelled matches
+#### `history[].shadow` — never-applied scoring for cancelled and drawn matches
 
 | Field | Type | Meaning |
 |---|---|---|
-| `history[].shadow` | object \| absent | Present ONLY on entries whose `exclusion_reason == "cancelled"` (`SHADOW_EXCLUSION_REASON` in [scripts/elo.py](../scripts/elo.py)) and whose would-be-rated lobby was non-empty. A cancelled game is a real, fully-recorded match whose *result* was lost, so the eight-axis composite is still computed and published — clearly labelled as never applied — to power the Balonce Meter's what-if card. Absent on every other exclusion reason and on every rated match. |
+| `history[].shadow` | object \| absent | Present ONLY on entries whose `exclusion_reason` is `"cancelled"` or `"draw"` (v21; `SHADOW_EXCLUSION_REASONS` in [scripts/elo.py](../scripts/elo.py)) and whose would-be-rated lobby was non-empty. A cancelled game is a real, fully-recorded match whose *result* was lost, so the eight-axis composite is still computed and published — clearly labelled as never applied — to power the Balonce Meter's what-if card. Absent on every other exclusion reason and on every rated match. |
 | `shadow.applied` | bool | Always `false`. Exists so a consumer can assert on it rather than infer from the key name. |
-| `shadow.reason` | string | Echoes `exclusion_reason` (`"cancelled"`). |
+| `shadow.reason` | string | Echoes `exclusion_reason` (`"cancelled"` or `"draw"`). |
 | `shadow.deltas[]` | array | One row per would-be-rated player, same v2.5 row filter as the rated path (campod / low-activity rows omitted). |
 | `shadow.deltas[].name` / `.steam64` / `.is_commander` | string / string \| null / bool | Identity, straight off the leaderboard row. |
 | `shadow.deltas[].before` | float | The rating the player carried INTO this match. Authoritative snapshot — a client reconstructing it by walking prior `deltas[].after` gets the same number, because VTSR-T only moves on rated appearances. |
@@ -3419,7 +3421,7 @@ Excluded matches still appear in `history[]` with `match_excluded: true`, an `ex
 
 ### `data/processed/elo_commander_current.json` + `elo_commander_history.json` — VTSR-C v2 (experimental)
 
-Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version: 2`, separate from `ELO_SCHEMA_VERSION`) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set). All UI consumers are 404-safe.
+Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version`, currently 13, separate from `ELO_SCHEMA_VERSION`; v13 dropped the 240 s minimum match length, so pre-v13 `peak_vtsr_c` is not comparable) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set). All UI consumers are 404-safe.
 
 **v2 (proto v4 overhaul) adds an economy-performance composite, structurally INERT behind `alpha_c = 1.0`** — formulas frozen in [critique/decisions/vtsr-c-v2-composite.md](../critique/decisions/vtsr-c-v2-composite.md) BEFORE any telemetry corpus accumulated. Axes per telemetry duel (both `has_resource_data` AND `has_build_data` required), amended 2026-10-23: every axis is measured over the **whole game** (every telemetry game carries a recorded outcome). Scored candidates (weight 0.25 each): `pool_lead` (mean `pool_count`), `non_green_share` (share of live-recycler samples with `scrap < 20 × pool_count`; green and the cap count against), `combat_conversion` (combat-ship BUILD scrap excluding the empty starter ships in `starter_ship_stems`, over positive 1 Hz income), `upgrade_time` (mean `upgrade_count`). Weight 0: `replacement_ratio` (combat ships built / human vehicle deaths, cap 3), `replacement_ratio_real` (the same without starter ships built), `loose_share` (`income_loose / max(scrap_income, 1)`, whole match). Normalization is the **within-match differential** (n=2 makes lobby z-scores degenerate): `z = clip(diff / shrunk_std(axis), −2, 2) / 2` with a rolling per-axis RMS (seed prior + shrinkage 10 pseudo-duels, snapshot-before-duel / update-after); `P₁ = Σw·z / Σw`, `P₂ = −P₁`. Blend `S' = alpha_c·S + (1−alpha_c)·(P+1)/2` applies only on telemetry duels — the code branches on `alpha_c < 1.0` so the inert path never routes through blend arithmetic (golden byte-identity gate: `_investigation/golden_vtsrc_v2.py`). Duels without telemetry score outcome-pure S at ANY alpha_c (ratified fallback policy). W/L/D records always tally the RAW outcome. Fields: top-level `alpha_c`, `econ_weights`, `econ_std_prior`, `econ_std_shrinkage`, `thug_supply_cap`, `econ_std_observed {axis: {count, std}}`, `econ_prefix_secs` (`[240, 480, 720]`), `starter_ship_stems`, `econ_semantics_amended_on`; per-rating `duels_with_telemetry`; per-duel `performance {available, p, axes, prefix_diffs}` (team-1 perspective; side 2 = negation) + per-side `score_blend {alpha_c, s_raw, s_blended}`.
 
@@ -3459,7 +3461,7 @@ Promote rule (2026-10-23 amendment; earlier rules retired): everything up to tha
 
 | Field | Type | Description |
 |---|---|---|
-| `rated_match_count` | int | Determined rated duels walked (adjudicated / attested / clean_win / contested team wins + attested draws). |
+| `rated_match_count` | int | Determined rated duels walked (adjudicated / attested / clean_win / contested team wins). Draws are not rated since schema 14 (`matches_skipped_draw`). |
 | `matches_skipped_undetermined` | int | Rated VTSR-T matches whose outcome is unverifiable (`unclear`, or no winner team) — skipped, zero rating effect. |
 | `matches_skipped_missing_commander` | int | Rated determined matches where either team's commander couldn't be identified (leaderboard `is_commander` + `team_leaders` fallback both failed) or the history entry didn't join back to the corpus. |
 | `ratings[].vtsr_c` | float | Commander rating. Anchor 1500; no floor. Sorted desc. |
@@ -3501,7 +3503,7 @@ Promote rule (2026-10-23 amendment; earlier rules retired): everything up to tha
 
 | Field | Type | Description |
 |---|---|---|
-| `duels[].outcome` | string | `"team1"` / `"team2"` / `"draw"` (draws score 0.5 for both). |
+| `duels[].outcome` | string | `"team1"` / `"team2"` (`"draw"` only in pre-schema-14 files; draws are no longer rated). |
 | `duels[].commanders.{1,2}.expected` | float | Handicap-aware expected score. The two values always sum to 1. |
 | `duels[].commanders.{1,2}.k` | float | Effective K after provisional decay (40 → 20 over the first 5 duels). |
 | `duels[].team_handicap.t{1,2}_thug_mean` | float \| null | Mean pre-match VTSR-T of the team's non-commander rated rows (from the canonical `elo_history` deltas' `before` values — zero leakage). `null` when the side has no joinable thug rows (handicap term becomes 0). |
@@ -3763,7 +3765,7 @@ One-time import of F9bomber's hand-kept match spreadsheet (`f9stats/f9stats-2026
 
 ### Eligibility funnel (strict partition of the sheet's rows; order matters)
 
-roster-complete → commanders parse as `A vs B` (names de-duped per side, commander stripped from own thug list) → even teams with 2-4 thugs/side (3v3 / 4v4 / 5v5 only) → no participant doubles as a straggler → winner is one of the two commanders → duration present and ≥ 240s → exact-dup dedup → **overlap pairing** (ours supersedes) → excluded-name filter (unpaired rows only — paired rows always become `overlaps[]` jogger entries). Overlap pairing: our matches within ±1 day (F9 dates are US-local vs our UTC ids), map title-stem match OR alias-resolved registry key == our raw map-file stem, commander pair equal by Steam64 set (keyname-set fallback), greedy one-to-one by participant-name Jaccard ≥ 0.4.
+roster-complete → commanders parse as `A vs B` (names de-duped per side, commander stripped from own thug list) → even teams with 2-4 thugs/side (3v3 / 4v4 / 5v5 only) → no participant doubles as a straggler → winner is one of the two commanders → duration present (any length; the ≥ 240s floor was dropped on 2026-11-08, so `x_short` is 0) → exact-dup dedup → **overlap pairing** (ours supersedes) → excluded-name filter (unpaired rows only — paired rows always become `overlaps[]` jogger entries). Overlap pairing: our matches within ±1 day (F9 dates are US-local vs our UTC ids), map title-stem match OR alias-resolved registry key == our raw map-file stem, commander pair equal by Steam64 set (keyname-set fallback), greedy one-to-one by participant-name Jaccard ≥ 0.4.
 
 ### `data/external/f9_ledger.json`
 
@@ -3774,7 +3776,7 @@ roster-complete → commanders parse as `A vs B` (names de-duped per side, comma
 | `duels[].row` | Source spreadsheet row (stable id; the `f9:<row>` sentinel in ladder fields derives from it). |
 | `duels[].date` | `YYYY-MM-DD` (day precision — the ledger has no timestamps). |
 | `duels[].map_title` / `map_key` | Verbatim F9 title + resolved registry key (`null` when unknown to the registry). |
-| `duels[].size` / `duration_sec` | `"3v3" \| "4v4" \| "5v5"`, seconds (≥ 240 guaranteed). |
+| `duels[].size` / `duration_sec` | `"3v3" \| "4v4" \| "5v5"`, seconds (always present; any length). |
 | `duels[].commanders.{1,2}` | `{name (F9 spelling), steam64 (str \| null)}`. |
 | `duels[].thugs.{1,2}[]` | Same shape; even lengths guaranteed. |
 | `duels[].winner_side` | `1 \| 2` (always set — winner-not-a-commander rows were dropped). |
@@ -3907,7 +3909,7 @@ Not telemetry. Not in the pipeline cache key. Built by standalone scripts, consu
 
 ## 18. VTSR-1v1 Outputs (`elo_1v1_current.json` + `elo_1v1_history.json`)
 
-Pipeline-emitted by [scripts/elo_1v1.py](../scripts/elo_1v1.py) after VTSR-C on every `process_stats.py` run. A separate plain-Elo ladder over **recorded** true 1v1s (exactly one non-campod leaderboard row per side, ≥ 240 s, decided winner or draw). It reads nothing from `elo_history.json` or `data/external/`, and nothing in VTSR-T / VTSR-C / the aggregator / the Balonce Meter reads it. **Corpus-wide, picker-unaware**, not in the cache key. Algorithm: [DEVELOPER_GUIDE.md §13.15](../DEVELOPER_GUIDE.md). Memo: `critique/decisions/vtsr-1v1-ladder.md`.
+Pipeline-emitted by [scripts/elo_1v1.py](../scripts/elo_1v1.py) after VTSR-C on every `process_stats.py` run. A separate plain-Elo ladder over **recorded** true 1v1s (exactly one non-campod leaderboard row per side, any length, decided winner; draws are not rated since schema 2). It reads nothing from `elo_history.json` or `data/external/`, and nothing in VTSR-T / VTSR-C / the aggregator / the Balonce Meter reads it. **Corpus-wide, picker-unaware**, not in the cache key. Algorithm: [DEVELOPER_GUIDE.md §13.15](../DEVELOPER_GUIDE.md). Memo: `critique/decisions/vtsr-1v1-ladder.md`.
 
 Both files share a header:
 
@@ -3917,12 +3919,12 @@ Both files share a header:
 | `computed_at` | UTC stamp of the run. |
 | `source` | Always `"recorded"` (no external ledger). |
 | `anchor` / `k_base` / `k_floor` / `provisional_prior` / `provisional_threshold` / `logistic_scale` | Elo constants (1500 / 40 / 20 / 5 / 5 / 400). Each game uses one K: the mean of both players' scheduled values. |
-| `min_duration_sec` | Duration gate (240). |
+| `min_duration_sec` | Duration gate (0 = off; was 240 until 2026-11-08). |
 | `leaderboard_min_games` | Display-only: rated 1v1s needed for a ranked `#` (5). |
 | `inactivity_window_days` / `comeback_games_required` / `corpus_latest_date` | Shared global activity clock (90 / 3), recorded corpus only. |
 | `one_v_one_matches_seen` | Matches with exactly one non-campod player per side. |
 | `duels_rated` | Games rated. |
-| `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_undetermined` / `skipped_duplicate_recording` | Why the other 1v1s were not rated. They partition `one_v_one_matches_seen − duels_rated`. |
+| `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_draw` / `skipped_undetermined` / `skipped_duplicate_recording` | Why the other 1v1s were not rated. They partition `one_v_one_matches_seen − duels_rated`. `skipped_draw` is schema 2: draws are not rated. |
 
 `elo_1v1_current.json` adds `ratings[]`, sorted by `rating` descending:
 
@@ -3946,7 +3948,7 @@ Both files share a header:
 | `map` / `map_file` | Registry-resolved title and raw `.bzn`. |
 | `duration_sec` | Match length. |
 | `factions` | `{"1": name, "2": name}` from `match.team_factions` (display only; no faction term). |
-| `decided_by` / `adjudicated` / `outcome` | Winner provenance; `outcome` is `team1`, `team2` or `draw`. |
+| `decided_by` / `adjudicated` / `outcome` | Winner provenance; `outcome` is `team1` or `team2` (`draw` only in schema-1 files). |
 | `players` | `{"1": {...}, "2": {...}}`, each `{steam64, name, before, after, delta, expected, k, score}`. The two `expected` values sum to 1, both sides carry the same `k`, and the two `delta` values sum to 0. |
 
 ---
@@ -3972,7 +3974,7 @@ All three use **recorded games only**. F9bomber's 2v2 rows were removed by opera
 | `team` | At least 3 per side and at least 6 total (VTSR-T, VTSR-C). |
 | `other` | Every other shape (2v1, 3v1, 3v2, 4v2, 1v0, an inactive 2v2). Rated by no ladder. |
 
-This field is for display and filtering only (the picker's Format facet, `?fmt=`, and the Experimental tab's recorded-game filter). It is never a rating input. Readers treat a missing stamp as `other`. Each ladder still applies its own outcome, duration and void gates. The main ladder's own side-size rule is `elo_current.json` `min_per_side` (3) / `matches_excluded_short_side` (exclusion reason `short_side`).
+This field is for display and filtering only (the picker's Format facet, `?fmt=`, and the Experimental tab's recorded-game filter). It is never a rating input. Readers treat a missing stamp as `other`. Each ladder still applies its own outcome and void gates; every ladder needs a recorded team winner, and match length is not a gate. The main ladder's own side-size rule is `elo_current.json` `min_per_side` (3) / `matches_excluded_short_side` (exclusion reason `short_side`).
 
 ### 19.2 Shared header
 
@@ -3980,19 +3982,18 @@ Both files carry this header:
 
 | Field | Description |
 |---|---|
-| `schema_version` | `ELO_2V2_SCHEMA_VERSION` (2; schema 1 also carried F9 rows, and its ratings are not comparable). |
+| `schema_version` | `ELO_2V2_SCHEMA_VERSION` (4: only games with a recorded team winner rate on any of the three ladders; 3 added laid-mine damage; schema 1 also carried F9 rows). Ratings across these versions are not comparable. |
 | `computed_at` | UTC stamp of the run. |
 | `anchor` / `k_base` / `k_floor` / `provisional_prior` / `provisional_threshold` / `logistic_scale` | Elo constants (1500 / 40 / 20 / 5 / 5 / 400), shared by all three ladders. Each role uses one K per game: the mean of both players' scheduled values. |
 | `lambda` | Thug-gap weight in the win/loss walk (1.0). |
-| `min_duration_sec` | Duration gate (240). |
+| `min_duration_sec` | Duration gate (0 = off; was 240 until 2026-11-08). |
 | `leaderboard_min_games` | Display-only: games in that ladder needed for a ranked `#` (5). |
 | `inactivity_window_days` / `comeback_games_required` / `corpus_latest_date` | Shared global activity clock (90 / 3), recorded corpus only. |
 | `two_v_two_shape_seen` | Recorded matches whose `match_format` is `2v2`. |
-| `games_rated` | Games in `games[]`: rated by the win/loss walk, the performance duel, or both. |
+| `games_rated` | Games in `games[]`. Every one has a recorded winner, so the win/loss walk always rates it; the performance duel rates it unless both thugs dealt 0. |
 | `wl_games_rated` | Win/loss walk games. |
 | `perf_games_rated` | Performance duels rated. |
-| `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_inactive_player` / `skipped_duplicate_recording` / `skipped_identity_collision` | Why a recorded 2v2-shaped match was not rated. `identity_collision` means the four seats did not resolve to four distinct players. |
-| `wl_skipped_undetermined` | Recorded games rated only by the performance duel, because no verified winner exists. |
+| `skipped_void` / `skipped_short` / `skipped_cancelled` / `skipped_draw` / `skipped_undetermined` / `skipped_inactive_player` / `skipped_duplicate_recording` / `skipped_identity_collision` | Why a recorded 2v2-shaped match was not rated. `skipped_draw` / `skipped_undetermined` (schema 4) are draws and games with no recorded winner; they rate on none of the three ladders (schema 4 replaced the old `wl_skipped_undetermined`, when the performance duel still rated them). `identity_collision` means the four seats did not resolve to four distinct players. |
 | `perf_skipped_no_damage` | Recorded games where both thugs dealt 0, so no performance duel. |
 
 ### 19.3 `elo_2v2_current.json`: `ladders`
@@ -4022,8 +4023,8 @@ Chronological.
 | `game_id` / `match_id` | The match id (both fields carry it). |
 | `source` | Always `"recorded"`. |
 | `date` | ISO timestamp of the match. |
-| `decided_by` / `outcome` / `adjudicated` | Winner provenance. `outcome` is `team1`, `team2`, `draw`, or `null` when undecided. |
-| `wl` | Win/loss walk: `{expected {"1","2"}, score {"1","2"}, k_commander, k_thug, lambda}`. `null` when the game had no verified winner. |
+| `decided_by` / `outcome` / `adjudicated` | Winner provenance. `outcome` is `team1` or `team2` (schema 4; earlier files also carry `draw` or `null`). |
+| `wl` | Win/loss walk: `{expected {"1","2"}, score {"1","2"}, k_commander, k_thug, lambda}`. Always present since schema 4. |
 | `perf` | Performance duel: `{expected {"1","2"}, score {"1","2"}, k}`, where `score` is each thug's `enemy_dealt` share. `null` when both thugs dealt 0. |
 | `map` / `map_file` / `duration_sec` / `factions` | Display context (no faction term). |
 | `sides` | `{"1": {commander, thug}, "2": {...}}`. Each `commander` is `{steam64, name, wl {before, after, delta}, enemy_dealt, combat_share}`. Each `thug` is `{steam64, name, wl {...}, enemy_dealt, perf {before, after, delta}}`. `wl` / `perf` are absent when that part did not rate. `combat_share` is the commander's share of the side's enemy damage, recorded but not scored. Within each role the two sides' deltas sum to 0. |

@@ -175,12 +175,13 @@ Design (locked, v1 -- all still true):
     CMDR_PROVISIONAL_THRESHOLD rated games.
 
 Rated set = canonical rated matches that are DETERMINED: present in
-elo_history with non-empty deltas (inherits the 6-player / 240s /
-cancelled gates for free), `winner.team` in (1, 2) via `decided_by` in
+elo_history with non-empty deltas (inherits the 6-player /
+cancelled gates for free; match length is not a gate), `winner.team` in (1, 2) via `decided_by` in
 DETERMINED_DECIDED_BY, both team leaders identified from
 `leaderboard[].is_commander` (fallback `match.team_leaders`).
-Attested / adjudicated draws (`decided_by == "draw"`) score S = 0.5 for
-both commanders. Undetermined matches skip (counted).
+Draws (`decided_by == "draw"`) are not rated (v14) and undetermined
+matches skip; both are counted. In practice scripts/elo.py already
+excludes both before they reach this walk.
 
 Output files (written by scripts/process_stats.py, both in the
 load_cache_index skip set):
@@ -236,8 +237,7 @@ CMDR_LOGISTIC_SCALE = 400.0
 CMDR_LAMBDA_TEAM_HANDICAP = 1.0
 
 # decided_by values that make a match outcome DETERMINED for rating
-# purposes (winner.team in (1, 2)). Draws are handled separately
-# (decided_by == "draw" -> S = 0.5 both sides).
+# purposes (winner.team in (1, 2)). Draws are not rated (v14).
 DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
 # ---- v2: economy-performance composite (INERT at alpha_c = 1.0) ----------
@@ -342,6 +342,14 @@ INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 
+# v14: draws are not rated (they scored 0.5 each) and, through
+# scripts/elo.py v21, no match without a recorded team winner reaches
+# the walk. Pre-v14 peak_vtsr_c is not comparable. Measured on adoption:
+# same duels, max |d| 6.6, mean |d| 1.1 (through the thug handicap).
+# v13: the 240 s minimum match length is gone (scripts/elo.py v20 and the
+# F9 importer). Recorded games and community duels under four minutes now
+# rate, so pre-v13 peak_vtsr_c is not comparable. Measured on adoption:
+# 2 recorded + 3 F9 duels added, max |d| 15.8, mean |d| 1.8.
 # v12: player-laid mine damage enters the thug-mean handicap through
 # VTSR-T enemy_dealt (match.schema_version 35). Commander duel math is
 # unchanged. Pre-v12 peak_vtsr_c is not comparable where that duel was
@@ -362,7 +370,7 @@ CMDR_STALE_WINDOW_DAYS = 90
 # comparable with schema 7 (alpha_c stays 1; the axis does not enter P).
 # v7: weight-0 loose_share audit axis. v6: opening-decision axes.
 # v5: display inactivity. v3 ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 12
+CMDR_ELO_SCHEMA_VERSION = 14
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +808,7 @@ def compute_commander_elo(all_match_data: list[dict],
     duels: list[dict] = []
     rated_match_count = 0
     skipped_undetermined = 0
+    skipped_draw = 0
     skipped_missing_commander = 0
     # Dual recordings that share ONE match id produce TWO elo_history
     # entries (two submitters' files landing on the same second). One
@@ -1054,9 +1063,9 @@ def compute_commander_elo(all_match_data: list[dict],
         decided_by = winner.get("decided_by")
         team = winner.get("team")
         if decided_by == "draw":
-            scores = {1: 0.5, 2: 0.5}
-            outcome = "draw"
-        elif decided_by in DETERMINED_DECIDED_BY and team in (1, 2):
+            skipped_draw += 1
+            continue
+        if decided_by in DETERMINED_DECIDED_BY and team in (1, 2):
             scores = {team: 1.0, 3 - team: 0.0}
             outcome = f"team{team}"
         else:
@@ -1321,6 +1330,7 @@ def compute_commander_elo(all_match_data: list[dict],
         "computed_at": computed_at,
         "rated_match_count": rated_match_count,
         "matches_skipped_undetermined": skipped_undetermined,
+        "matches_skipped_draw": skipped_draw,
         "matches_skipped_missing_commander": skipped_missing_commander,
         "matches_skipped_duplicate_recording": skipped_duplicate_recording,
         # v3: external community ledger (F9bomber). rated_match_count

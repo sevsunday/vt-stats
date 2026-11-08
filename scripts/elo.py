@@ -48,8 +48,10 @@ gates auditable. No algorithm
 changes: axis weights, priors, K-factor, loss aversion, floor taper,
 shrinkage strengths, alpha-blend all unchanged.
 
-Matches with fewer than 6 non-campod leaderboard rows, or
-``duration_sec < 240``, don't update ratings; they emit a history row
+Matches with fewer than 6 non-campod leaderboard rows, cancelled or
+drawn matches, and matches with no recorded team winner (v21: unclear
+outcomes are ignored entirely) don't update ratings (match length is
+not a gate since v20); they emit a history row
 with ``match_excluded: true`` so exclusion counters reconcile. Camera-pod
 spectators occupy slots but are not a team, so a 1v1 watched from pods
 does not pass the gate. Idle thugs and partials still count toward it
@@ -100,13 +102,15 @@ ELO_MIN_PLAYER_COUNT = 6         # excluded when non-campod leaderboard rows < 6
 # 4v2 or 5v1 is not a team game. Moved no rating when added; see
 # critique/decisions/vtsr-2v2-ladders.md and scripts/match_format.py.
 ELO_MIN_PER_SIDE = match_format.TEAM_MIN_PER_SIDE
-ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
+# Match length is not a gate (v20 dropped the 240 s floor). The branch and
+# its `short_duration` counter stay so history reasons still reconcile.
+ELO_MIN_DURATION_SEC = 0
 
-# The ONE exclusion reason that still gets scored in the shadow (a
-# never-applied `shadow` block on its elo_history entry, for the
-# dashboard's what-if card). See _shadow_score_match for why cancelled
-# earns it and the other two reasons do not.
-SHADOW_EXCLUSION_REASON = "cancelled"
+# Exclusion reasons that still get scored in the shadow (a never-applied
+# `shadow` block on their elo_history entry, for the dashboard's what-if
+# card). Cancelled and drawn games cleared the lobby gates and were real
+# games whose result does not rate; the other reasons get nothing.
+SHADOW_EXCLUSION_REASONS = ("cancelled", "draw")
 
 # Per-match outcome scale; bounds dR via (P_i - E_i) which lives in roughly [-1, +1].
 ELO_RATING_SCALE = 2.5
@@ -166,9 +170,10 @@ WINS_K_BASE = 24.0
 WINS_K_FLOOR = 12.0
 WINS_PROVISIONAL_PRIOR = 10.0
 WINS_LOGISTIC_SCALE = 400.0
-# decided_by values that make a match outcome DETERMINED for the wins
-# ladder (winner.team in (1, 2)). Draws (decided_by == "draw") score
-# S = 0.5 for every rated row. Mirrors elo_commander.DETERMINED_DECIDED_BY.
+# decided_by values that make a match outcome DETERMINED (winner.team in
+# (1, 2)). Since v21 a match rates on ANY ladder only with one of these;
+# draws and unclear outcomes are match-level exclusions. Mirrors
+# elo_commander.DETERMINED_DECIDED_BY.
 WINS_DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
 # v2.4: per-match commander role adjustment. For each commander row and
@@ -377,12 +382,22 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # critique/decisions/vtsr-t-enemy-damage.md. Output shape: `weights`,
 # `axis_means`, and `axis_contributions` carry 1 key. Ratings move, so
 # **pre-v18 `peak_vtsr` is no longer comparable**.
-# v19 (current) = v18 plus player-laid mine damage inside
+# v19 = v18 plus player-laid mine damage inside
 # `personal.enemy_dealt` (match.schema_version 35). A mine that detonates
 # as its own entity used to book to asset_dealt, which this axis never
 # read. Output shape is unchanged. Ratings move, so **pre-v19
 # `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 19
+# v20 = the 240 s minimum match length is gone
+# (`ELO_MIN_DURATION_SEC` 0). Games under four minutes now rate, so
+# **pre-v20 `peak_vtsr` is no longer comparable**. Measured on adoption:
+# 7 more rated matches, max |d| 32.4, mean |d| 5.8, 3 band changes.
+# v21 (current) = a match rates only with a recorded team winner
+# (attested / clean_win / contested / adjudicated). Unclear matches are
+# excluded as `no_winner`; draws are excluded as `draw` and shadow-scored
+# like cancellations. **Pre-v21 `peak_vtsr` is no longer comparable**.
+# Measured on adoption: 28 matches excluded, max |d| 50.7, mean |d| 12.1,
+# 9 band changes.
+ELO_SCHEMA_VERSION = 21
 
 
 # ---------------------------------------------------------------------------
@@ -1084,7 +1099,7 @@ def compute_performance_index(
 
     available = [a for a, v in raw.items() if v is not None]
     if not available:
-        # Pathological — duration gate normally catches this; belt-and-braces.
+        # Pathological — every builder returned None; belt-and-braces.
         return (
             [0.0] * len(lobby),
             [_player_key(p) for p in lobby],
@@ -1253,9 +1268,9 @@ def _shadow_score_match(
     """Score a match that is EXCLUDED from rating, for display only.
 
     A host-cancelled game is a real, fully-recorded match whose result was
-    lost to a crash. It must never rate (`resolve_match_outcome` said
-    there is no winner, and `compute_elo` excludes it), but the 6-axis
-    composite still measured what everyone did, and the reader deserves to
+    lost to a crash, and a drawn game (v21) is one with no winner to
+    score. Neither may ever rate (`compute_elo` excludes both), but the
+    performance composite still measured what everyone did, and the reader deserves to
     see it. So we run the SAME performance index and the SAME delta
     arithmetic the rated path uses, and label the answer as never applied.
 
@@ -1476,11 +1491,14 @@ def _rating_pass(
     excluded_short_side       = 0
     excluded_short_duration   = 0
     excluded_void             = 0
-    excluded_no_winner        = 0  # reserved (alpha-blend slot); always 0 in v1
+    # v21: no team winner recorded (unclear, or signed off as unknown).
+    excluded_no_winner        = 0
     # v15: host-attested GAME_CANCELLED matches (early RE / crash / restart
     # per the collector's outcome dialog). Real combat may have occurred,
     # so the match stays visible everywhere else -- but it doesn't rate.
     excluded_cancelled        = 0
+    # v21: attested / adjudicated draws are excluded like cancellations.
+    excluded_draw             = 0
     # v2.5: per-row exclusion counters (independent of match-level
     # exclusions above). A row hitting both flags is counted in both
     # counters but excluded once from the rated lobby either way.
@@ -1490,12 +1508,11 @@ def _rating_pass(
     excluded_campod_rows       = 0
     excluded_low_activity_rows = 0
     excluded_zero_damage_rows  = 0
-    # Stage E: wins-ladder match counters. A RATED match either scores
-    # the wins ladder (determined outcome / draw), skips as undetermined
-    # (unclear / missing team), or skips because every rated row landed
-    # on one side (no duel structure -- defensive, e.g. heavy exclusions).
-    # matches_excluded_no_winner stays 0: undetermined matches still rate
-    # the thug side in full.
+    # Stage E: wins-ladder match counters. A RATED match always has a
+    # team winner (v21 match-level gate), so it scores the wins ladder
+    # unless every rated row landed on one side (no duel structure --
+    # defensive, e.g. heavy exclusions). wins_skipped_undetermined is a
+    # guard that stays 0.
     wins_matches_rated        = 0
     wins_skipped_undetermined = 0
     wins_skipped_one_sided    = 0
@@ -1528,15 +1545,18 @@ def _rating_pass(
         lobby = _rated_lobby(lobby_raw)
 
         # Match-level gates: operator void, fewer than 6 non-campod
-        # players, duration < 240s, or a host-attested cancellation (v15
-        # winner.decided_by == "cancelled") → emit excluded history
-        # row, no rating change. Void is checked first and does not
+        # players, a short side, a host-attested cancellation (v15
+        # winner.decided_by == "cancelled"), a draw, or no recorded team
+        # winner (v21) → emit excluded history row, no rating change.
+        # Void is checked first and does not
         # shadow-score: the operator said the game does not count.
         # Campod spectators fill slots without being a team (a 1v1 with
         # six pods has player_count 8). Idle / partial rows still count
         # here so a real 6-player game stays rated; _rated_lobby drops
         # them from z-scoring. Missing is_campod (legacy) counts as playing.
         playing = sum(1 for p in lobby_raw if not p.get("is_campod"))
+        gate_winner = m.get("winner") or {}
+        gate_decided_by = gate_winner.get("decided_by")
         exclusion_reason = None
         if m.get("void"):
             excluded_void += 1
@@ -1550,9 +1570,16 @@ def _rating_pass(
         elif (m.get("duration_sec", 0) or 0) < ELO_MIN_DURATION_SEC:
             excluded_short_duration += 1
             exclusion_reason = "short_duration"
-        elif ((m.get("winner") or {}).get("decided_by")) == "cancelled":
+        elif gate_decided_by == "cancelled":
             excluded_cancelled += 1
             exclusion_reason = "cancelled"
+        elif gate_decided_by == "draw":
+            excluded_draw += 1
+            exclusion_reason = "draw"
+        elif not (gate_decided_by in WINS_DETERMINED_DECIDED_BY
+                  and gate_winner.get("team") in (1, 2)):
+            excluded_no_winner += 1
+            exclusion_reason = "no_winner"
 
         if exclusion_reason is not None:
             excluded_entry: dict[str, Any] = {
@@ -1562,13 +1589,13 @@ def _rating_pass(
                 "exclusion_reason": exclusion_reason,
                 "deltas": [],
             }
-            # A cancelled match is the one exclusion worth scoring in the
-            # shadow: it cleared the player-count and duration gates (the
-            # if/elif above tests those FIRST), so it is a real game that
-            # was interrupted rather than a non-event. `deltas` stays empty
-            # so every existing consumer -- elo_commander.py's
-            # `match_excluded` skip included -- is untouched.
-            if exclusion_reason == SHADOW_EXCLUSION_REASON:
+            # Cancelled and drawn matches are the exclusions worth scoring
+            # in the shadow: they cleared the player-count gates (the
+            # if/elif above tests those FIRST), so they are real games
+            # whose result does not rate. `deltas` stays empty so every
+            # existing consumer -- elo_commander.py's `match_excluded`
+            # skip included -- is untouched.
+            if exclusion_reason in SHADOW_EXCLUSION_REASONS:
                 shadow_deltas = _shadow_score_match(
                     md,
                     # Snapshots, not the live dicts: nothing in the shadow
@@ -1657,9 +1684,9 @@ def _rating_pass(
 
         # ---- Stage E: resolve this match's wins-ladder outcome ----------
         # Runs on RATED matches only (match-level gates already applied).
-        # Determined team win -> S = 1/0 by side; draw -> S = 0.5 for all
-        # rated rows; anything else skips the wins update entirely (the
-        # thug side still rates -- matches_excluded_no_winner stays 0).
+        # Determined team win -> S = 1/0 by side. Since v21 draws and
+        # undetermined matches never reach here (match-level exclusions);
+        # the else branch is a guard.
         winner_block = (m.get("winner") or {})
         wins_decided_by = winner_block.get("decided_by")
         wins_winner_team = winner_block.get("team")
@@ -1671,10 +1698,8 @@ def _rating_pass(
                 t = 1 if 1 <= slot <= 5 else (2 if 6 <= slot <= 10 else None)
             wins_row_team[j] = t
         wins_s_by_team: dict[int, float] | None = None
-        if wins_decided_by == "draw":
-            wins_s_by_team = {1: 0.5, 2: 0.5}
-        elif (wins_decided_by in WINS_DETERMINED_DECIDED_BY
-              and wins_winner_team in (1, 2)):
+        if (wins_decided_by in WINS_DETERMINED_DECIDED_BY
+                and wins_winner_team in (1, 2)):
             wins_s_by_team = {wins_winner_team: 1.0, 3 - wins_winner_team: 0.0}
         else:
             wins_skipped_undetermined += 1
@@ -2035,6 +2060,8 @@ def _rating_pass(
         # v15: host-attested GAME_CANCELLED matches (see the match-level
         # gate above). 0 for the entire pre-v3 corpus.
         "matches_excluded_cancelled":        excluded_cancelled,
+        # v21: attested / adjudicated draws (excluded like cancellations).
+        "matches_excluded_draw":             excluded_draw,
         "matches_excluded_void":             excluded_void,
         # v2.5: row-level (not match-level) exclusion counters. A row
         # hitting both flags is counted in both keys. Key naming

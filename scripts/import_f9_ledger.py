@@ -78,8 +78,10 @@ REGISTRY_PATH = PROJECT_ROOT / "data" / "map-registry.json"
 PROVIDER_NAME = "F9bomber"
 PROVIDER_URL = "https://f9bomber.com"
 
-# Locked gate constants (mirror scripts/elo.py's ELO_MIN_DURATION_SEC).
-MIN_DURATION_SEC = 240
+# Locked gate constants. MIN_DURATION_SEC mirrors scripts/elo.py's
+# ELO_MIN_DURATION_SEC: 0 since 2026-11-08, so the gate only rejects rows
+# with no recorded time (x_nodur).
+MIN_DURATION_SEC = 0
 THUGS_PER_SIDE = (2, 3, 4)          # 3v3 / 4v4 / 5v5 with commanders
 OVERLAP_DAY_TOLERANCE = 1           # F9 dates are US-local; ours are UTC
 OVERLAP_JACCARD_MIN = 0.4

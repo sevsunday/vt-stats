@@ -150,3 +150,16 @@ log-loss 0.622.
 badge (`decided_by: "adjudicated"`). The review was rule-level (this
 memo), not per-match; each entry's `note` field carries the mechanical
 provenance for anyone auditing the store.
+
+## Amendment (2026-11-08): no minimum length
+
+Operator decision: the 240 s floor is removed from every ladder, so the
+eligibility row's `duration >= 240s` becomes "duration recorded"
+(`MIN_DURATION_SEC = 0` in `scripts/import_f9_ledger.py`; rows with no
+time still drop as `x_nodur`). Re-importing the same sheet adds three
+duels that pass every other gate and pair with no recording: row 896
+(2026-02-17, Sahara, 212 s, Maverick beat F9bomber), row 1066
+(2026-04-04, Cracked, 228 s, VTrider beat Blue Banana) and row 1069
+(2026-04-05, Oasis, 228 s, VTrider beat Blue Banana). VTSR-C goes to
+`CMDR_ELO_SCHEMA_VERSION` 13 together with the recorded short games
+that scripts/elo.py now rates.

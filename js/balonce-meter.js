@@ -101,11 +101,22 @@
   const DISADVANTAGE_PROB = 0.60;
 
   /**
-   * The ONE `exclusion_reason` that still gets a card, rendered as a
-   * what-if. See the gate in `joinMatch` for why widening this set would
-   * be a mistake.
+   * The `exclusion_reason`s that still get a card, rendered as a what-if:
+   * games that cleared the lobby gates but whose result does not rate.
+   * See the gate in `joinMatch` for why the other reasons stay hidden.
    */
-  const HYPOTHETICAL_REASON = 'cancelled';
+  const HYPOTHETICAL_REASONS = new Set(['cancelled', 'draw']);
+
+  /** How a what-if card names the reason the match was not rated. */
+  function notRatedWord(joined) {
+    return joined.exclusionReason === 'draw' ? 'draw' : 'cancelled';
+  }
+
+  function notRatedSentence(joined) {
+    return joined.exclusionReason === 'draw'
+      ? 'The match ended in a draw, and draws are not rated'
+      : 'The game was cancelled';
+  }
 
   const CMDR_HISTORY_URL_CANDIDATES = [
     'data/processed/elo_commander_history.json',
@@ -581,21 +592,20 @@
     // lobby, so there is nothing honest to show.
     if (!entry) return { available: false };
 
-    // A host-cancelled match is a real game that got interrupted, and
-    // everything that was true BEFORE it is untouched by the crash: the
+    // A host-cancelled or drawn match is a real game whose result does
+    // not rate, and everything that was true BEFORE it still holds: the
     // ratings both sides brought, the handicap, and what the duel was
     // worth. So it renders as a WHAT-IF instead of hiding.
     //
-    // Deliberately scoped to `cancelled` and nothing else. The
-    // match-level gates in scripts/elo.py are an if/elif chain testing
-    // player count, then duration, then cancellation -- so `cancelled`
-    // already implies >= ELO_MIN_PLAYER_COUNT players and
-    // >= ELO_MIN_DURATION_SEC seconds. A 30-second rage-quit lands in
-    // `short_duration` and gets nothing, for free.
+    // Deliberately scoped to `cancelled` and `draw`. The match-level gates
+    // in scripts/elo.py are an if/elif chain testing player count, then
+    // cancellation, then draw -- so both already imply
+    // >= ELO_MIN_PLAYER_COUNT players. A match with no recorded winner
+    // (`no_winner`) gets nothing: there is no result to frame.
     const exclusionReason = entry.match_excluded
       ? (entry.exclusion_reason || 'unknown')
       : null;
-    const hypothetical = exclusionReason === HYPOTHETICAL_REASON;
+    const hypothetical = HYPOTHETICAL_REASONS.has(exclusionReason);
     if (entry.match_excluded && !hypothetical) return { available: false };
     if (!hypothetical && !(entry.deltas || []).length) {
       return { available: false };
@@ -658,7 +668,7 @@
       perTeam[team].push({ delta: d, row });
     }
 
-    // A cancelled match has no real deltas, but scripts/elo.py scores it
+    // A cancelled or drawn match has no real deltas, but scripts/elo.py scores it
     // in the shadow and those rows carry the same
     // {before, performance, expected, axis_contributions} shape — so every
     // team-level helper below works on them unchanged. `would_delta` is
@@ -959,8 +969,8 @@
     // them, and the reader has to know that before reading any further.
     const chip = joined.hypothetical
       ? `<span class="vt-balonce-notrated" data-bs-toggle="tooltip" data-bs-placement="top"
-           title="The host recorded this match as cancelled, so it is excluded from VTSR-T and the commander ladder. The ratings below are the real ones both sides brought into it \u2014 only the outcome is missing.">
-           <i class="bi bi-slash-circle me-1" aria-hidden="true"></i>Not rated \u00b7 cancelled</span>`
+           title="${esc(notRatedSentence(joined))}, so it is excluded from VTSR-T and the commander ladder. The ratings below are the real ones both sides brought into it \u2014 only a rated result is missing.">
+           <i class="bi bi-slash-circle me-1" aria-hidden="true"></i>Not rated \u00b7 ${esc(notRatedWord(joined))}</span>`
       : '';
 
     return `
@@ -979,10 +989,10 @@
       </div>`;
   }
 
-  // ---- Zone 2a: what-if (cancelled matches) ------------------------
+  // ---- Zone 2a: what-if (cancelled or drawn matches) ---------------
 
   /**
-   * Both branches of a cancelled match, per commander: the rating each
+   * Both branches of a cancelled or drawn match, per commander: the rating each
    * would have carried out of it had it been scored either way.
    *
    * A real duel hands us `k` and `expected`; a what-if has neither, so
@@ -1043,16 +1053,16 @@
           <h6 class="vt-balonce-zone-title">What was at stake</h6>
         </div>
         <div class="vt-balonce-whatif-note">
-          Neither branch happened. The game was cancelled, so no commander
-          rating moved and nobody's VTSR-T changed \u2014 this is only what
-          the result would have been worth.
+          Neither branch happened. ${esc(notRatedSentence(joined))}, so no
+          commander rating moved and nobody's VTSR-T changed \u2014 this is
+          only what a win or a loss would have been worth.
         </div>
         ${body}
       </div>`;
   }
 
   /**
-   * "How it was going" — the shadow read on a cancelled match.
+   * "How it was going" — the shadow read on a cancelled or drawn match.
    *
    * The result was lost, but the VTSR-T match score still measured the whole
    * game, so this answers the question the crash left hanging: who was
@@ -1077,7 +1087,7 @@
         : diff < -0.05 ? 'was under-performing'
           : 'was playing to form';
       return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Mean of this side\u2019s players: what the VTSR-T match score (share of enemy damage) measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
+        title="Mean of this side\u2019s players: what the VTSR-T match score (share of enemy damage) measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was not rated.">
         <span class="vt-balonce-perf-team">${phrase}</span>
         <span class="vt-balonce-perf-verdict">${verdict}</span>
         <span class="vt-mono">${fmtSigned(diff, 2)}</span>
@@ -1138,7 +1148,7 @@
           <h6 class="vt-balonce-zone-title">How it was going</h6>
         </div>
         <div class="vt-balonce-whatif-note">
-          The result was lost, but the whole game was still recorded. This is
+          The result does not rate, but the whole game was still recorded. This is
           what the VTSR-T match score measured over those
           ${Math.round((joined.match.duration_sec || 0) / 60)} minutes \u2014
           measured, never applied.
@@ -1175,14 +1185,6 @@
    * Upset starts only when the favorite was at 70% or more.
    */
   function outcomeVerdict(joined) {
-    if (joined.isDraw) {
-      return {
-        key: 'draw',
-        label: 'Draw',
-        icon: 'bi-dash-circle',
-        tip: 'The match was recorded as a draw. Both commanders scored half a point.',
-      };
-    }
     if (!joined.winnerTeam) {
       return {
         key: 'unknown',
@@ -1501,9 +1503,9 @@
   // exclude it and the main join is unavailable. The separate 2v2
   // ladders carry the read instead: gauge and verdict from the stored
   // win/loss expectation, the commander and thug win/loss moves, and the
-  // thugs' performance duel. An undecided game moved only the performance
-  // ladder, so it shows that part alone. VTSR-2v2T is not VTSR-T, so its
-  // numbers are printed.
+  // thugs' performance duel. Only games with a recorded winner are rated
+  // (ELO_2V2_SCHEMA_VERSION 4). VTSR-2v2T is not VTSR-T, so its numbers
+  // are printed.
 
   function join2v2(currentData, g) {
     const sides = g.sides || {};
@@ -1601,8 +1603,7 @@
       const fav = favoriteOf(j.probT1);
       const pair = (s) => esc(`${(j.commanders[s] || {}).name || '?'} and ${(j.thugs[s] || {}).name || '?'}`);
       let line;
-      if (j.isDraw) line = 'The teams drew; every win/loss rating scored half a point.';
-      else if (!fav.team || fmtPct(fav.prob) === '50%') line = `${pair(win)} won a game the ratings called even.`;
+      if (!fav.team || fmtPct(fav.prob) === '50%') line = `${pair(win)} won a game the ratings called even.`;
       else if (fav.team === win) line = `${pair(win)} were favored (${fmtPct(fav.prob)}) and won.`;
       else line = `${pair(win)} won as the underdog (${fmtPct(1 - fav.prob)}).`;
       const chips = [];
@@ -1756,7 +1757,7 @@
     }
 
     // Team panels are first. Gauge + verdict sit under them, and how it
-    // played out (or the cancelled what-if) sits under that.
+    // played out (or the cancelled / draw what-if) sits under that.
     read.innerHTML = joined.hypothetical
       ? zonePrematchHtml(joined)
       : [zonePrematchHtml(joined), zoneVerdictHtml(joined)].join('');

@@ -647,7 +647,7 @@
     const winRateStr = winN > 0 ? `${Math.round(((winW + 0.5 * winD) / winN) * 100)}%` : '\u2014';
     const winRecordStr = winD > 0 ? `${winW}\u2013${winL}\u2013${winD}` : `${winW}\u2013${winL}`;
     const winRateTip = winN > 0
-      ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Draws count as half. Camera-pod, partial, and idle rows are left out, and matches with no winner are left out. This does not move VTSR-T.`
+      ? `${winRecordStr} \u00b7 ${winN} decided rated ${winN === 1 ? 'match' : 'matches'}. How often this player's team won. Camera-pod, partial, and idle rows are left out; only matches with a recorded winner are rated. This does not move VTSR-T.`
       : 'No decided rated matches';
 
     const peakBand = VTSRDisplay.rawBandFor(r.peak_vtsr || r.vtsr);
@@ -656,7 +656,7 @@
       ? `Highest band reached: ${peakBand ? peakBand.label : ''}, at ${peakAt}`
       : `Highest band reached: ${peakBand ? peakBand.label : ''}`;
 
-    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} \u00b7 excludes matches with <6 players or <4 min duration`;
+    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} \u00b7 excludes matches with <6 players or no recorded winner`;
 
     const detailHtml = buildVtsrDetailPanel(r, careerRow);
     const progressChip = showProgress ? vtsrProgressChipHtml(r, elo) : '';
@@ -1224,7 +1224,7 @@
       ${renderCmdrTableHtml('vtsr-c-table', 'vtsr-c-tbody', ranked, c, true)}
       ${unrankedHtml}
       <p class="text-muted small mb-0">
-        ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
+        Matches with no recorded winner, and draws, are not rated.
       </p>`;
 
     const $credit = document.getElementById('vtsr-c-f9-credit');
@@ -2320,7 +2320,7 @@
         label: 'Rated matches', value: String(L.rated_match_count ?? '\u2014'),
         badge: badge('sample', L.rated_match_count),
         caption: `Across ${L.players_total ?? '?'} players. Every number below comes from re-checking the rating against this corpus on each pipeline run.`,
-        tech: 'Corpus gates: a match is rated only when it has \u22656 players and runs \u22654 minutes.',
+        tech: 'Corpus gates: a match is rated only when it has \u22656 players and a recorded winner (host result, recycler/factory loss, or reviewer sign-off). Draws and match length do not count.',
       },
       {
         label: 'Self-consistency', value: (L.self_consistency_rho != null) ? L.self_consistency_rho.toFixed(2) : '\u2014',

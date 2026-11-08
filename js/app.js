@@ -6149,8 +6149,11 @@
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
                        : idx.exclusion_reason === 'short_side'       ? 'a side had fewer than 3 players'
-                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
+                       : idx.exclusion_reason === 'short_duration'   ? 'too short under an older length rule'
                        : idx.exclusion_reason === 'void'             ? 'voided — this game does not count'
+                       : idx.exclusion_reason === 'no_winner'        ? 'no winner was recorded'
+                       : idx.exclusion_reason === 'draw'             ? 'draws are not rated'
+                       : idx.exclusion_reason === 'cancelled'        ? 'the host cancelled it'
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
