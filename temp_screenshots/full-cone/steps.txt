@@ -1,0 +1,37 @@
+If you are planning to host games, it is highly recommended you optimize your router settings for "Full Cone" connections. Full Cone is preferred over the Symmetric `NAT_TYPE` because [enter layman explanation here].
+
+NOTE: The steps below are simplified on purpose, and intended for Windows 11 systems. You will need to look up your own router's documentation to find the equivalent settings. If you aren't sure about anything outlined below, Google or your favorite AI tool can walk you through your specific setup if you feed it screenshots and these steps.
+
+# Set a Static IP for your PC
+
+1. Login to your router's configuration interface. For most routers, this will involve entering an IP like `http://192.168.100.1` into your browser.
+
+2. Find the MAC Address of your PC. You can do this two ways:
+
+  A. If your PC has a unique name, look for a "client list" in your router's web management console. Your PC should be listed with its MAC Address.
+
+  B. Open "Command Prompt" in Windows and enter `ipconfig /all`. Look for a field called "Physical Address" and note its value. If it uses hyphens instead of decimal points, you may need to convert it depending on your router. 
+
+3. Assign a Static IP to your PC using the MAC Address. This may vary depending on if you use Wi-Fi or Ethernet. 
+
+[step-1.png]
+
+
+# Forward Ports
+
+Once your static IP is assigned to your PC, you'll need to forward your Battlezone ports:
+
+1. Find the port forwarding section in your router settings.
+
+2. Set up a new port forwarding rule:
+
+  A. Name: Call the rule something like "Battlezone" or "BZCC"
+  B. Type: Use `UDP` or `Both` 
+  C. Ports: set ALL port values (e.g. Inbound, Outbound) to `17770`
+  D. IP: Use the static IP you set earlier
+
+[step-2.png]
+
+3. Host a game. You should now see a message in the lobby mentioning "Full Cone" which indicates success!
+
+[step-3.png]

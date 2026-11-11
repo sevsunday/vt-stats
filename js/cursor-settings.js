@@ -10,9 +10,11 @@
  *   1. reads settings from localStorage (key `vt.cursor.settings.v1`),
  *   2. injects a gear dropdown as the last child of `.vt-nav-menu` (the one
  *      DOM anchor present in all shells + templates). The panel always
- *      starts with a Docs row (href from this script's URL), then an
- *      optional "This page" section that relocates `[data-vt-page-control]`
- *      nodes (Share / Live sync / About / ODF Shortcuts), then Custom cursor.
+ *      starts with an About row opening the shared #about-modal (injected
+ *      here when the page has none; source repos, then Docs with its href
+ *      from this script's URL), then an optional "This page" section that
+ *      relocates `[data-vt-page-control]` nodes (Share / Live sync /
+ *      Replay quality / ODF Shortcuts), then Custom cursor.
  *   3. creates a fixed overlay <div> that plays the HD sprite (64 frames) via a
  *      CSS steps(64) keyframe (continuous spin, like in-game) and follows the
  *      mouse with the comet-tip hotspot pinned.
@@ -213,11 +215,57 @@
     return 'docs/';
   }
 
-  function isDocsPage() {
-    const parts = location.pathname.replace(/\/+$/, '').split('/');
-    const last = parts.pop() || '';
-    const parent = parts.pop() || '';
-    return (last === 'docs') || (parent === 'docs' && last === 'index.html');
+  function aboutEntryHtml(label, href, icon, name, desc, external) {
+    const target = external ? ' target="_blank" rel="noopener noreferrer"' : '';
+    const arrow = external ? '<i class="bi bi-box-arrow-up-right ms-2 small"></i>' : '';
+    return `
+          <div class="vt-about-entry">
+            <div class="stat-label vt-about-label mb-1">${label}</div>
+            <a href="${href}"${target} class="d-inline-flex align-items-center">
+              <i class="bi ${icon} me-2"></i>${name}${arrow}
+            </a>
+            <div class="small text-muted">${desc}</div>
+          </div>`;
+  }
+
+  // One About modal for every shell, so Docs stays reachable site-wide.
+  function ensureAboutModal() {
+    if (document.getElementById('about-modal')) return;
+    const html = `
+  <div class="modal fade" id="about-modal" tabindex="-1" aria-labelledby="about-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="about-modal-title">
+            <i class="bi bi-info-circle me-2"></i>About VT Stats
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3 small text-muted">
+            VT Stats is a static dashboard for Battlezone: Combat Commander match statistics,
+            built on top of VT's protobuf-based stats collector.
+          </p>
+          ${aboutEntryHtml('Source repository', 'https://github.com/sevsunday/vt-stats', 'bi-github',
+            'sevsunday/vt-stats', "This website's source code.", true)}
+          ${aboutEntryHtml("Stats collector (VT's repo)", 'https://github.com/VTrider/statsgate', 'bi-github',
+            'VTrider/statsgate',
+            'In-game client that captures match data and writes the <code>.binpb</code> sessions this dashboard consumes.', true)}
+          ${aboutEntryHtml('Game session data', 'https://github.com/Nielk1/MultiplayerSessionList', 'bi-github',
+            'Nielk1/MultiplayerSessionList',
+            'Live Battlezone lobby list. <code>bz2api.js</code> used to query the RakNet server directly and now reads this API instead.', true)}
+          ${aboutEntryHtml('Session client', 'https://sevsunday.github.io/bz2api.js/', 'bi-braces-asterisk',
+            'bz2api.js', 'In-browser client that turns that API into the Tools and Game Watch session cards.', true)}
+          ${aboutEntryHtml('Documentation', resolveDocsHref(), 'bi-book',
+            'Docs', 'Data dictionary and developer guide.', false)}
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
   }
 
   function hideDropdown(btn) {
@@ -276,22 +324,21 @@
     if (!menu) return;
     if (menu.querySelector('.vt-settings-dropdown')) return; // idempotent
 
-    const onDocs = isDocsPage();
-    const docsHref = resolveDocsHref();
+    ensureAboutModal();
 
     const wrap = document.createElement('div');
     wrap.className = 'dropdown vt-settings-dropdown';
     wrap.innerHTML = `
-      <button class="vt-nav-icon-btn${onDocs ? ' active' : ''}" type="button" data-bs-toggle="dropdown"
-              data-bs-auto-close="outside" title="Settings" aria-label="Settings"
-              ${onDocs ? 'aria-current="page"' : ''}>
+      <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+              data-bs-auto-close="outside" title="Settings" aria-label="Settings">
         <i class="bi bi-gear"></i><span class="vt-nav-label ms-2">Settings</span>
       </button>
       <div class="dropdown-menu dropdown-menu-end vt-settings-panel">
-        <a class="vt-settings-navitem${onDocs ? ' active' : ''}" id="vt-settings-docs"
-           href="${docsHref}"${onDocs ? ' aria-current="page"' : ''}>
-          <i class="bi bi-book"></i><span class="vt-settings-navitem-label">Docs</span>
-        </a>
+        <button type="button" class="vt-settings-navitem" id="vt-settings-about"
+                data-bs-toggle="modal" data-bs-target="#about-modal"
+                title="About / source repositories / docs">
+          <i class="bi bi-info-circle"></i><span class="vt-settings-navitem-label">About</span>
+        </button>
         <div class="dropdown-divider vt-settings-divider"></div>
         <div class="vt-settings-page-slot"></div>
         <div class="vt-settings-section-title">

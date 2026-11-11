@@ -15,8 +15,8 @@ critique/decisions/vtsr-1v1-ladder.md).
 
 Eligible game: not void; exactly one non-campod leaderboard row per
 side (slots 1-5 / 6-10); duration >= ONE_V_ONE_MIN_DURATION_SEC;
-winner.decided_by in DETERMINED_DECIDED_BY with team 1/2 (or a draw,
-0.5 each). A low-activity row does not void the game -- the outcome is
+winner.decided_by in DETERMINED_DECIDED_BY with team 1/2. Draws are not
+rated (v2). A low-activity row does not void the game -- the outcome is
 the label. Same-id dual recordings rate once.
 
 Math: classic Elo, scale 400, anchor 1500, no floor. Each game uses ONE
@@ -52,7 +52,8 @@ ONE_V_ONE_K_FLOOR = 20.0
 ONE_V_ONE_PROVISIONAL_PRIOR = 5.0
 ONE_V_ONE_PROVISIONAL_THRESHOLD = 5
 ONE_V_ONE_LOGISTIC_SCALE = 400.0
-ONE_V_ONE_MIN_DURATION_SEC = 240
+# 0 = no length floor (the 240 s gate was dropped 2026-11-08).
+ONE_V_ONE_MIN_DURATION_SEC = 0
 
 # Display-only ranked-table gate. Do not lower it to fill the table.
 ONE_V_ONE_LADDER_MIN_GAMES = 5
@@ -61,7 +62,9 @@ COMEBACK_GAMES_REQUIRED = 3
 
 DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
-ELO_1V1_SCHEMA_VERSION = 1
+# v2: draws are not rated (they scored 0.5 each). No draw had been rated,
+# so ratings are unchanged on adoption.
+ELO_1V1_SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +138,7 @@ def compute_1v1_elo(all_match_data: list[dict],
         "void": 0,
         "short": 0,
         "cancelled": 0,
+        "draw": 0,
         "undetermined": 0,
         "duplicate_recording": 0,
     }
@@ -162,9 +166,9 @@ def compute_1v1_elo(all_match_data: list[dict],
             skipped["cancelled"] += 1
             continue
         if decided_by == "draw":
-            scores = {1: 0.5, 2: 0.5}
-            outcome = "draw"
-        elif decided_by in DETERMINED_DECIDED_BY and team in (1, 2):
+            skipped["draw"] += 1
+            continue
+        if decided_by in DETERMINED_DECIDED_BY and team in (1, 2):
             scores = {team: 1.0, 3 - team: 0.0}
             outcome = f"team{team}"
         else:
@@ -309,6 +313,7 @@ def compute_1v1_elo(all_match_data: list[dict],
         "skipped_void": skipped["void"],
         "skipped_short": skipped["short"],
         "skipped_cancelled": skipped["cancelled"],
+        "skipped_draw": skipped["draw"],
         "skipped_undetermined": skipped["undetermined"],
         "skipped_duplicate_recording": skipped["duplicate_recording"],
     }

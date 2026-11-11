@@ -1,0 +1,227 @@
+/*
+ * VT Stats - How-to guide pages (/beta/, /ports/)
+ *
+ * Step lists, uniform screenshot frames, the click-to-expand lightbox and
+ * the masked copy-to-clipboard row. Loaded after vtstats-theme.css.
+ */
+
+/* ---------- Step lists ---------- */
+
+.vt-guide-steps {
+    padding-left: 1.5rem;
+    margin-bottom: 0;
+}
+
+.vt-guide-steps > li {
+    margin-bottom: 1.5rem;
+}
+
+.vt-guide-steps > li:last-child {
+    margin-bottom: 0;
+}
+
+.vt-guide-steps > li::marker {
+    color: var(--kb-primary);
+    font-weight: 600;
+}
+
+.vt-guide-substeps {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+}
+
+.vt-guide-substeps > li {
+    margin-bottom: 0.4rem;
+}
+
+.vt-guide-section-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0 0 1.25rem;
+    color: var(--kb-primary);
+}
+
+.vt-guide-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+/* ---------- Screenshot frames ---------- */
+
+.vt-guide-figure {
+    margin: 0.75rem 0 0;
+}
+
+.vt-guide-figure figcaption {
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--kb-text-muted);
+}
+
+/* Every shot gets the same frame; the image is fitted inside it and never
+   upscaled, so small crops stay sharp and the frames line up. */
+.vt-guide-shot-frame {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 220px;
+    padding: 0.75rem;
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 10px;
+    box-shadow: var(--vt-shadow-elevation-1);
+    cursor: zoom-in;
+    overflow: hidden;
+    transition: border-color var(--vt-anim-duration, 0.2s) ease;
+}
+
+.vt-guide-shot-frame img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    border-radius: 4px;
+}
+
+.vt-guide-shot-frame:hover {
+    border-color: var(--kb-primary);
+}
+
+.vt-guide-shot-frame:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
+}
+
+.vt-guide-shot-hint {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--kb-text-primary);
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    opacity: 0;
+    transition: opacity var(--vt-anim-duration, 0.2s) ease;
+    pointer-events: none;
+}
+
+.vt-guide-shot-frame:hover .vt-guide-shot-hint,
+.vt-guide-shot-frame:focus-visible .vt-guide-shot-hint {
+    opacity: 1;
+}
+
+@media (max-width: 767.98px) {
+    .vt-guide-shot-frame {
+        height: 170px;
+    }
+
+    /* No hover on touch: keep the expand badge visible. */
+    .vt-guide-shot-hint {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-guide-shot-frame,
+    .vt-guide-shot-hint {
+        transition: none;
+    }
+}
+
+/* ---------- Lightbox ---------- */
+
+.vt-guide-lightbox-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--kb-bg-subtle);
+}
+
+.vt-guide-lightbox-img {
+    display: block;
+    max-width: 100%;
+    max-height: 80vh;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+}
+
+/* ---------- Copy row ---------- */
+
+.vt-guide-copy-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.vt-guide-copy-mask {
+    display: inline-block;
+    min-width: calc(14ch + 14 * 0.15em + 1.2rem);
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.15em;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+    color: var(--kb-text-secondary);
+    user-select: none;
+}
+
+.vt-guide-copy-mask .is-scrambling {
+    color: var(--kb-text-muted);
+}
+
+.vt-guide-copy-mask .is-locked {
+    color: var(--kb-primary);
+    font-weight: 600;
+}
+
+.vt-guide-copy-mask.is-cracked {
+    user-select: text;
+    animation: vt-guide-cracked 0.6s ease-out;
+}
+
+@keyframes vt-guide-cracked {
+    0% {
+        border-color: var(--kb-primary);
+        box-shadow: 0 0 0 0 color-mix(in oklab, var(--kb-primary) 60%, transparent);
+    }
+    100% {
+        border-color: var(--kb-border-subtle);
+        box-shadow: 0 0 0 0.5rem color-mix(in oklab, var(--kb-primary) 0%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-guide-copy-mask.is-cracked {
+        animation: none;
+    }
+}
+
+.vt-guide-copy-fallback {
+    max-width: 22rem;
+    margin-top: 0.75rem;
+}
+
+.vt-guide-copy-fallback .form-control {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.05em;
+}
+
+.vt-guide-copy-fallback-hint {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--kb-text-muted);
+}

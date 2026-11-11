@@ -133,15 +133,22 @@
             <ul class="dropdown-menu dropdown-menu-end">
               <li><a class="dropdown-item" href="tools/" data-vt-tools-item
                      title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
-                <i class="bi bi-controller me-2"></i>Tools
+                <i class="bi bi-controller me-2"></i>Live Lobby
               </a></li>
               <li><a class="dropdown-item" href="time/">
                 <i class="bi bi-clock me-2"></i>Discord Time
               </a></li>
-              <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item" href="record/"
                      title="How to record your own stats">
-                <i class="bi bi-record-circle me-2"></i>Record
+                <i class="bi bi-record-circle me-2"></i>Record Stats
+              </a></li>
+              <li><a class="dropdown-item" href="beta/"
+                     title="Switch to the devtest beta to join VSR games">
+                <i class="bi bi-steam me-2"></i>Beta Versions
+              </a></li>
+              <li><a class="dropdown-item" href="ports/"
+                     title="Router setup for hosting games (Full Cone NAT)">
+                <i class="bi bi-router me-2"></i>Port Forwarding
               </a></li>
             </ul>
           </div>
@@ -153,13 +160,8 @@
           </button>
           <button class="vt-nav-icon-btn" id="live-sync-toggle" hidden data-vt-page-control
                   title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
-                  aria-pressed="false">
+                  aria-pressed="true">
             <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
-          </button>
-          <button class="vt-nav-icon-btn" id="about-btn" type="button" hidden data-vt-page-control
-                  data-bs-toggle="modal" data-bs-target="#about-modal"
-                  title="About / source repositories" aria-label="About / source repositories">
-            <i class="bi bi-info-circle"></i>
           </button>
           <button class="vt-nav-icon-btn" id="replay-quality-btn" type="button" hidden data-vt-page-control
                   data-bs-toggle="modal" data-bs-target="#replay-quality-modal"
@@ -1396,77 +1398,6 @@
         <div class="modal-footer border-top">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
           <button type="button" class="btn btn-primary btn-sm" id="replay-quality-save">Save</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- About / Source Repos Modal -->
-  <div class="modal fade" id="about-modal" tabindex="-1" aria-labelledby="about-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="about-modal-title">
-            <i class="bi bi-info-circle me-2"></i>About VT Stats
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="mb-3" style="color: var(--kb-text-muted); font-size: 0.9rem;">
-            VT Stats is a static dashboard for Battlezone: Combat Commander match statistics,
-            built on top of VT's protobuf-based stats collector.
-          </p>
-
-          <div class="mb-4">
-            <div class="stat-label mb-1" style="font-size: 0.75rem;">Source repository</div>
-            <a href="https://github.com/sevsunday/vt-stats" target="_blank" rel="noopener noreferrer"
-               class="d-inline-flex align-items-center">
-              <i class="bi bi-github me-2"></i>sevsunday/vt-stats
-              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
-            </a>
-            <div class="small" style="color: var(--kb-text-muted);">
-              This website's source code.
-            </div>
-          </div>
-
-          <div class="mb-4">
-            <div class="stat-label mb-1" style="font-size: 0.75rem;">Stats collector (VT's repo)</div>
-            <a href="https://github.com/VTrider/statsgate" target="_blank" rel="noopener noreferrer"
-               class="d-inline-flex align-items-center">
-              <i class="bi bi-github me-2"></i>VTrider/statsgate
-              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
-            </a>
-            <div class="small" style="color: var(--kb-text-muted);">
-              In-game client that captures match data and writes the <code>.binpb</code> sessions this dashboard consumes.
-            </div>
-          </div>
-
-          <div class="mb-4">
-            <div class="stat-label mb-1" style="font-size: 0.75rem;">Game session data</div>
-            <a href="https://github.com/Nielk1/MultiplayerSessionList" target="_blank" rel="noopener noreferrer"
-               class="d-inline-flex align-items-center">
-              <i class="bi bi-github me-2"></i>Nielk1/MultiplayerSessionList
-              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
-            </a>
-            <div class="small" style="color: var(--kb-text-muted);">
-              Live Battlezone lobby list. <code>bz2api.js</code> used to query the RakNet server directly and now reads this API instead.
-            </div>
-          </div>
-
-          <div class="mb-0">
-            <div class="stat-label mb-1" style="font-size: 0.75rem;">Session client</div>
-            <a href="https://sevsunday.github.io/bz2api.js/" target="_blank" rel="noopener noreferrer"
-               class="d-inline-flex align-items-center">
-              <i class="bi bi-braces-asterisk me-2"></i>bz2api.js
-              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
-            </a>
-            <div class="small" style="color: var(--kb-text-muted);">
-              In-browser client that turns that API into the Tools and Game Watch session cards.
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>

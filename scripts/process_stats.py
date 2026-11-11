@@ -12077,18 +12077,19 @@ def main():
             json.dump(elo_history, f, indent=2, ensure_ascii=False)
         rated = elo_current.get("match_count", 0)
         excl_lpc = elo_current.get("matches_excluded_low_player_count", 0)
-        excl_dur = elo_current.get("matches_excluded_short_duration", 0)
+        excl_nw = elo_current.get("matches_excluded_no_winner", 0)
+        excl_draw = elo_current.get("matches_excluded_draw", 0)
         n_ratings = len(elo_current.get("ratings", []))
         print(f"VTSR-T: {elo_current_path.name} ({n_ratings} players · "
               f"{rated} rated matches · {excl_lpc} excluded low-player-count · "
-              f"{excl_dur} excluded short-duration)")
+              f"{excl_nw} excluded no-winner · {excl_draw} excluded draw)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T ({e}); skipping.")
 
     # ----- VTSR-C (commander rating, v1 -- experimental) -----
     # Win/loss ELO between the two commanders of every DETERMINED rated
-    # match (adjudicated / attested / clean_win / contested; draws score
-    # 0.5), with a team-strength handicap in the expected score built
+    # match (adjudicated / attested / clean_win / contested; draws are
+    # not rated), with a team-strength handicap in the expected score built
     # from the canonical elo_history deltas' pre-match `before` values.
     # Outcome-pure (alpha_c = 1) v1; separate ladder, separate files --
     # zero risk to compute_elo and zero changes to VTSR-T consumers.
@@ -12168,6 +12169,7 @@ def main():
         print(f"VTSR-2v2: {v2_current_path.name} "
               f"({v2_current.get('wl_games_rated', 0)} win/loss games · "
               f"{v2_current.get('perf_games_rated', 0)} performance duels · "
+              f"{v2_current.get('skipped_undetermined', 0)} undetermined · "
               f"{v2_current.get('skipped_inactive_player', 0)} inactive-player)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-2v2 ({e}); skipping.")

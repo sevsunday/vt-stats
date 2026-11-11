@@ -196,3 +196,30 @@ What this says:
 their VTSR-C. Point 1 is the case for it. Adopting it would change the
 frozen math, so it needs its own memo with a pre-registered test on
 games after the adoption date.
+
+## Amendment (2026-11-08): no minimum length
+
+Operator decision: the 240 s floor is removed from every ladder
+(`TWO_V_TWO_MIN_DURATION_SEC = 0`). Both eligibility lists above lose
+their `duration_sec >= 240` line; nothing else changes. No recorded
+strict 2v2 was under four minutes on that day, so no game was added
+and `ELO_2V2_SCHEMA_VERSION` stays 3.
+
+## Amendment (2026-11-08): only recorded winners rate
+
+Operator decision, applied to every ladder: a game rates only with a
+recorded team winner (`attested`, `clean_win`, `contested` or
+`adjudicated`). On these ladders that changes two things:
+
+1. A draw no longer scores 0.5 on the win/loss walk; it is skipped
+   (`skipped_draw`).
+2. The performance duel no longer rates games with no winner. It
+   needed no outcome by design, but the operator wants no unclear game
+   counted anywhere. Two recorded games drop
+   (`2026-05-16T21-25-56` Red Slope, `2026-05-24T01-11-02` Quarry 2),
+   counted in `skipped_undetermined`, which replaces
+   `wl_skipped_undetermined`.
+
+The pick-one rule is unaffected: it already counted determined games
+only. `ELO_2V2_SCHEMA_VERSION` 3 → 4; pre-v4 performance peaks are not
+comparable.

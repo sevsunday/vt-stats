@@ -75,7 +75,11 @@ SITE_URL = "https://vtstats.bz"
 # "Sort by" select (VTSR-T sort added).
 # v27 makes VTSR-T the default "Sort by" option and adds Net damage / match
 # (the automatic sort once the hub scope narrows).
-PLAYER_TEMPLATE_VERSION = 27
+# v28 reshapes the Tools dropdown (Live Lobby, Discord Time, Record,
+# Join VSR Games, Port Forwarding; no divider).
+# v29 renames two Tools items: Record -> Record Stats, Join VSR Games ->
+# Beta Versions.
+PLAYER_TEMPLATE_VERSION = 29
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

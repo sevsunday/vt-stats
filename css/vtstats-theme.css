@@ -565,6 +565,13 @@ body::before {
     box-shadow: var(--vt-shadow-elevation-2);
 }
 
+/* Topnav menus are solid: page content must never show through them. */
+.navbar .dropdown-menu {
+    background: var(--kb-bg-card) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
 /* Light mode: flip inset shadow from light edge to subtle dark edge */
 [data-mode="light"] .card {
     box-shadow: var(--vt-shadow-elevation-1),
@@ -3647,6 +3654,14 @@ body.vt-replay-expand-active .tab-content {
 
 @media (max-width: 767.98px) {
     /* -- Navbar collapsed menu -- */
+    /* The menus render inline inside the navbar here, so the navbar itself
+       goes solid while the collapse is open. */
+    .navbar:has(.navbar-collapse.show, .navbar-collapse.collapsing) {
+        background: var(--kb-bg-card) !important;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
     .navbar-collapse {
         flex-basis: 100%;
         margin-top: 0.5rem;
@@ -7374,6 +7389,19 @@ html.vt-cursor-active * {
     margin-top: 0.85rem;
     padding-top: 0.75rem;
     border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+
+/* About modal (injected site-wide by js/cursor-settings.js) */
+.vt-about-entry {
+    margin-bottom: 1.5rem;
+}
+
+.vt-about-entry:last-child {
+    margin-bottom: 0;
+}
+
+.vt-about-label {
+    font-size: 0.75rem;
 }
 
 .vt-settings-divider {

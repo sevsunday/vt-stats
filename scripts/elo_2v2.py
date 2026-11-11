@@ -26,9 +26,10 @@ exactly zero-sum. Anchor 1500, no floor, no seeding.
 Eligible games:
   * recorded strict 2v2s (scripts/match_format.py: two non-campod rows per
     side, each side's commander among them, all four active); not void,
-    not cancelled, at least TWO_V_TWO_MIN_DURATION_SEC. The win/loss walk
-    also needs a determined winner or a draw; the performance duel does
-    not, but skips games where both thugs dealt 0.
+    not cancelled, at least TWO_V_TWO_MIN_DURATION_SEC, and (v4) a
+    recorded team winner. Draws and unclear games are not rated on any
+    of the three ladders. The performance duel also skips games where
+    both thugs dealt 0.
 
 Recorded games only: F9bomber's 2v2 rows were removed by operator
 decision (memo amendment, 2026-10-27), and the activity clock reads the
@@ -61,7 +62,8 @@ TWO_V_TWO_PROVISIONAL_PRIOR = 5.0
 TWO_V_TWO_PROVISIONAL_THRESHOLD = 5
 TWO_V_TWO_LOGISTIC_SCALE = 400.0
 TWO_V_TWO_LAMBDA = 1.0
-TWO_V_TWO_MIN_DURATION_SEC = 240
+# 0 = no length floor (the 240 s gate was dropped 2026-11-08).
+TWO_V_TWO_MIN_DURATION_SEC = 0
 
 # Display-only ranked-table gate. Do not lower it to fill the table.
 TWO_V_TWO_LADDER_MIN_GAMES = 5
@@ -76,7 +78,10 @@ LADDERS = ("commander", "thug_wl", "thug_perf")
 # player-laid mine damage (match.schema_version 35). Pre-v3 peaks are not
 # comparable where that game was the peak. Measured max |d| 0.05, mean
 # |d| 0.02, 4 performance peaks moved, ladder order unchanged.
-ELO_2V2_SCHEMA_VERSION = 3
+# v4: a game rates only with a recorded team winner. The performance duel
+# used to rate undecided games, and draws scored 0.5 on win/loss; both
+# are now skipped. Pre-v4 performance peaks are not comparable.
+ELO_2V2_SCHEMA_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -227,11 +232,12 @@ def compute_2v2_elo(all_match_data: list[dict],
         "void": 0,
         "short": 0,
         "cancelled": 0,
+        "draw": 0,
+        "undetermined": 0,
         "inactive_player": 0,
         "duplicate_recording": 0,
         "identity_collision": 0,
     }
-    wl_undetermined = 0
     perf_no_damage = 0
     shape_seen = 0
 
@@ -258,6 +264,13 @@ def compute_2v2_elo(all_match_data: list[dict],
         if winner.get("decided_by") == "cancelled":
             skipped["cancelled"] += 1
             continue
+        if winner.get("decided_by") == "draw":
+            skipped["draw"] += 1
+            continue
+        if not (winner.get("decided_by") in DETERMINED_DECIDED_BY
+                and winner.get("team") in (1, 2)):
+            skipped["undetermined"] += 1
+            continue
         if match_id in seen_ids:
             skipped["duplicate_recording"] += 1
             continue
@@ -279,15 +292,8 @@ def compute_2v2_elo(all_match_data: list[dict],
         winner = m.get("winner") or {}
         decided_by = winner.get("decided_by")
         team = winner.get("team")
-        if decided_by == "draw":
-            scores = {1: 0.5, 2: 0.5}
-            outcome = "draw"
-        elif decided_by in DETERMINED_DECIDED_BY and team in (1, 2):
-            scores = {team: 1.0, 3 - team: 0.0}
-            outcome = f"team{team}"
-        else:
-            scores = None
-            outcome = None
+        scores = {team: 1.0, 3 - team: 0.0}
+        outcome = f"team{team}"
 
         keys = {s: {role: _key(*ids[s][role]) for role in ("commander", "thug")}
                 for s in (1, 2)}
@@ -325,40 +331,37 @@ def compute_2v2_elo(all_match_data: list[dict],
             }
 
         # Win/loss walk (commander + thug_wl).
-        if scores is not None:
-            for s in (1, 2):
-                cmdr_l.ensure(keys[s]["commander"])
-                twl_l.ensure(keys[s]["thug"])
-            c = {s: cmdr_l.rating[keys[s]["commander"]] for s in (1, 2)}
-            t = {s: twl_l.rating[keys[s]["thug"]] for s in (1, 2)}
-            e1 = win_chance(c[1], c[2], t[1], t[2])
-            expected = {1: e1, 2: 1.0 - e1}
-            kc = cmdr_l.k_game(keys[1]["commander"], keys[2]["commander"])
-            kt = twl_l.k_game(keys[1]["thug"], keys[2]["thug"])
-            dc1 = kc * (scores[1] - expected[1])
-            dt1 = kt * (scores[1] - expected[1])
-            for s in (1, 2):
-                sign = 1.0 if s == 1 else -1.0
-                ck, tk = keys[s]["commander"], keys[s]["thug"]
-                cb, ca = cmdr_l.apply(ck, sign * dc1, scores[s], expected[s], game_id, date)
-                tb, ta = twl_l.apply(tk, sign * dt1, scores[s], expected[s], game_id, date)
-                cmdr_l.record_result(ck, scores[s])
-                twl_l.record_result(tk, scores[s])
-                sides_out[str(s)]["commander"]["wl"] = {
-                    "before": round(cb, 2), "after": round(ca, 2), "delta": round(sign * dc1, 2)}
-                sides_out[str(s)]["thug"]["wl"] = {
-                    "before": round(tb, 2), "after": round(ta, 2), "delta": round(sign * dt1, 2)}
-            cmdr_l.games_rated += 1
-            twl_l.games_rated += 1
-            game["wl"] = {
-                "expected": {"1": round(expected[1], 4), "2": round(expected[2], 4)},
-                "score": {"1": scores[1], "2": scores[2]},
-                "k_commander": round(kc, 2),
-                "k_thug": round(kt, 2),
-                "lambda": TWO_V_TWO_LAMBDA,
-            }
-        else:
-            wl_undetermined += 1
+        for s in (1, 2):
+            cmdr_l.ensure(keys[s]["commander"])
+            twl_l.ensure(keys[s]["thug"])
+        c = {s: cmdr_l.rating[keys[s]["commander"]] for s in (1, 2)}
+        t = {s: twl_l.rating[keys[s]["thug"]] for s in (1, 2)}
+        e1 = win_chance(c[1], c[2], t[1], t[2])
+        expected = {1: e1, 2: 1.0 - e1}
+        kc = cmdr_l.k_game(keys[1]["commander"], keys[2]["commander"])
+        kt = twl_l.k_game(keys[1]["thug"], keys[2]["thug"])
+        dc1 = kc * (scores[1] - expected[1])
+        dt1 = kt * (scores[1] - expected[1])
+        for s in (1, 2):
+            sign = 1.0 if s == 1 else -1.0
+            ck, tk = keys[s]["commander"], keys[s]["thug"]
+            cb, ca = cmdr_l.apply(ck, sign * dc1, scores[s], expected[s], game_id, date)
+            tb, ta = twl_l.apply(tk, sign * dt1, scores[s], expected[s], game_id, date)
+            cmdr_l.record_result(ck, scores[s])
+            twl_l.record_result(tk, scores[s])
+            sides_out[str(s)]["commander"]["wl"] = {
+                "before": round(cb, 2), "after": round(ca, 2), "delta": round(sign * dc1, 2)}
+            sides_out[str(s)]["thug"]["wl"] = {
+                "before": round(tb, 2), "after": round(ta, 2), "delta": round(sign * dt1, 2)}
+        cmdr_l.games_rated += 1
+        twl_l.games_rated += 1
+        game["wl"] = {
+            "expected": {"1": round(expected[1], 4), "2": round(expected[2], 4)},
+            "score": {"1": scores[1], "2": scores[2]},
+            "k_commander": round(kc, 2),
+            "k_thug": round(kt, 2),
+            "lambda": TWO_V_TWO_LAMBDA,
+        }
 
         # Performance duel + recorded-not-scored context.
         e = {s: {role: _enemy_dealt(pair[s][role]) for role in ("commander", "thug")}
@@ -385,8 +388,7 @@ def compute_2v2_elo(all_match_data: list[dict],
                 sign = 1.0 if s == 1 else -1.0
                 pb, pa = tperf_l.apply(keys[s]["thug"], sign * dp1, pscore[s],
                                        pexp[s], game_id, date)
-                if scores is not None:
-                    tperf_l.record_result(keys[s]["thug"], scores[s])
+                tperf_l.record_result(keys[s]["thug"], scores[s])
                 sides_out[str(s)]["thug"]["perf"] = {
                     "before": round(pb, 2), "after": round(pa, 2),
                     "delta": round(sign * dp1, 2)}
@@ -471,10 +473,11 @@ def compute_2v2_elo(all_match_data: list[dict],
         "skipped_void": skipped["void"],
         "skipped_short": skipped["short"],
         "skipped_cancelled": skipped["cancelled"],
+        "skipped_draw": skipped["draw"],
+        "skipped_undetermined": skipped["undetermined"],
         "skipped_inactive_player": skipped["inactive_player"],
         "skipped_duplicate_recording": skipped["duplicate_recording"],
         "skipped_identity_collision": skipped["identity_collision"],
-        "wl_skipped_undetermined": wl_undetermined,
         "perf_skipped_no_damage": perf_no_damage,
     }
     current = dict(common)

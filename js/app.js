@@ -254,14 +254,23 @@
   }
 
   // --- Live URL Sync ---
-  // When off (default), URL writes from in-app state changes are suppressed so
-  // the browser URL stays clean. Incoming shared URLs still apply on load.
-  // When on, a user view change pushes a history entry (Back walks it).
+  // On by default: a user view change pushes a history entry (Back walks it).
   // The first load and setLiveSync(true) replace the current entry instead.
-  // Two one-time bypasses exist: setLiveSync(true) catches the URL up to
-  // current state on toggle-on, and showMatchNotFound clears stale bad-match
-  // URLs on error recovery.
-  let liveSyncEnabled = localStorage.getItem('vt-url-sync') === 'true';
+  // When the user turns it off, URL writes from in-app state changes are
+  // suppressed so the browser URL stays clean; incoming shared URLs still
+  // apply on load. Two one-time bypasses exist: setLiveSync(true) catches the
+  // URL up to current state on toggle-on, and showMatchNotFound clears stale
+  // bad-match URLs on error recovery.
+  // `vt-url-sync-default-on-v1` flips every existing visitor on exactly once
+  // (including an old stored 'false'); a later toggle-off is respected.
+  try {
+    if (!localStorage.getItem('vt-url-sync-default-on-v1')) {
+      localStorage.setItem('vt-url-sync', 'true');
+      localStorage.setItem('vt-url-sync-default-on-v1', '1');
+    }
+  } catch { /* private mode / storage blocked — default below still applies */ }
+  let liveSyncEnabled = true;
+  try { liveSyncEnabled = localStorage.getItem('vt-url-sync') !== 'false'; } catch { /* storage blocked */ }
   // User view changes pushState once the first match has loaded.
   // Boot canonicalization and setLiveSync(true) replace the landed entry.
   // historyWrites suppresses both while popstate is applying a URL.
@@ -6140,8 +6149,11 @@
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
                        : idx.exclusion_reason === 'short_side'       ? 'a side had fewer than 3 players'
-                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
+                       : idx.exclusion_reason === 'short_duration'   ? 'too short under an older length rule'
                        : idx.exclusion_reason === 'void'             ? 'voided — this game does not count'
+                       : idx.exclusion_reason === 'no_winner'        ? 'no winner was recorded'
+                       : idx.exclusion_reason === 'draw'             ? 'draws are not rated'
+                       : idx.exclusion_reason === 'cancelled'        ? 'the host cancelled it'
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Set up your router for hosting — VT Stats</title>
+  <meta name="description" content="Give your PC a static IP and forward Battlezone's UDP port 17770 so your lobby reports a Full Cone NAT and players can connect.">
+
+  <link rel="canonical" href="https://vtstats.bz/ports/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Set up your router for hosting — VT Stats">
+  <meta property="og:description" content="Give your PC a static IP and forward Battlezone's UDP port 17770 so your lobby reports a Full Cone NAT and players can connect.">
+  <meta property="og:url" content="https://vtstats.bz/ports/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/guides.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../weapons/"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Players and ratings">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
+                    data-bs-toggle="dropdown" data-bs-auto-close="true"
+                    data-vt-tools-link data-vt-tools-live="0" aria-current="page"
+                    title="Lobby tools and Discord timestamps"
+                    aria-label="Tools">
+              <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../tools/" data-vt-tools-item
+                     title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
+                <i class="bi bi-controller me-2"></i>Live Lobby
+              </a></li>
+              <li><a class="dropdown-item" href="../time/">
+                <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><a class="dropdown-item" href="../record/"
+                     title="How to record your own stats">
+                <i class="bi bi-record-circle me-2"></i>Record Stats
+              </a></li>
+              <li><a class="dropdown-item" href="../beta/"
+                     title="Switch to the devtest beta to join VSR games">
+                <i class="bi bi-steam me-2"></i>Beta Versions
+              </a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"
+                     title="Router setup for hosting games (Full Cone NAT)">
+                <i class="bi bi-router me-2"></i>Port Forwarding
+              </a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4 py-md-5 flex-grow-1">
+    <div class="row justify-content-center">
+      <div class="col-12 col-lg-10 col-xl-8">
+        <article class="card">
+          <div class="card-header">
+            <h1 class="h5 mb-0">
+              <i class="bi bi-router me-2"></i>Set up your router for hosting
+            </h1>
+          </div>
+          <div class="card-body">
+            <p class="mb-2">
+              If you are planning to host games, it is highly recommended you set up your router for
+              <strong>Full Cone</strong> connections. Full Cone is preferred over the Symmetric <code>NAT_TYPE</code>
+              because once your router forwards Battlezone's port, any player can reach your game through it.
+              Symmetric NAT gives each connection a different, unpredictable port which can sometimes cause issues.
+            </p>
+            <p class="small text-muted mb-3">
+              <i class="bi bi-info-circle me-1"></i>For the exact definitions, see
+              <a href="https://github.com/Nielk1/MultiplayerSessionList/blob/da517a3cdc669c2c61b7e8843603aaca92c885ab/MultiplayerSessionList/Plugins/BattlezoneCombatCommander/Model.cs#L48-L58"
+                 target="_blank" rel="noopener noreferrer">Nielk1's code notes<i class="bi bi-box-arrow-up-right ms-1 small"></i></a>.
+            </p>
+
+            <div class="alert alert-info small mb-0 py-2 px-3" role="note">
+              <i class="bi bi-info-circle me-1"></i>
+              The steps below are simplified on purpose and written for Windows 11. Look up your own router's
+              documentation to find the equivalent settings. If you aren't sure about anything here, Google or your
+              favorite AI tool can walk you through your specific setup if you give it screenshots and these steps.
+            </div>
+
+            <section class="vt-guide-section">
+              <h2 class="vt-guide-section-title">
+                <i class="bi bi-pc-display me-2"></i>Set a static IP for your PC
+              </h2>
+              <ol class="vt-guide-steps">
+                <li>
+                  Log in to your router's configuration interface. For most routers, this means entering an
+                  address like <code>http://192.168.100.1</code> into your browser.
+                </li>
+                <li>
+                  Find the MAC address of your PC. There are two ways to do this:
+                  <ol type="A" class="vt-guide-substeps">
+                    <li>
+                      If your PC has a unique name, look for a <strong>client list</strong> in your router's web
+                      management console. Your PC should be listed with its MAC address.
+                    </li>
+                    <li>
+                      Open <strong>Command Prompt</strong> in Windows and enter <code>ipconfig /all</code>.
+                      Look for the <strong>Physical Address</strong> field and note its value. If it uses hyphens
+                      instead of colons, you may need to convert it depending on your router.
+                    </li>
+                  </ol>
+                </li>
+                <li>
+                  Assign a static IP to your PC using its MAC address. This may differ depending on whether you
+                  use Wi-Fi or Ethernet.
+                  <figure class="vt-guide-figure">
+                    <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                            aria-label="Expand screenshot: router reserved IP client list">
+                      <img src="img/reserved-ip-client-list.png" width="857" height="140" loading="lazy"
+                           alt="Router Reserved IP Client List showing a PC named AXIOM at 192.168.0.23 with its MAC address">
+                      <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                    </button>
+                  </figure>
+                </li>
+              </ol>
+            </section>
+
+            <section class="vt-guide-section">
+              <h2 class="vt-guide-section-title">
+                <i class="bi bi-hdd-network me-2"></i>Forward ports
+              </h2>
+              <p class="mb-3">Once your PC has its static IP, forward your Battlezone ports:</p>
+              <ol class="vt-guide-steps">
+                <li>Find the port forwarding section in your router settings.</li>
+                <li>
+                  Set up a new port forwarding rule:
+                  <ol type="A" class="vt-guide-substeps">
+                    <li><strong>Name:</strong> call the rule something like <code>Battlezone</code> or <code>BZCC</code>.</li>
+                    <li><strong>Type:</strong> use <code>UDP</code> or <code>Both</code>.</li>
+                    <li><strong>Ports:</strong> set ALL port values (for example Inbound and Outbound) to <code>17770</code>.</li>
+                    <li><strong>IP:</strong> use the static IP you set earlier.</li>
+                  </ol>
+                  <figure class="vt-guide-figure">
+                    <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                            aria-label="Expand screenshot: router port forwarding rule">
+                      <img src="img/port-forwarding-rule.png" width="1111" height="363" loading="lazy"
+                           alt="Router Virtual Servers / Port Forwarding page with a BZCC rule: port 17770, type Both, private IP 192.168.0.23">
+                      <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                    </button>
+                  </figure>
+                </li>
+                <li>
+                  Host a game. You should now see a message in the lobby mentioning <strong>Full cone</strong>,
+                  which means it worked.
+                  <figure class="vt-guide-figure">
+                    <button type="button" class="vt-guide-shot-frame" data-vt-lightbox
+                            aria-label="Expand screenshot: lobby Full Cone message">
+                      <img src="img/lobby-full-cone.png" width="705" height="149" loading="lazy"
+                           alt="Battlezone lobby Communications panel: Note: Your NAT type seems open: Full cone (Relaxed). Clients should be able to connect.">
+                      <span class="vt-guide-shot-hint" aria-hidden="true"><i class="bi bi-arrows-fullscreen"></i></span>
+                    </button>
+                  </figure>
+                </li>
+              </ol>
+            </section>
+          </div>
+          <div class="card-footer small text-muted">
+            <i class="bi bi-steam me-1"></i>Not on the <code>devtest</code> branch yet?
+            <a href="../beta/">How to join VSR games</a>.
+          </div>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <!-- Screenshot lightbox, opened by js/guides.js. -->
+  <div class="modal fade" id="vt-guide-lightbox" tabindex="-1" aria-labelledby="vt-guide-lightbox-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h6" id="vt-guide-lightbox-title">Screenshot</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-guide-lightbox-body">
+          <img class="vt-guide-lightbox-img" alt="">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+  <script src="../js/guides.js"></script>
+</body>
+</html>

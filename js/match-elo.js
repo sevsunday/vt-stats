@@ -87,8 +87,16 @@
     if (reason === 'short_side') {
       return 'A side had fewer than 3 players, so VTSR-T and VTSR-C did not rate it.';
     }
+    if (reason === 'no_winner') {
+      return 'No winner was recorded for this match (no host result and no recycler or factory loss), so it was not rated.';
+    }
+    if (reason === 'draw') {
+      return 'This match ended in a draw. Draws are not rated. The Balonce Meter '
+        + 'on the Overview tab still shows the ratings both sides brought into '
+        + 'it and what winning would have been worth.';
+    }
     if (reason === 'short_duration') {
-      return 'This match was shorter than 4 minutes, so it was not rated.';
+      return 'This match was left out for its length under an older rule. Match length is no longer a gate.';
     }
     if (reason === 'cancelled') {
       // Don't dead-end the reader: the Balonce Meter still shows the real

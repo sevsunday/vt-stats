@@ -372,6 +372,23 @@ accuracy: canonical 55.6% (79/142), alpha10 55.6% (79), alpha25 56.3%
 α = 0.50, under the +5pp bar, so it
 would have held. Recorded here so the record has no gap.
 
+## Amendment (2026-11-08) — only recorded winners rate
+
+Operator decision, applied to every ladder (`ELO_SCHEMA_VERSION` 21):
+a match rates only with a recorded team winner (`attested`,
+`clean_win`, `contested` or `adjudicated`). Two consequences here:
+
+- Draws no longer score S = 0.5 on the wins ladder. They are a
+  match-level exclusion (`draw`), so the wins ladder never sees them.
+- Undetermined matches no longer rate the thug side while skipping the
+  wins update. They are a match-level exclusion (`no_winner`), so every
+  rated match is wins-rated and `wins_matches_skipped_undetermined`
+  reads 0.
+
+The promote rule above is unchanged. Any future sweep runs on a corpus
+where VTSR-T and the wins ladder see exactly the same matches, so its
+numbers are not comparable with the sweeps recorded above.
+
 ## Source files
 
 - `scripts/elo.py` (wins ladder + alpha_override)
