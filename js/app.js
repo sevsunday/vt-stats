@@ -134,19 +134,20 @@
     storyline:   'tab-storyline-btn',
     replay:      'tab-replay-btn',
   };
-  // All Matches is match-centric: Overview (hero stats) · Weapons · Meta.
+  // All Matches is match-centric: Overview (hero stats) · Weapons.
   // The player-centric tabs (career leaderboard, commanders, experimental
-  // schedule/form) moved to the Players hub (/player/); their legacy
-  // ?match=all&tab= deep links redirect there (see redirectLegacyAllTab).
+  // schedule/form) moved to the Players hub (/player/). The Meta tab
+  // moved to /meta/. Legacy ?match=all&tab= deep links redirect
+  // (see redirectLegacyAllTab).
   const ALL_TAB_SLUGS = {
     overview:            'all-tab-overview-btn',
     weapons:             'all-tab-weapons-btn',
     'weapons-rivalries': 'all-tab-weapons-btn',  // legacy alias
-    meta:                'all-tab-meta-btn',
   };
   const LEGACY_ALL_TAB_REDIRECTS = {
     commanders: 'player/?tab=commanders',
     players:    'player/?tab=trends',
+    meta:       'meta/',
   };
 
   // Legacy All Matches deep links that now live on the Players hub.
@@ -3713,32 +3714,6 @@
       renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
     });
 
-    registerTabRenderer('#all-tab-meta', () => {
-      const mc = data.meta_charts || {
-        maps: [], duration_bands: {}, player_counts: {}, submitters: [], matches_over_time: [], start_times: [],
-      };
-      const fs = data.faction_stats || { win_counts: {} };
-      const mapNameResolver = (mapFile) => {
-        const key = (mapFile || '').replace(/\.bzn$/i, '').toLowerCase();
-        const reg = (mapRegistry && mapRegistry[key]) || null;
-        if (reg && reg.title) {
-          // Strip iteratively-stripped XYZ: prefixes the same way the
-          // pipeline's resolve_match_name does for the manifest.
-          let t = String(reg.title);
-          while (/^[A-Za-z0-9]+:\s/.test(t)) t = t.replace(/^[A-Za-z0-9]+:\s*/, '');
-          return t;
-        }
-        return (mapFile || '').replace(/\.bzn$/i, '');
-      };
-      renderMetaFactionMaps(mc.maps, mapNameResolver);
-      renderMetaFactionMatchups(fs.matchups);
-      renderMetaFactionWinrate('meta-faction-winrate-canvas',   fs.win_counts);
-      renderMetaDurationHistogram('meta-duration-canvas',       mc.duration_bands);
-      renderMetaPlayerCount('meta-playercount-canvas',          mc.player_counts);
-      renderWhenPlayed(mc.start_times || []);
-      renderF9CommunityCard();
-    });
-
     registerAllMatchesCharts(data);
 
     // Deep-link tab activation MUST come after every registerTabRenderer
@@ -3753,133 +3728,14 @@
       if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
     }
     // Bootstrap does not re-fire shown.bs.tab when that pill is already
-    // active, so a picker re-aggregate while Meta is open would leave
-    // the charts destroyed. Render the open pane if it has not run yet.
+    // active, so a picker re-aggregate while Weapons is open would leave
+    // the chart destroyed. Render the open pane if it has not run yet.
     const activeAllBtn = document.querySelector('#all-tabs .nav-link.active');
     const activeAllTarget = activeAllBtn && activeAllBtn.getAttribute('data-bs-target');
     if (activeAllTarget) renderTabIfNeeded(activeAllTarget);
 
     syncUrl(dashboardHistoryLive ? 'push' : 'replace');
     dashboardHistoryLive = true;
-  }
-
-  // All Matches → Meta. Row faction's record against the column faction.
-  // Under 5 determined games the percent is an em dash (same floor as
-  // commander Win %). Diagonal cells are mirror counts, never a percent.
-  const MATCHUP_MIN_GAMES = 5;
-  const MATCHUP_FACTIONS = [
-    { code: 'i', name: 'ISDF' },
-    { code: 'e', name: 'Hadean' },
-    { code: 'f', name: 'Scion' },
-  ];
-  const META_MAP_LIMIT = 15;
-
-  function matchupBadge(code, name) {
-    return `<span class="vt-faction-badge" data-faction-code="${code}">${esc(name)}</span>`;
-  }
-
-  // Off-diagonal matchup cell and a map's faction cell share this floor.
-  function matchupRateCell(wins, games) {
-    if (games < MATCHUP_MIN_GAMES) {
-      const noun = games === 1 ? 'game' : 'games';
-      const tip = `${games} determined ${noun}`;
-      return `<td class="vt-matchup-cell" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">
-        <div class="vt-mono vt-matchup-pct">&mdash;</div>
-      </td>`;
-    }
-    const losses = games - wins;
-    const pct = (wins / games * 100).toFixed(1);
-    return `<td class="vt-matchup-cell">
-      <div class="vt-mono vt-matchup-pct">${pct}%</div>
-      <div class="vt-matchup-record">${wins}\u2013${losses}</div>
-    </td>`;
-  }
-
-  function renderMetaFactionMatchups(matchups) {
-    const container = document.getElementById('meta-faction-matchups');
-    if (!container) return;
-    const grid = matchups || {};
-    const cellOf = (row, col) => {
-      const line = grid[row] || {};
-      const cell = line[col] || {};
-      return { wins: cell.wins || 0, games: cell.games || 0 };
-    };
-    let any = false;
-    for (const a of MATCHUP_FACTIONS) {
-      for (const b of MATCHUP_FACTIONS) {
-        if (cellOf(a.code, b.code).games > 0) any = true;
-      }
-    }
-    if (!any) {
-      container.innerHTML = '<p class="text-center mb-0" style="color:var(--kb-text-muted);">No determined matchups in the current scope.</p>';
-      ensureTooltips(document.getElementById('section-meta-faction-matchups'));
-      return;
-    }
-    const head = MATCHUP_FACTIONS.map(f => `<th class="text-center">${matchupBadge(f.code, f.name)}</th>`).join('');
-    const rows = MATCHUP_FACTIONS.map(row => {
-      const cells = MATCHUP_FACTIONS.map(col => {
-        const { wins, games } = cellOf(row.code, col.code);
-        if (row.code === col.code) {
-          return `<td class="vt-matchup-cell vt-matchup-mirror">
-            <div class="vt-mono vt-matchup-pct">${games}</div>
-            <div class="vt-matchup-record">mirrors</div>
-          </td>`;
-        }
-        return matchupRateCell(wins, games);
-      }).join('');
-      return `<tr><th class="text-start">${matchupBadge(row.code, row.name)}</th>${cells}</tr>`;
-    }).join('');
-    container.innerHTML = `<div class="table-responsive">
-      <table class="table table-sm align-middle text-center mb-0 vt-matchup-table">
-        <thead><tr><th></th>${head}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-    ensureTooltips(document.getElementById('section-meta-faction-matchups'));
-  }
-
-  // Top maps by game count. Each faction cell is that faction's win rate
-  // on the map against a different known faction. Three rates need not
-  // sum to 100%: each faction has its own denominator.
-  function renderMetaFactionMaps(maps, mapNameResolver) {
-    const container = document.getElementById('meta-maps-body');
-    if (!container) return;
-    const rows = (maps || []).slice(0, META_MAP_LIMIT);
-    if (!rows.length) {
-      container.innerHTML = '<p class="text-center mb-0" style="color:var(--kb-text-muted);">No maps in the current scope.</p>';
-      ensureTooltips(document.getElementById('section-meta-maps'));
-      return;
-    }
-    const head = MATCHUP_FACTIONS.map(f => `<th class="text-center">${matchupBadge(f.code, f.name)}</th>`).join('');
-    const body = rows.map(row => {
-      const raw = row.map || '';
-      const name = (mapNameResolver ? mapNameResolver(raw) : raw) || raw;
-      const slug = String(raw).replace(/\.bzn$/i, '').toLowerCase();
-      const label = slug
-        ? `<a class="vt-map-title-link" href="map/${encodeURIComponent(slug)}/" target="_blank" rel="noopener">${esc(name)}</a>`
-        : esc(name);
-      const fac = row.factions || {};
-      const cells = MATCHUP_FACTIONS.map(f => {
-        const cell = fac[f.code] || {};
-        return matchupRateCell(cell.wins || 0, cell.games || 0);
-      }).join('');
-      return `<tr>
-        <th class="text-start">${label}</th>
-        <td class="text-end vt-mono">${row.count || 0}</td>
-        ${cells}
-      </tr>`;
-    }).join('');
-    container.innerHTML = `<div class="table-responsive">
-      <table class="table table-sm align-middle text-center mb-0 vt-matchup-table">
-        <thead><tr>
-          <th class="text-start">Map</th>
-          <th class="text-end">Matches</th>
-          ${head}
-        </tr></thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>`;
-    ensureTooltips(document.getElementById('section-meta-maps'));
   }
 
   function renderTimelineSection(data) {
@@ -7194,209 +7050,12 @@
     ensureF9CommunityLoaded().then(paintHeroCommunity);
   }
 
-  // ---- When games are played (Meta tab) ----
-  // Recorded start instants come from the picker-scoped aggregate.
-  // F9bomber's dates are calendar days and join weekday, month, and
-  // the weekly line only while the picker is clear. The timezone
-  // select is static HTML so a tab rebuild does not reset it.
-  const PLAYTIME_TZ_KEY = 'vt.playtime.tz';
-  const PLAYTIME_TZ_VALUES = [
-    'local',
-    'America/Los_Angeles',
-    'America/Denver',
-    'America/Chicago',
-    'America/New_York',
-    'Europe/London',
-    'Europe/Berlin',
-    'Australia/Sydney',
-    'UTC',
-  ];
-  const PLAYTIME_TZ_NAMES = {
-    local: 'Your timezone',
-    'America/Los_Angeles': 'Pacific',
-    'America/Denver': 'Mountain',
-    'America/Chicago': 'Central',
-    'America/New_York': 'Eastern',
-    'Europe/London': 'London',
-    'Europe/Berlin': 'Germany',
-    'Australia/Sydney': 'Sydney',
-    UTC: 'UTC',
-  };
-  let whenPlayedStartTimes = [];
-  let whenPlayedBucket = null;
-  let whenPlayedGen = 0;
-  let whenPlayedOverTimeMode = 'weeks';
-
-  function viewerTimeZone() {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    } catch (e) {
-      return 'UTC';
-    }
-  }
-
-  function utcOffsetLabel(timeZone) {
-    try {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: timeZone || 'UTC',
-        timeZoneName: 'shortOffset',
-      }).formatToParts(new Date());
-      let raw = (parts.find(p => p.type === 'timeZoneName') || {}).value || 'GMT';
-      raw = raw.replace(/^GMT/i, '').trim();
-      if (!raw) return 'UTC';
-      const m = /^([+-])(\d{1,2})(?::(\d{2}))?$/.exec(raw);
-      if (!m) return 'UTC';
-      const sign = m[1] === '-' ? '\u2212' : '+';
-      const hours = String(Number(m[2]));
-      const mins = m[3] && m[3] !== '00' ? ':' + m[3] : '';
-      return 'UTC' + sign + hours + mins;
-    } catch (e) {
-      return '';
-    }
-  }
-
-  function playtimeOptionLabel(value) {
-    const name = PLAYTIME_TZ_NAMES[value] || value;
-    if (value === 'UTC') return 'UTC';
-    const zone = value === 'local' ? viewerTimeZone() : value;
-    const off = utcOffsetLabel(zone);
-    if (!off || off === 'UTC') return value === 'local' ? 'Your timezone' : name;
-    return name + ' (' + off + ')';
-  }
-
-  function initWhenPlayedTimezone() {
-    const sel = document.getElementById('meta-when-tz');
-    if (!sel || sel.dataset.wired === '1') return;
-    sel.dataset.wired = '1';
-    sel.querySelectorAll('option').forEach(opt => {
-      opt.textContent = playtimeOptionLabel(opt.value);
-    });
-    let stored = 'local';
-    try { stored = localStorage.getItem(PLAYTIME_TZ_KEY) || 'local'; } catch (e) {}
-    if (PLAYTIME_TZ_VALUES.indexOf(stored) < 0) stored = 'local';
-    if (stored !== 'local') {
-      try { Intl.DateTimeFormat('en-US', { timeZone: stored }); }
-      catch (e) { stored = 'local'; }
-    }
-    sel.value = stored;
-    sel.addEventListener('change', () => {
-      const value = PLAYTIME_TZ_VALUES.indexOf(sel.value) >= 0 ? sel.value : 'local';
-      if (value !== sel.value) sel.value = value;
-      try { localStorage.setItem(PLAYTIME_TZ_KEY, value); } catch (e) {}
-      repaintWhenPlayed();
-    });
-  }
-
-  function readPlaytimePref() {
-    const sel = document.getElementById('meta-when-tz');
-    if (sel && sel.dataset.wired === '1' && PLAYTIME_TZ_VALUES.indexOf(sel.value) >= 0) return sel.value;
-    return 'local';
-  }
-
-  function resolvePlaytimeZone(pref) {
-    if (!pref || pref === 'local') return viewerTimeZone();
-    try {
-      Intl.DateTimeFormat('en-US', { timeZone: pref });
-      return pref;
-    } catch (e) {
-      return viewerTimeZone();
-    }
-  }
-
-  function playtimeZoneLabel(pref, resolved) {
-    if (pref && pref !== 'local' && PLAYTIME_TZ_NAMES[pref]) return PLAYTIME_TZ_NAMES[pref];
-    if (PLAYTIME_TZ_NAMES[resolved]) return PLAYTIME_TZ_NAMES[resolved];
-    return String(resolved || 'UTC').replace(/_/g, ' ');
-  }
-
-  function whenPlayedSummary(bucket, zoneLabel) {
-    if (!bucket || !bucket.recorded) return 'No recorded matches in this view.';
-    const h = bucket.busiestHour;
-    const n = bucket.hours[h] || 0;
-    const games = n === 1 ? 'game' : 'games';
-    const hourText = (typeof formatHourLong === 'function') ? formatHourLong(h) : String(h);
-    const where = zoneLabel.indexOf('/') >= 0
-      ? hourText + ' (' + zoneLabel + ', ' + n + ' ' + games + ')'
-      : hourText + ' ' + zoneLabel + ' (' + n + ' ' + games + ')';
-    return 'Busiest hour is ' + where + '.';
-  }
-
-  function paintWhenPlayed(startTimes, comm) {
-    if (typeof bucketWhenPlayed !== 'function') return;
-    initWhenPlayedTimezone();
-    initOverTimeToggle();
-    whenPlayedStartTimes = startTimes || [];
-    const filtered = hasAnyFilterEngaged(pickerState);
-    const playDates = (comm && Array.isArray(comm.play_dates)) ? comm.play_dates : [];
-    const includeCommunity = !filtered && playDates.length > 0;
-    const pref = readPlaytimePref();
-    const timeZone = resolvePlaytimeZone(pref);
-    const zoneLabel = playtimeZoneLabel(pref, timeZone);
-    const bucket = bucketWhenPlayed({
-      startTimes: whenPlayedStartTimes,
-      playDates: playDates,
-      includeCommunity: includeCommunity,
-      timeZone: timeZone,
-    });
-    whenPlayedBucket = bucket;
-    const summary = document.getElementById('meta-when-hour-summary');
-    if (summary) summary.textContent = whenPlayedSummary(bucket, zoneLabel);
-    renderMetaWhenHour('meta-when-hour-canvas', bucket);
-    renderMetaWhenWeekday('meta-when-weekday-canvas', bucket);
-    renderMetaWhenMonth('meta-when-month-canvas', bucket);
-    renderOverTimeChart('meta-overtime-canvas');
-  }
-
-  function renderOverTimeChart(canvasId) {
-    if (!whenPlayedBucket || typeof renderMetaWhenOverTime !== 'function') return null;
-    return renderMetaWhenOverTime(canvasId || 'meta-overtime-canvas', whenPlayedBucket, whenPlayedOverTimeMode);
-  }
-
-  function initOverTimeToggle() {
-    const group = document.getElementById('meta-overtime-interval');
-    if (!group || group.dataset.wired === '1') return;
-    group.dataset.wired = '1';
-    group.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-overtime]');
-      if (!btn || !group.contains(btn)) return;
-      const mode = btn.getAttribute('data-overtime');
-      if (mode !== 'weeks' && mode !== 'months') return;
-      if (mode === whenPlayedOverTimeMode) return;
-      whenPlayedOverTimeMode = mode;
-      group.querySelectorAll('[data-overtime]').forEach(el => {
-        el.classList.toggle('active', el === btn);
-      });
-      renderOverTimeChart('meta-overtime-canvas');
-    });
-  }
-
-  function renderWhenPlayed(startTimes) {
-    const gen = ++whenPlayedGen;
-    whenPlayedStartTimes = startTimes || [];
-    const paint = (comm) => {
-      if (gen !== whenPlayedGen) return;
-      if (currentTarget !== '__all__') return;
-      paintWhenPlayed(whenPlayedStartTimes, comm);
-    };
-    // Draw recorded bars immediately. F9bomber's dates arrive with the
-    // sheet fetch and the same generation repaints the combined totals.
-    paint(f9CommunityCache);
-    if (f9CommunityCache === undefined) ensureF9CommunityLoaded().then(paint);
-  }
-
-  function repaintWhenPlayed() {
-    if (currentTarget !== '__all__') return;
-    if (!tabRendered['#all-tab-meta']) return;
-    paintWhenPlayed(whenPlayedStartTimes, f9CommunityCache || null);
-  }
-
   // ---- F9bomber's stats (display-only, never folded into VTAggregate) --
   // Static rollup of F9bomber's hand-kept match ledger
   // (data/external/f9_community.json). Corpus-wide reference data:
-  // deliberately NOT merged into the picker-scoped faction_stats /
-  // meta_charts, and never re-aggregated by the picker. 404-safe.
-  // Fetched once per session. Hero, commander standings, and the Meta
-  // card all read this cache.
+  // deliberately NOT merged into faction_stats / meta_charts. 404-safe.
+  // Fetched once per session for the All Matches hero. The Meta page
+  // fetches the same file on its own.
   let f9CommunityCache; // undefined = not fetched; null = 404/absent
   let _f9CommunityFetch = null;
   function ensureF9CommunityLoaded() {
@@ -7408,94 +7067,6 @@
         .then(json => { f9CommunityCache = json || null; return f9CommunityCache; });
     }
     return _f9CommunityFetch;
-  }
-
-  function renderF9CommunityCard() {
-    const card = document.getElementById('section-f9-community');
-    const body = document.getElementById('f9-community-body');
-    if (!card || !body) return;
-
-    const paint = (comm) => {
-      if (!comm || !(comm.duel_count > 0)) { card.classList.add('d-none'); return; }
-      const fs = comm.faction_stats || {};
-      const FAC = [['i', 'ISDF'], ['e', 'Hadean'], ['f', 'Scion']];
-      const rows = FAC.map(([code, label]) => {
-        const s = fs[code] || { picks: 0, wins: 0 };
-        const wr = s.picks > 0 ? ((s.wins / s.picks) * 100).toFixed(1) + '%' : '\u2014';
-        return `<tr>
-          <td><span class="vt-faction-badge" data-faction-code="${code}">${label}</span></td>
-          <td class="text-end vt-mono">${s.picks.toLocaleString()}</td>
-          <td class="text-end vt-mono">${s.wins.toLocaleString()}</td>
-          <td class="text-end vt-mono">${wr}</td>
-        </tr>`;
-      }).join('');
-      const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
-      const prov = comm.provider || {};
-      const commanders = (Array.isArray(comm.commander_records) ? comm.commander_records : [])
-        .filter(r => r && (r.games || 0) > 0)
-        .slice()
-        .sort((a, b) => (b.games || 0) - (a.games || 0) || (b.wins || 0) - (a.wins || 0))
-        .slice(0, 8);
-      const cmdrRows = commanders.map(r => `<tr>
-          <td>${vtPlayerLinkHtml(r.name, r.steam64)}</td>
-          <td class="text-end vt-mono">${(r.wins || 0).toLocaleString()}\u2013${(r.losses || 0).toLocaleString()}</td>
-          <td class="text-end vt-mono">${(r.games || 0).toLocaleString()}</td>
-        </tr>`).join('');
-      const maps = (Array.isArray(comm.maps) ? comm.maps : [])
-        .filter(m => m && (m.games || 0) > 0)
-        .slice()
-        .sort((a, b) => (b.games || 0) - (a.games || 0) || String(a.title || '').localeCompare(String(b.title || '')))
-        .slice(0, 8);
-      const mapRows = maps.map(m => {
-        const title = esc(m.title || m.map_key || 'Unknown');
-        const key = String(m.map_key || '');
-        const safe = /^[a-z0-9_-]+$/i.test(key);
-        const label = safe
-          ? `<a class="vt-map-title-link" href="map/${encodeURIComponent(key.toLowerCase())}/">${title}</a>`
-          : title;
-        return `<tr>
-          <td>${label}</td>
-          <td class="text-end vt-mono">${(m.games || 0).toLocaleString()}</td>
-        </tr>`;
-      }).join('');
-      body.innerHTML = `
-        <p class="small text-secondary mb-2">
-          ${comm.duel_count.toLocaleString()} matches in
-          <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>'s stats
-          (${esc(range[0] || '?')} \u2192 ${esc(range[1] || '?')}), even 3v3/4v4/5v5 lobbies only.
-        </p>
-        <div class="row g-3">
-          <div class="col-md-4">
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-2 vt-standings-table">
-                <thead><tr><th>Faction</th><th class="text-end">Picks</th><th class="text-end">Wins</th><th class="text-end">Win %</th></tr></thead>
-                <tbody>${rows}</tbody>
-              </table>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-2 vt-standings-table">
-                <thead><tr><th>Commander</th><th class="text-end">W\u2013L</th><th class="text-end">Games</th></tr></thead>
-                <tbody>${cmdrRows}</tbody>
-              </table>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-2 vt-standings-table">
-                <thead><tr><th>Map</th><th class="text-end">Games</th></tr></thead>
-                <tbody>${mapRows}</tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <p class="text-muted small mb-0">Includes data from
-          <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>.</p>`;
-      card.classList.remove('d-none');
-    };
-
-    ensureF9CommunityLoaded().then(paint);
   }
 
   function careerPerMatchAvg(total, matchesPlayed) {
@@ -7817,18 +7388,6 @@
     registerChartRenderer('section-global-weapon', (canvasId) => {
       return renderGlobalWeaponMeta(canvasId, data.global_weapon_meta);
     });
-    registerChartRenderer('section-meta-when-hour', (canvasId) => {
-      return whenPlayedBucket ? renderMetaWhenHour(canvasId, whenPlayedBucket) : null;
-    });
-    registerChartRenderer('section-meta-when-weekday', (canvasId) => {
-      return whenPlayedBucket ? renderMetaWhenWeekday(canvasId, whenPlayedBucket) : null;
-    });
-    registerChartRenderer('section-meta-when-month', (canvasId) => {
-      return whenPlayedBucket ? renderMetaWhenMonth(canvasId, whenPlayedBucket) : null;
-    });
-    registerChartRenderer('section-meta-over-time', (canvasId) => {
-      return renderOverTimeChart(canvasId);
-    });
   }
 
   // --- Helpers ---
@@ -8000,7 +7559,7 @@
     || (initialUrlState.players && initialUrlState.players.length);
 
   function runInitialBoot() {
-    // ?match=all&tab=commanders|players now live on the Players hub.
+    // ?match=all&tab=commanders|players|meta now live elsewhere.
     if (redirectLegacyAllTab(new URLSearchParams(window.location.search))) return;
     if (initialUrlState.match === 'all') {
       updateMatchPickerTriggers('__all__');
@@ -8028,6 +7587,5 @@
     }
   }
 
-  initWhenPlayedTimezone();
   runInitialBoot();
 })();

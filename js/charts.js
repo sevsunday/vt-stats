@@ -1436,7 +1436,7 @@ function renderCommanderFactionPicks(canvasId, rows) {
   return chart;
 }
 
-// --- Meta tab charts (Phase 8) ---
+// --- Meta page charts ---
 
 // Faction win-rate horizontal bar. X-axis = win % (0-1); tooltip shows raw
 // wins / determined.
@@ -1589,7 +1589,7 @@ function renderMetaOverTime(canvasId, labels, values) {
   return chart;
 }
 
-// --- When games are played (All Matches → Meta) ---
+// --- When games are played (Meta page) ---
 // Recorded instants are bucketed here, not in the aggregator, so a
 // timezone change can redraw without re-aggregating. F9bomber's dates
 // are calendar days with no clock time; they never enter the hour

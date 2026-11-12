@@ -80,7 +80,8 @@ SITE_URL = "https://vtstats.bz"
 # v29 renames two Tools items: Record -> Record Stats, Join VSR Games ->
 # Beta Versions.
 # v30 adds Discord Invite to the Tools dropdown.
-PLAYER_TEMPLATE_VERSION = 30
+# v31 replaces Analysis with Meta in the Players dropdown.
+PLAYER_TEMPLATE_VERSION = 31
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

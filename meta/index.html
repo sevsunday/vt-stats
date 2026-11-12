@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meta — VT Stats</title>
+  <meta name="description" content="Faction win rates, matchups, and when the recorded VT Stats corpus is played.">
+
+  <link rel="canonical" href="https://vtstats.bz/meta/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Meta — VT Stats">
+  <meta property="og:description" content="Faction win rates, matchups, and when the recorded VT Stats corpus is played.">
+  <meta property="og:url" content="https://vtstats.bz/meta/">
+  <meta property="og:site_name" content="VT Stats">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../weapons/"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn active" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Players and ratings" aria-current="page">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-pie-chart me-2"></i>Meta</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
+                    data-bs-toggle="dropdown" data-bs-auto-close="true"
+                    data-vt-tools-link data-vt-tools-live="0"
+                    title="Lobby tools and Discord timestamps"
+                    aria-label="Tools">
+              <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../tools/" data-vt-tools-item
+                     title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
+                <i class="bi bi-controller me-2"></i>Live Lobby
+              </a></li>
+              <li><a class="dropdown-item" href="../time/">
+                <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><a class="dropdown-item" href="../discord/"
+                     title="Join the BZ2 Vet Strats Discord">
+                <i class="bi bi-discord me-2"></i>Discord Invite
+              </a></li>
+              <li><a class="dropdown-item" href="../record/"
+                     title="How to record your own stats">
+                <i class="bi bi-record-circle me-2"></i>Record Stats
+              </a></li>
+              <li><a class="dropdown-item" href="../beta/"
+                     title="Switch to the devtest beta to join VSR games">
+                <i class="bi bi-steam me-2"></i>Beta Versions
+              </a></li>
+              <li><a class="dropdown-item" href="../ports/"
+                     title="Router setup for hosting games (Full Cone NAT)">
+                <i class="bi bi-router me-2"></i>Port Forwarding
+              </a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid px-3 px-md-4 py-4 flex-grow-1">
+    <h1 class="fs-2 mb-4">Meta</h1>
+
+    <p class="text-muted mb-0" id="meta-status">Loading match data&hellip;</p>
+
+    <div id="meta-body" class="d-none">
+      <div class="row g-4 mb-4">
+        <div class="col-lg-6 vt-meta-maps-col">
+          <div class="card h-100" id="section-meta-maps">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div class="d-flex align-items-center gap-2">
+                <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Faction win rate by map</h5>
+                <i class="bi bi-info-circle vt-col-info"
+                   data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                   title="&lt;strong&gt;Faction win rate by map&lt;/strong&gt;&lt;br&gt;Each row is a map. Each percent is that faction&#39;s win rate on the map against a different known faction. The other faction in that game takes the loss.&lt;br&gt;&lt;br&gt;Mirror games and a game with an unknown opponent are left out. Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;The 15 maps with the most recorded games are listed. This table is the full recorded corpus. The map page&#39;s own win-rate card also counts F9bomber&#39;s stats."></i>
+              </div>
+              <button class="btn btn-sm" data-expand="section-meta-maps" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body" id="meta-maps-body"></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card h-100" id="section-meta-faction-matchups">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div class="d-flex align-items-center gap-2">
+                <h5 class="mb-0"><i class="bi bi-grid-3x3 me-2"></i>Faction Matchups</h5>
+                <i class="bi bi-info-circle vt-col-info"
+                   data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                   title="&lt;strong&gt;Faction matchups&lt;/strong&gt;&lt;br&gt;Each cell is that row faction&#39;s win rate against the column faction, in determined games where both factions are known. The opposite cell is the complement.&lt;br&gt;&lt;br&gt;The diagonal counts mirror games (both teams fielded the same faction). Those games have no win rate, because a percent there would only say which team slot won.&lt;br&gt;&lt;br&gt;Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;Draws, cancellations, unclear games, and a game with an unknown faction are left out. The Faction Win Rate bar still counts mirror games and a known faction against an unknown one, so the two cards do not add up.&lt;br&gt;&lt;br&gt;This table is the full recorded corpus."></i>
+              </div>
+              <button class="btn btn-sm" data-expand="section-meta-faction-matchups" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body" id="meta-faction-matchups"></div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-12">
+          <div class="card h-100" id="section-meta-faction-winrate">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Faction Win Rate</h5>
+              <button class="btn btn-sm" data-expand="section-meta-faction-winrate" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body"><div class="chart-container" style="height:300px;"><canvas id="meta-faction-winrate-canvas"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+          <div class="card h-100" id="section-meta-duration-histogram">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Match Duration</h5>
+              <button class="btn btn-sm" data-expand="section-meta-duration-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-duration-canvas"></canvas></div></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card h-100" id="section-meta-player-counts">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Player Count</h5>
+              <button class="btn btn-sm" data-expand="section-meta-player-counts" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-playercount-canvas"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-12">
+          <div class="card h-100" id="section-meta-when-hour">
+            <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+              <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Start hour</h5>
+              <div class="d-flex align-items-center gap-2">
+                <label for="meta-when-tz" class="visually-hidden">Timezone</label>
+                <select id="meta-when-tz" class="form-select form-select-sm vt-when-tz" autocomplete="off">
+                  <option value="local">Your timezone</option>
+                  <option value="America/Los_Angeles">Pacific</option>
+                  <option value="America/Denver">Mountain</option>
+                  <option value="America/Chicago">Central</option>
+                  <option value="America/New_York">Eastern</option>
+                  <option value="Europe/London">London</option>
+                  <option value="Europe/Berlin">Germany</option>
+                  <option value="Australia/Sydney">Sydney</option>
+                  <option value="UTC">UTC</option>
+                </select>
+                <button class="btn btn-sm" data-expand="section-meta-when-hour" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="chart-container" style="height:260px;"><canvas id="meta-when-hour-canvas"></canvas></div>
+              <p class="small mb-0 mt-2" id="meta-when-hour-summary"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+          <div class="card h-100" id="section-meta-when-weekday">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Day of week</h5>
+              <button class="btn btn-sm" data-expand="section-meta-when-weekday" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body">
+              <div class="chart-container" style="height:240px;"><canvas id="meta-when-weekday-canvas"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card h-100" id="section-meta-when-month">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Month</h5>
+              <button class="btn btn-sm" data-expand="section-meta-when-month" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="card-body">
+              <div class="chart-container" style="height:240px;"><canvas id="meta-when-month-canvas"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-12">
+          <div class="card h-100" id="section-meta-over-time">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Matches Over Time</h5>
+              <div class="d-flex align-items-center gap-2">
+                <div class="btn-group btn-group-sm" role="group" id="meta-overtime-interval" aria-label="Matches over time interval">
+                  <button type="button" class="btn btn-outline-secondary active" data-overtime="weeks">Weeks</button>
+                  <button type="button" class="btn btn-outline-secondary" data-overtime="months">Months</button>
+                </div>
+                <button class="btn btn-sm" data-expand="section-meta-over-time" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+            </div>
+            <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-overtime-canvas"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4 mb-4">
+        <div class="col-12">
+          <!-- F9bomber's stats (static counts, hides on 404).
+               Corpus-wide reference data, separate from the recorded
+               faction_stats above. play_dates join weekday, month, and
+               the weekly line. -->
+          <div class="card h-100 d-none" id="section-f9-community">
+            <div class="card-header">
+              <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>F9bomber's stats</h5>
+            </div>
+            <div class="card-body" id="f9-community-body"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="modal fade" id="fullscreen-modal" tabindex="-1" aria-labelledby="fullscreen-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="fullscreen-modal-title"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="fullscreen-modal-body" style="overflow:auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../vendor/chartjs/chart.umd.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/vtstats-fx.js"></script>
+  <script src="../js/charts.js"></script>
+  <script src="../js/all-matches-aggregator.js"></script>
+  <script src="../js/meta.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>

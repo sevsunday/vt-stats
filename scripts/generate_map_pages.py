@@ -74,7 +74,8 @@ SITE_URL = "https://vtstats.bz"
 # v19 renames two Tools items: Record -> Record Stats, Join VSR Games ->
 # Beta Versions.
 # v20 adds Discord Invite to the Tools dropdown.
-MAP_TEMPLATE_VERSION = 20
+# v21 replaces Analysis with Meta in the Players dropdown.
+MAP_TEMPLATE_VERSION = 21
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
@@ -131,7 +132,7 @@ INSIGHT_BEST_COMMANDERS_MIN = 3
 
 # Team-win decided_by values. Contested / draw / cancelled / unclear
 # stay out of blowout, closest-call, and commander win rate on the
-# map page. The Meta tab's faction win-rate table is a separate tally.
+# map page. The Meta page's faction win-rate table is a separate tally.
 _TEAM_WIN_DECIDED = frozenset({"clean_win", "attested", "adjudicated"})
 _FACTION_CODES = ("i", "e", "f")
 

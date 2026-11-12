@@ -309,7 +309,7 @@
    * "Ebola"). Mirrors the same logic in
    *   - Python `resolve_match_name()` (scripts/process_stats.py)
    *   - Python `map_title_resolver()` (scripts/generate_map_pages.py)
-   *   - JS `mapNameResolver` (js/app.js, All Matches Meta tab)
+   *   - JS `mapNameResolver` (js/meta.js, Meta page)
    * Document drift in AGENTS.md when this changes; touch all four sites.
    */
   function stripTitlePrefixes(rawTitle) {

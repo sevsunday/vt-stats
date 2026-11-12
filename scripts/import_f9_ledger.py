@@ -17,7 +17,8 @@ committed artifacts:
                                    records, commander records, faction
                                    picks, map counts, play_dates) consumed
                                    404-safe by js/player.js, js/app.js
-                                   (Meta tab) and js/maps.js
+                                   (All Matches hero), js/meta.js and
+                                   js/maps.js
 
 THIS SCRIPT IS NOT PART OF THE PIPELINE. It runs once per ledger drop
 (`python scripts/import_f9_ledger.py`), requires openpyxl (import-time

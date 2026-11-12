@@ -119,7 +119,7 @@
             <ul class="dropdown-menu dropdown-menu-end">
               <li><a class="dropdown-item" href="player/"><i class="bi bi-people me-2"></i>Players</a></li>
               <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
-              <li><a class="dropdown-item" href="elo/analysis/"><i class="bi bi-bar-chart-line me-2"></i>Analysis</a></li>
+              <li><a class="dropdown-item" href="meta/"><i class="bi bi-pie-chart me-2"></i>Meta</a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -1187,9 +1187,6 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons</button>
         </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="all-tab-meta-btn" data-bs-toggle="pill" data-bs-target="#all-tab-meta" type="button" role="tab" aria-controls="all-tab-meta" aria-selected="false">Meta</button>
-        </li>
       </ul>
     </div>
 
@@ -1213,16 +1210,20 @@
 
         <!-- Player-centric career views (Career Leaderboard, Career
              Highlights, Commanders, Trends) moved to the Players hub
-             (/player/). All Matches stays match-centric: hero stats above,
-             Weapons and Meta in the tabs. -->
+             (/player/). Corpus distribution charts moved to /meta/.
+             All Matches stays match-centric: hero stats above, Weapons
+             in the remaining tab. -->
         <div class="vt-info-banner mb-4" id="all-matches-players-banner" role="note">
           <i class="bi bi-people-fill"></i>
           <div class="flex-grow-1">
             Player careers, leaderboards, commanders and trends live on the
             <a href="player/" class="fw-semibold">Players</a> hub, with faction / ship / weapon / role filters.
+            Faction win rates and when games are played live on
+            <a href="meta/" class="fw-semibold">Meta</a>.
           </div>
           <a href="player/?tab=leaderboards" class="btn btn-sm btn-primary"><i class="bi bi-list-ol me-1"></i>Leaderboards</a>
           <a href="player/?tab=trends" class="btn btn-sm btn-outline-secondary"><i class="bi bi-graph-up me-1"></i>Trends</a>
+          <a href="meta/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pie-chart me-1"></i>Meta</a>
         </div>
       </div>
 
@@ -1236,153 +1237,6 @@
                 <button class="btn btn-sm" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
               <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- All Tab: Meta — corpus-distribution charts -->
-      <div class="tab-pane fade" id="all-tab-meta" role="tabpanel" aria-labelledby="all-tab-meta-btn">
-        <div class="row g-4 mb-4">
-          <div class="col-lg-6 vt-meta-maps-col">
-            <div class="card h-100" id="section-meta-maps">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center gap-2">
-                  <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Faction win rate by map</h5>
-                  <i class="bi bi-info-circle vt-col-info"
-                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                     title="&lt;strong&gt;Faction win rate by map&lt;/strong&gt;&lt;br&gt;Each row is a map. Each percent is that faction&#39;s win rate on the map against a different known faction. The other faction in that game takes the loss.&lt;br&gt;&lt;br&gt;Mirror games and a game with an unknown opponent are left out. Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;The 15 maps with the most games in the current picker are listed. This table follows the match picker. The map page&#39;s own win-rate card also counts F9bomber&#39;s stats."></i>
-                </div>
-                <button class="btn btn-sm" data-expand="section-meta-maps" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="meta-maps-body"></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-faction-matchups">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center gap-2">
-                  <h5 class="mb-0"><i class="bi bi-grid-3x3 me-2"></i>Faction Matchups</h5>
-                  <i class="bi bi-info-circle vt-col-info"
-                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                     title="&lt;strong&gt;Faction matchups&lt;/strong&gt;&lt;br&gt;Each cell is that row faction&#39;s win rate against the column faction, in determined games where both factions are known. The opposite cell is the complement.&lt;br&gt;&lt;br&gt;The diagonal counts mirror games (both teams fielded the same faction). Those games have no win rate, because a percent there would only say which team slot won.&lt;br&gt;&lt;br&gt;Under 5 determined games the percent shows &amp;mdash;; hover the cell for the count.&lt;br&gt;&lt;br&gt;Draws, cancellations, unclear games, and a game with an unknown faction are left out. The Faction Win Rate bar still counts mirror games and a known faction against an unknown one, so the two cards do not add up.&lt;br&gt;&lt;br&gt;This table follows the match picker."></i>
-                </div>
-                <button class="btn btn-sm" data-expand="section-meta-faction-matchups" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="meta-faction-matchups"></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-12">
-            <div class="card h-100" id="section-meta-faction-winrate">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Faction Win Rate</h5>
-                <button class="btn btn-sm" data-expand="section-meta-faction-winrate" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container" style="height:300px;"><canvas id="meta-faction-winrate-canvas"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-duration-histogram">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Match Duration</h5>
-                <button class="btn btn-sm" data-expand="section-meta-duration-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-duration-canvas"></canvas></div></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-player-counts">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Player Count</h5>
-                <button class="btn btn-sm" data-expand="section-meta-player-counts" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-playercount-canvas"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-12">
-            <div class="card h-100" id="section-meta-when-hour">
-              <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
-                <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Start hour</h5>
-                <div class="d-flex align-items-center gap-2">
-                  <label for="meta-when-tz" class="visually-hidden">Timezone</label>
-                  <select id="meta-when-tz" class="form-select form-select-sm vt-when-tz" autocomplete="off">
-                    <option value="local">Your timezone</option>
-                    <option value="America/Los_Angeles">Pacific</option>
-                    <option value="America/Denver">Mountain</option>
-                    <option value="America/Chicago">Central</option>
-                    <option value="America/New_York">Eastern</option>
-                    <option value="Europe/London">London</option>
-                    <option value="Europe/Berlin">Germany</option>
-                    <option value="Australia/Sydney">Sydney</option>
-                    <option value="UTC">UTC</option>
-                  </select>
-                  <button class="btn btn-sm" data-expand="section-meta-when-hour" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-                </div>
-              </div>
-              <div class="card-body">
-                <div class="chart-container" style="height:260px;"><canvas id="meta-when-hour-canvas"></canvas></div>
-                <p class="small mb-0 mt-2" id="meta-when-hour-summary"></p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-when-weekday">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Day of week</h5>
-                <button class="btn btn-sm" data-expand="section-meta-when-weekday" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body">
-                <div class="chart-container" style="height:240px;"><canvas id="meta-when-weekday-canvas"></canvas></div>
-              </div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-meta-when-month">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Month</h5>
-                <button class="btn btn-sm" data-expand="section-meta-when-month" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body">
-                <div class="chart-container" style="height:240px;"><canvas id="meta-when-month-canvas"></canvas></div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-12">
-            <div class="card h-100" id="section-meta-over-time">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Matches Over Time</h5>
-                <div class="d-flex align-items-center gap-2">
-                  <div class="btn-group btn-group-sm" role="group" id="meta-overtime-interval" aria-label="Matches over time interval">
-                    <button type="button" class="btn btn-outline-secondary active" data-overtime="weeks">Weeks</button>
-                    <button type="button" class="btn btn-outline-secondary" data-overtime="months">Months</button>
-                  </div>
-                  <button class="btn btn-sm" data-expand="section-meta-over-time" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-                </div>
-              </div>
-              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-overtime-canvas"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-12">
-            <!-- F9bomber's stats (static counts, hides on 404).
-                 Corpus-wide reference data — not part of the picker-scoped
-                 faction_stats above. -->
-            <div class="card h-100 d-none" id="section-f9-community">
-              <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>F9bomber's stats</h5>
-              </div>
-              <div class="card-body" id="f9-community-body"></div>
             </div>
           </div>
         </div>

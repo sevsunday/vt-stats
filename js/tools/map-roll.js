@@ -193,7 +193,7 @@
   function stripTitlePrefixes(title) {
     // Mirror of the iterative `XYZ: ` prefix-stripping logic used by
     // scripts/process_stats.py resolve_match_name + scripts/generate_map_pages.py
-    // map_title_resolver + js/app.js mapNameResolver + js/maps.js stripTitlePrefixes.
+    // map_title_resolver + js/meta.js mapNameResolver + js/maps.js stripTitlePrefixes.
     let s = String(title || '');
     for (let i = 0; i < 5; i++) {
       const m = s.match(/^([A-Z]{1,4}):\s*(.+)$/);
