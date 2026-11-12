@@ -73,7 +73,8 @@ SITE_URL = "https://vtstats.bz"
 # Join VSR Games, Port Forwarding; no divider).
 # v19 renames two Tools items: Record -> Record Stats, Join VSR Games ->
 # Beta Versions.
-MAP_TEMPLATE_VERSION = 19
+# v20 adds Discord Invite to the Tools dropdown.
+MAP_TEMPLATE_VERSION = 20
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
