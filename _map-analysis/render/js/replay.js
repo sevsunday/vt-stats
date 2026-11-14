@@ -2660,18 +2660,32 @@ function normStructOdf(odf) {
 // instance at tSec, returned in reflected scene coords (matching actorFlashPos).
 // The structure meshes live in worldGroup (scale.z = -1) and sit on terrain, so
 // we mirror their placement: world Z = -inst.z, Y = terrain height at (x, z).
+function slotSide(slot) {
+  const n = Number(slot);
+  if (n >= 1 && n <= 5) return 1;
+  if (n >= 6 && n <= 10) return 2;
+  return 0;
+}
+
 function structureFor(vs, tSec, shooterPos) {
   const block = STATE.matchData && STATE.matchData.structures;
   const insts = block && block.instances;
   if (!insts || !insts.length || !vs) return null;
   const tick = tSec * (STATE.tickRate || 20);
   const wantOdf = normStructOdf(vs.odf);
+  const wantSide = slotSide(vs.team);
+  const wantHandle = vs.handle ? (vs.handle >>> 0) : 0;
   const hm = STATE.mapData && STATE.mapData.heightmap;
   let best = null;
   let bestD = Infinity;
   for (const inst of insts) {
-    if (inst.team !== vs.team) continue;
-    if (normStructOdf(inst.odf) !== wantOdf) continue;
+    if (inst.death_reason === 'untracked') continue;
+    if (wantHandle) {
+      if (((inst.handle || 0) >>> 0) !== wantHandle) continue;
+    } else {
+      if (inst.team !== wantSide) continue;
+      if (normStructOdf(inst.odf) !== wantOdf) continue;
+    }
     if (inst.spawn_tick != null && tick < inst.spawn_tick) continue;
     if (inst.death_tick != null && tick > inst.death_tick) continue;
     if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z)) continue;

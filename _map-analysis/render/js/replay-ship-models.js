@@ -249,7 +249,7 @@ export function collectMatchOdfs(matchData) {
   const instances = (data.structures && data.structures.instances) || [];
   for (const inst of instances) {
     if (!inst) continue;
-    if (inst.death_reason === 'untracked' || inst.cls === 'turret') continue;
+    if (inst.death_reason === 'untracked') continue;
     addOdf(set, inst.odf);
   }
   for (const o of FACTION_ODFS) addOdf(set, o);

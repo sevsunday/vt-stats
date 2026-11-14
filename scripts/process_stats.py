@@ -178,7 +178,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # follow the same rule. Ratings move.
 # 60 -> 61: per-team loose collected in 60s buckets (match.schema_version
 # 36). Display-only series for the Economy tab. Ratings unmoved.
-PIPELINE_VERSION = 61
+# 61 -> 62: gun-tower handles. A turret BUILD with a non-zero build_handle
+# is drawn and removed only when UnitDestroyed.victim_handle matches.
+# Handle 0 keeps death_reason untracked. Display-only. Ratings unmoved.
+PIPELINE_VERSION = 62
 
 # Building damage inside this many seconds of the last recorded tick is
 # reported separately as `enemy_structure_dealt_late` (the winners' end-of-
@@ -211,6 +214,10 @@ ACCURACY_RECON_CONTAMINATED = frozenset({
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
 # emitting those deaths reliably. Do NOT infer deaths from HP.
+# A non-zero BuildEvent.build_handle is the exception: that pad is
+# drawn and removed only when victim_handle matches. Handle 0 stays
+# untracked. This flag stays False so the nearest-killer matcher
+# never runs on turrets.
 TURRET_DEATHS_RELIABLE = False
 
 TIMELINE_BUCKET_SECONDS = 10
@@ -6199,14 +6206,60 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
     return len(kept)
 
 
+def _handle_u32(value):
+    """Session object handle as an unsigned 32-bit int. 0 means absent.
+
+    The collector stores a signed ``int`` Handle in a uint32 field. Values
+    above 2^31 are normal. Compare and store them unsigned so a death
+    joins the completion that built that object.
+    """
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n & 0xFFFFFFFF
+
+
+def _apply_turret_handle_deaths(instances, kills):
+    """Remove a handled turret only when victim_handle equals its build handle.
+
+    No match leaves the pad standing. Several towers of the same ODF may
+    be up together. This does not look at damage or the killer's position.
+    """
+    by_handle = {}
+    for inst in instances:
+        handle = inst.get("handle") or 0
+        if not handle or inst.get("cls") != "turret":
+            continue
+        if inst.get("death_reason") == "untracked":
+            continue
+        by_handle.setdefault(handle, []).append(inst)
+    if not by_handle:
+        return
+    for row in kills or []:
+        handle = _handle_u32(row.get("victim_handle"))
+        pool = by_handle.get(handle)
+        if not pool:
+            continue
+        tick = int(row.get("tick") or 0)
+        for inst in pool:
+            if inst.get("death_tick") is not None:
+                continue
+            if (inst.get("spawn_tick") or 0) <= tick:
+                inst["death_tick"] = tick
+                inst["death_reason"] = "destroyed"
+                break
+
+
 def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants=None):
     """Derive the match-global structures[] block.
 
     Starting recyclers (one per team) plus one instance per constructor
     BUILD that carries xyz. Factory/armory/recycler *lane* pads are
     units, not buildings. Deaths come from UnitDestroyed / kill feed
-    only -- never HP inference. Turret-class instances stay
-    death_reason='untracked' while TURRET_DEATHS_RELIABLE is False.
+    only -- never HP inference. Turret-class instances with no
+    build_handle stay death_reason='untracked'. A non-zero handle is
+    drawn and removed only when victim_handle matches.
 
     When `pool_plants` is non-empty (proto v5), each plant is a base
     extractor unless a constructor *bscup BUILD pairs with it (then that
@@ -6288,6 +6341,10 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         seq += 1
         cls = "turret" if stem in turret_odfs else "building"
         pretty = row.get("name") or odf_map.get(stem + ".odf") or odf_map.get(stem) or stem
+        handle = _handle_u32(row.get("handle")) if cls == "turret" else 0
+        # A handled turret is identified by build_handle. Handle 0 stays
+        # untracked: the nearest-killer matcher must not guess which pad died.
+        tracked = cls == "turret" and handle != 0
         inst = {
             "id": f"b-{side}-{stem}-{seq}",
             "team": side,
@@ -6300,9 +6357,17 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
             "spawn_tick": int(row.get("tick") or 0),
             "max_hp": _lookup_max_hp(ship_caps, stem),
             "death_tick": None,
-            "death_reason": "untracked" if (cls == "turret" and not TURRET_DEATHS_RELIABLE) else None,
+            "death_reason": (
+                "untracked"
+                if (cls == "turret" and not TURRET_DEATHS_RELIABLE and not tracked)
+                else None
+            ),
         }
+        if tracked:
+            inst["handle"] = handle
         instances.append(inst)
+
+    _apply_turret_handle_deaths(instances, kills)
 
     pool_sites = []
     _tag_upgrade_sites(instances, pool_sites)
@@ -6314,6 +6379,10 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
     living = {}
     for inst in instances:
         if inst.get("death_reason") == "untracked":
+            continue
+        # Handled turrets are joined by victim_handle above. The
+        # nearest-killer pass must not assign a different pad's death.
+        if inst.get("cls") == "turret" and inst.get("handle"):
             continue
         # An upgrade plant already retired its base. A later kill of that
         # ODF must not land on the retired row.
@@ -6868,11 +6937,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # + building ODF stem; the replay resolves that to the nearest living
     # structure instance at draw time. v2+ only (v1 DamageDealt carries no
     # event-time victim_odf). Display-only / rating-inert.
-    engage_struct_open = {}            # (shooter, vteam, vodf) -> {t_start, t_end, dmg}
-    engage_struct_closed = []          # [(shooter, vteam, vodf, t_start, t_end, dmg), ...]
+    engage_struct_open = {}            # (shooter, vteam, vodf, handle) -> {t_start, t_end, dmg}
+    engage_struct_closed = []          # [(shooter, vteam, vodf, handle, t_start, t_end, dmg), ...]
 
-    def _engage_struct_add(shooter, vteam, vodf, tick, amount):
-        key = (shooter, vteam, vodf)
+    def _engage_struct_add(shooter, vteam, vodf, tick, amount, handle=0):
+        # handle 0 keeps the historical grouping for buildings. A non-zero
+        # gun-tower handle keeps two of the same type from sharing one line.
+        key = (shooter, vteam, vodf, _handle_u32(handle))
         cur = engage_struct_open.get(key)
         if cur is not None and (tick - cur["t_end"]) <= _engage_window_ticks:
             cur["t_end"] = tick
@@ -6880,7 +6951,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         else:
             if cur is not None and cur["dmg"] >= ENGAGE_MIN_DAMAGE:
                 engage_struct_closed.append(
-                    (key[0], key[1], key[2], cur["t_start"], cur["t_end"], cur["dmg"]))
+                    (key[0], key[1], key[2], key[3], cur["t_start"], cur["t_end"], cur["dmg"]))
             engage_struct_open[key] = {"t_start": tick, "t_end": tick, "dmg": amount}
 
     # Faction totals
@@ -7553,6 +7624,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 de_victim = dd.victim
                 de_victim_team = dd.victim_team
                 de_victim_odf_event = dd.victim_odf
+                de_victim_handle = _handle_u32(getattr(dd, "victim_handle", 0))
                 de_ordnance = dd.ordnance_odf
                 de_amount = dd.amount
                 de_victim_amount = dd.amount  # unified: one amount represents both sides
@@ -7584,6 +7656,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     de_victim_amount = 0.0
                     i += 1
                 de_victim_odf_event = ""
+                de_victim_handle = 0
 
             # v2.5: presence-window tracking for is_low_activity gate.
             # Touched on BOTH sides (shooter + victim) per plan; _touch
@@ -7639,8 +7712,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # raw-lowercased odf but key/emit the normalized stem so the
                 # replay's structureFor matches structures[] inst.odf.
                 _vraw = de_victim_odf_event.lower() if de_victim_odf_event else ""
+                _vstem = _norm_build_odf(_vraw) if _vraw else ""
                 if _vraw and _vraw in building_odfs:
-                    _engage_struct_add(de_shooter, de_victim_team, _norm_build_odf(_vraw), de_tick, de_amount)
+                    _engage_struct_add(de_shooter, de_victim_team, _vstem, de_tick, de_amount)
+                elif de_victim_handle and _vstem and _vstem in (turret_odfs or ()):
+                    _engage_struct_add(
+                        de_shooter, de_victim_team, _vstem, de_tick, de_amount,
+                        de_victim_handle,
+                    )
 
             skip_shooter = (de_shooter_team == 0 or de_amount == 0.0)
 
@@ -8064,6 +8143,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # default to False.
                 "is_pilot_victim": bool(victim_is_pilot),
             }
+            _vhandle = _handle_u32(getattr(ud, "victim_handle", 0))
+            if _vhandle:
+                _feed_row["victim_handle"] = _vhandle
             # Omitted unless this kill was reattributed from a mine entity.
             if killer_via_mine:
                 _feed_row["killer_via_mine"] = True
@@ -8620,6 +8702,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     else None
                 ),
             }
+            _bhandle = _handle_u32(getattr(be, "build_handle", 0))
+            if _etype == "build" and _bhandle:
+                _row["handle"] = _bhandle
 
             if _etype == "queue":
                 _tup = (int(be.tick), int(be.teamnum), int(be.producer), _stem)
@@ -9661,7 +9746,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     for _key, _cur in engage_struct_open.items():
         if _cur["dmg"] >= ENGAGE_MIN_DAMAGE:
             engage_struct_closed.append(
-                (_key[0], _key[1], _key[2], _cur["t_start"], _cur["t_end"], _cur["dmg"]))
+                (_key[0], _key[1], _key[2], _key[3], _cur["t_start"], _cur["t_end"], _cur["dmg"]))
     engagement_pairs = [
         {
             "s": nick_for_s64(_shooter),
@@ -9673,8 +9758,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         for _shooter, _victim, _t0, _t1, _dmg in engage_closed
     ]
     engagement_pairs.sort(key=lambda p: p["t0"])
-    structure_pairs = [
-        {
+    structure_pairs = []
+    for _shooter, _vteam, _vodf, _vhandle, _t0, _t1, _dmg in engage_struct_closed:
+        _pair = {
             "s": nick_for_s64(_shooter),
             "vteam": int(_vteam),
             "vodf": _vodf,
@@ -9683,8 +9769,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "t1": round(_t1 / tick_rate, 2),
             "dmg": round(_dmg, 1),
         }
-        for _shooter, _vteam, _vodf, _t0, _t1, _dmg in engage_struct_closed
-    ]
+        if _vhandle:
+            _pair["vhandle"] = int(_vhandle)
+        structure_pairs.append(_pair)
     structure_pairs.sort(key=lambda p: p["t0"])
     engagements_block = {
         "window_sec": ENGAGE_WINDOW_SEC,

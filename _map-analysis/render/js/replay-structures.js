@@ -475,7 +475,7 @@ export function buildStructuresLayer(matchData, mapData) {
   const odfMap = matchData.odf_map || {};
   let skippedTurrets = 0;
   for (const inst of block.instances) {
-    if (inst.death_reason === 'untracked' || inst.cls === 'turret') {
+    if (inst.death_reason === 'untracked') {
       skippedTurrets += 1;
       continue;
     }

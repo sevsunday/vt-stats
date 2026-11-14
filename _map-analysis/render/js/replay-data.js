@@ -462,7 +462,12 @@ function engagementEntriesFromBlock(eng, killIndex) {
     out.push({
       shooter,
       victim: null,
-      victimStruct: { team: p.vteam, odf: p.vodf, name: p.vname },
+      victimStruct: {
+        team: p.vteam,
+        odf: p.vodf,
+        name: p.vname,
+        handle: p.vhandle ? (p.vhandle >>> 0) : 0,
+      },
       tStart: t0,
       tEnd: Math.max(t0, t1),
       dmg: Number(p.dmg) || 0,
