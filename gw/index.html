@@ -34,7 +34,7 @@
 </head>
 <body class="d-flex flex-column h-100">
 
-  <!-- Navbar. Shared destination cluster; Game Watch is not a bar item. -->
+  <!-- Navbar. Shared destination cluster; Game Watch lives in the Tools dropdown. -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
@@ -94,7 +94,7 @@
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
                     data-bs-toggle="dropdown" data-bs-auto-close="true"
-                    data-vt-tools-link data-vt-tools-live="0"
+                    data-vt-tools-link data-vt-tools-live="0" aria-current="page"
                     title="Lobby tools and Discord timestamps"
                     aria-label="Tools">
               <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
@@ -103,6 +103,9 @@
               <li><a class="dropdown-item" href="../tools/" data-vt-tools-item
                      title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
                 <i class="bi bi-controller me-2"></i>Live Lobby
+              </a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page">
+                <i class="bi bi-broadcast-pin me-2"></i>Game Watch
               </a></li>
               <li><a class="dropdown-item" href="../time/">
                 <i class="bi bi-clock me-2"></i>Discord Time

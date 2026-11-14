@@ -75,7 +75,8 @@ SITE_URL = "https://vtstats.bz"
 # Beta Versions.
 # v20 adds Discord Invite to the Tools dropdown.
 # v21 replaces Analysis with Meta in the Players dropdown.
-MAP_TEMPLATE_VERSION = 21
+# v22 adds Game Watch to the Tools dropdown.
+MAP_TEMPLATE_VERSION = 22
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
