@@ -34,6 +34,9 @@
   let stackPromise = null;
   let polling = false;
   let themeObs = null;
+  let liveFitting = false;
+  const LIVE_FIT_MAX = 4;
+  const LIVE_CAP_FLOOR = 2;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -598,6 +601,109 @@
     grid.innerHTML = '';
   }
 
+  function sessionKey(session) {
+    if (!session) return '';
+    if (session.id != null && session.id !== '') return String(session.id);
+    return String(session.guid || session.name || '');
+  }
+
+  function showLiveCard(grid, session) {
+    const key = sessionKey(session);
+    const existing = grid.querySelector('.gw-card');
+    if (existing && existing.dataset.sessionId === key) {
+      VTGwCard.patch(existing, session, { ofInterest: !!session.__ofInterest });
+      return;
+    }
+    clearLiveCards();
+    const card = VTGwCard.create(session, { ofInterest: !!session.__ofInterest });
+    card.classList.remove('gw-enter-init');
+    card.dataset.sessionId = key;
+    grid.appendChild(card);
+  }
+
+  function rosterColumns(card) {
+    return card.querySelectorAll('.gw-team-rows, .gw-plist');
+  }
+
+  function clearRosterCap(card) {
+    card.querySelectorAll('.vt-home-live-more-rows').forEach((el) => el.remove());
+    card.querySelectorAll('.gw-prow').forEach((row) => {
+      if (!row.dataset.capped) return;
+      row.hidden = false;
+      delete row.dataset.capped;
+    });
+  }
+
+  function applyRosterCap(card, k) {
+    rosterColumns(card).forEach((col) => {
+      const rows = col.querySelectorAll(':scope > .gw-prow');
+      let extra = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const hide = i >= k;
+        rows[i].hidden = hide;
+        if (hide) {
+          rows[i].dataset.capped = '1';
+          extra += 1;
+        } else {
+          delete rows[i].dataset.capped;
+        }
+      }
+      if (extra > 0) {
+        const note = document.createElement('div');
+        note.className = 'vt-home-live-more-rows';
+        note.textContent = '+' + extra + ' more';
+        col.appendChild(note);
+      }
+    });
+  }
+
+  function liveOverflows(card) {
+    const grid = card.closest('#vt-home-live-grid');
+    if (grid && grid.scrollHeight > grid.clientHeight + 1) return true;
+    const players = card.querySelector('.gw-card-players');
+    if (players && players.scrollHeight > players.clientHeight + 1) return true;
+    return card.scrollHeight > card.clientHeight + 1;
+  }
+
+  // Drop the footer, the message, then the time and mode lines, then go
+  // dense. If a full roster still does not fit, cap each column and say
+  // how many names are off the card. Phones keep the whole card.
+  function fitLive() {
+    if (liveFitting) return;
+    const grid = document.getElementById('vt-home-live-grid');
+    if (!grid) return;
+    const card = grid.querySelector('.gw-card');
+    if (!card) return;
+    liveFitting = true;
+    try {
+      clearRosterCap(card);
+      if (!risingCanGrow() || grid.clientHeight < 40) {
+        card.removeAttribute('data-fit');
+        return;
+      }
+      let fit = 0;
+      card.dataset.fit = '0';
+      while (fit < LIVE_FIT_MAX && liveOverflows(card)) {
+        fit += 1;
+        card.dataset.fit = String(fit);
+      }
+      if (!liveOverflows(card)) return;
+      let maxRows = 0;
+      rosterColumns(card).forEach((col) => {
+        const n = col.querySelectorAll(':scope > .gw-prow').length;
+        if (n > maxRows) maxRows = n;
+      });
+      let k = maxRows;
+      while (k > LIVE_CAP_FLOOR && liveOverflows(card)) {
+        k -= 1;
+        clearRosterCap(card);
+        applyRosterCap(card, k);
+      }
+    } finally {
+      liveFitting = false;
+    }
+  }
+
   function setLiveEmpty(on) {
     const card = document.getElementById('vt-home-live');
     if (card) card.classList.toggle('is-empty', !!on);
@@ -618,13 +724,10 @@
     const more = document.getElementById('vt-home-live-more');
     const grid = document.getElementById('vt-home-live-grid');
     if (status) status.hidden = true;
-    clearLiveCards();
-    if (grid && window.VTGwCard) {
-      shown.forEach((session) => {
-        const card = VTGwCard.create(session, { ofInterest: !!session.__ofInterest });
-        grid.appendChild(card);
-        requestAnimationFrame(() => card.classList.remove('gw-enter-init'));
-      });
+    if (grid && window.VTGwCard && shown.length) {
+      showLiveCard(grid, shown[0]);
+    } else {
+      clearLiveCards();
     }
     setLiveEmpty(shown.length === 0);
     if (empty) empty.hidden = shown.length !== 0;
@@ -637,6 +740,14 @@
         more.innerHTML = '';
       }
     }
+    scheduleFitLive();
+  }
+
+  // The first measurement can land before the slot has its final height,
+  // and a late font load changes row heights without resizing the slot.
+  function scheduleFitLive() {
+    fitLive();
+    requestAnimationFrame(fitLive);
   }
 
   function paintLiveError() {
@@ -724,10 +835,17 @@
     window.addEventListener('resize', () => {
       fitHeader();
       fitRising();
+      scheduleFitLive();
     });
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => fitLive()).catch(() => {});
+    }
     if (typeof ResizeObserver !== 'undefined') {
-      const riseObs = new ResizeObserver(() => fitRising());
-      ['vt-home-commanders', 'vt-home-thugs'].forEach((id) => {
+      const riseObs = new ResizeObserver(() => {
+        fitRising();
+        fitLive();
+      });
+      ['vt-home-commanders', 'vt-home-thugs', 'vt-home-live-grid'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) riseObs.observe(el);
       });

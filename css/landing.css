@@ -608,9 +608,138 @@ body.vt-home-body {
   min-height: 0;
 }
 
+/* Home only. Game Watch keeps the full card. */
+#vt-home-live {
+  --gw-thumb: 3.6rem;
+}
+
 #vt-home-live-grid .gw-card {
   font-size: 0.78rem;
   box-shadow: none;
+}
+
+#vt-home-live .gw-card-bar,
+#vt-home-live .gw-card-foot {
+  padding: 0.32rem 0.6rem;
+  min-height: 0;
+}
+
+#vt-home-live .gw-card-info {
+  gap: 0.3rem 0.55rem;
+  padding: 0.4rem 0.6rem;
+}
+
+#vt-home-live .gw-dl { gap: 0.04rem; }
+
+#vt-home-live .gw-dl-row { gap: 0.35rem; }
+
+#vt-home-live .gw-card-players {
+  padding: 0 0.55rem 0.4rem;
+}
+
+#vt-home-live .gw-teams { gap: 0.35rem; }
+
+#vt-home-live .gw-team-head {
+  padding: 0 0.25rem 0.12rem;
+}
+
+#vt-home-live .gw-team-rows,
+#vt-home-live .gw-plist,
+#vt-home-live .gw-hidden-rows {
+  gap: 0.12rem;
+}
+
+#vt-home-live .gw-prow {
+  padding: 0.12rem 0.32rem;
+}
+
+#vt-home-live .gw-hidden {
+  margin-bottom: 0.28rem;
+  padding: 0.22rem 0.32rem 0.26rem;
+}
+
+/* Fit steps. Each step keeps what the earlier ones dropped. fitLive()
+   raises data-fit only while the card is taller than its slot. */
+#vt-home-live .gw-card[data-fit="1"] .gw-card-foot,
+#vt-home-live .gw-card[data-fit="2"] .gw-card-foot,
+#vt-home-live .gw-card[data-fit="3"] .gw-card-foot,
+#vt-home-live .gw-card[data-fit="4"] .gw-card-foot {
+  display: none;
+}
+
+#vt-home-live .gw-card[data-fit="2"] .gw-card-msg,
+#vt-home-live .gw-card[data-fit="3"] .gw-card-msg,
+#vt-home-live .gw-card[data-fit="4"] .gw-card-msg {
+  display: none;
+}
+
+#vt-home-live .gw-card[data-fit="2"] .gw-card-info,
+#vt-home-live .gw-card[data-fit="3"] .gw-card-info,
+#vt-home-live .gw-card[data-fit="4"] .gw-card-info {
+  grid-template-areas: "thumb dl";
+  grid-template-rows: auto;
+}
+
+#vt-home-live .gw-card[data-fit="3"] .gw-dl-row:has([data-gw-field="time"]),
+#vt-home-live .gw-card[data-fit="3"] .gw-dl-row:has([data-gw-field="mode"]),
+#vt-home-live .gw-card[data-fit="4"] .gw-dl-row:has([data-gw-field="time"]),
+#vt-home-live .gw-card[data-fit="4"] .gw-dl-row:has([data-gw-field="mode"]) {
+  display: none;
+}
+
+#vt-home-live .gw-card[data-fit="3"] .gw-pnick,
+#vt-home-live .gw-card[data-fit="4"] .gw-pnick {
+  display: none;
+}
+
+#vt-home-live .gw-card[data-fit="4"] {
+  --gw-thumb: 2.6rem;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-card-info {
+  gap: 0.25rem 0.45rem;
+  padding: 0.28rem 0.5rem;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-prow {
+  padding: 0.04rem 0.28rem;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-pname-wrap {
+  align-items: center;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-hidden {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.45rem;
+  margin-bottom: 0.12rem;
+  padding: 0.02rem 0.28rem;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-hidden-head {
+  padding: 0;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-hidden-rows {
+  display: contents;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-open {
+  margin-top: 0.08rem;
+}
+
+#vt-home-live .gw-card[data-fit="4"] .gw-hidden .gw-prow {
+  padding: 0;
+  background: none;
+}
+
+.vt-home-live-more-rows {
+  padding: 0.02rem 0.28rem 0;
+  color: var(--kb-text-muted);
+  font-size: 0.68rem;
 }
 
 #vt-home-live-more {
@@ -691,6 +820,30 @@ body.vt-home-body {
 
   #vt-home-live.is-empty .vt-home-live-body {
     min-height: 0;
+  }
+
+  #vt-home-live .vt-home-live-body {
+    overflow: hidden;
+  }
+
+  #vt-home-live-grid {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #vt-home-live-grid .gw-card {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  #vt-home-live-grid .gw-card-players {
+    min-height: 0;
+    overflow: hidden;
   }
 
   #vt-home-meta-body {
