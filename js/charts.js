@@ -1757,11 +1757,25 @@ function renderWhenBarChart(canvasId, config) {
   if (!canvas) return null;
   destroyChartOnCanvas(canvasId);
   const primary = getCSSVar('--kb-primary') || '#4d7cff';
+  const accent = getCSSVar('--kb-accent') || primary;
+  const highlight = Array.isArray(config.highlight) ? new Set(config.highlight) : null;
+  const n = (config.recorded || []).length;
+  let backgroundColor = withAlpha(primary, 0.8);
+  let borderColor = primary;
+  if (highlight && highlight.size && n) {
+    backgroundColor = [];
+    borderColor = [];
+    for (let i = 0; i < n; i++) {
+      const on = highlight.has(i);
+      backgroundColor.push(withAlpha(on ? accent : primary, on ? 0.95 : 0.28));
+      borderColor.push(on ? accent : withAlpha(primary, 0.4));
+    }
+  }
   const datasets = [{
     label: 'Games',
     data: config.recorded,
-    backgroundColor: withAlpha(primary, 0.8),
-    borderColor: primary,
+    backgroundColor,
+    borderColor,
     borderWidth: 1,
   }];
   const chart = new Chart(canvas.getContext('2d'), {
@@ -1783,9 +1797,16 @@ function renderWhenBarChart(canvasId, config) {
           },
         },
       },
+      layout: config.compact ? { padding: { top: 2, right: 0, bottom: 0, left: 0 } } : undefined,
       scales: {
-        x: { ticks: config.ticks || { font: { size: 10 } } },
-        y: { beginAtZero: true, ticks: { precision: 0 } },
+        x: Object.assign(
+          { ticks: config.ticks || { font: { size: 10 } } },
+          config.compact ? { grid: { display: false }, border: { display: false } } : {}
+        ),
+        y: Object.assign(
+          { beginAtZero: true, ticks: { precision: 0 } },
+          config.compact ? { display: false } : {}
+        ),
       },
     },
   });

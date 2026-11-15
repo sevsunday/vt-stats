@@ -380,10 +380,13 @@ stays hidden through it. A census or kill death shows the pool again. A box
 or a LEGO body leaves the pool visible. Extractors declare no cells of their
 own; their sunken parts sit in the pool's bowl cut.
 
-There is no runtime flatten for these replay-placed buildings (the 2 m
-ground is not shipped to the browser). On a sloped pad the cut edge may not
-meet the floor. The wireframe floor is the raw mesh, so it still draws the
-lines inside a cut. No `PIPELINE_VERSION`, match schema or rating change.
+A catalog structure with a `terrainPatch` flattens every terrain vertex inside
+that square to the pad height the first time it stands (`stampStructurePads`).
+The next vertex outside keeps its own height, so the shared triangles slope
+into the pad. That flat square stays after the structure is destroyed. A box
+and a recycler still on its mobile hull do not stamp one. Tunnel cuts still
+follow the living building. The wireframe floor is the raw mesh, so it still
+draws the lines inside a cut. No `PIPELINE_VERSION`, match schema or rating change.
 The committed top-down PNGs change only if they are regenerated.
 
 ## Atmosphere: `<stem>.sky.json` (schema 5) and the lighting / fog model

@@ -2441,7 +2441,7 @@
     const axes = renderAxisContribBars(r);
     const wb = renderWeaponBreakdownBar(r);
     const ld = renderLoadoutBar(r);
-    const fullMatchHref = `${state.dataPrefix}index.html?match=${encodeURIComponent(r.match_id)}&filter=player&players=${encodeURIComponent(state.matchLogState.rating.steam64 || '')}`;
+    const fullMatchHref = `${state.dataPrefix}matches/?match=${encodeURIComponent(r.match_id)}&filter=player&players=${encodeURIComponent(state.matchLogState.rating.steam64 || '')}`;
 
     return `<tr class="vt-matchlog-detail-row"><td colspan="11" class="vt-matchlog-detail">
       <div class="row g-3">
@@ -2870,7 +2870,7 @@
       const ru = counts[c].runner_ups || 0;
       const rate = played > 0 ? (w / played) * 100 : null;
       const last = counts[c].last_win_id
-        ? `<a href="${state.dataPrefix}index.html?match=${encodeURIComponent(counts[c].last_win_id)}" title="Open the most recent win">${escapeHtml(String(counts[c].last_win_date || counts[c].last_win_id).slice(0, 10))}</a>`
+        ? `<a href="${state.dataPrefix}matches/?match=${encodeURIComponent(counts[c].last_win_id)}" title="Open the most recent win">${escapeHtml(String(counts[c].last_win_date || counts[c].last_win_id).slice(0, 10))}</a>`
         : '\u2014';
       return `<div class="col-6 col-md-4 col-xl-3">
         <div class="vt-award-tile${w > 0 ? '' : ' vt-award-tile--runnerup-only'}" title="${escapeHtml(meta.what)}">
@@ -3908,7 +3908,7 @@
               const f9 = p.source === 'f9'
                 ? ' <span class="vt-cmdr-riv-tag" title="Community duel from F9bomber">F9</span>' : '';
               const dash = (p.match_id && p.source !== 'f9')
-                ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+                ? ` <a href="${state.dataPrefix}matches/?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
                 : '';
               const opp = p.opponentSteam64
                 ? `<a href="${playerHref(p.opponentSteam64)}">${escapeHtml(p.opponent || 'unknown')}</a>`
@@ -3997,7 +3997,7 @@
         ? `<a href="${playerHref(p.opponentSteam64)}">${escapeHtml(p.opponent || 'unknown')}</a>`
         : escapeHtml(p.opponent || 'unknown');
       const dash = p.match_id
-        ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+        ? ` <a href="${state.dataPrefix}matches/?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
         : '';
       return `<tr>
         <td class="vt-matchlog-num">${cmdrDateLabel(p.date)}</td>
@@ -4125,7 +4125,7 @@
         ? `${v2Delta(wlDelta)} <span class="text-secondary small">W/L</span> ${v2Delta(perfDelta)} <span class="text-secondary small">perf</span>`
         : v2Delta(wlDelta);
       const src = g.match_id
-        ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(g.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+        ? ` <a href="${state.dataPrefix}matches/?match=${encodeURIComponent(g.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
         : '';
       return `<tr>
         <td class="vt-matchlog-num">${cmdrDateLabel(g.date)}${src}</td>
@@ -4427,7 +4427,7 @@
                       <div class="vt-player-single-stat-label">Last match</div>
                       <div class="vt-player-single-stat-value" style="font-size:0.95rem;">
                         ${rating.last_match_id
-                          ? `<a href="${state.dataPrefix}index.html?match=${encodeURIComponent(rating.last_match_id)}">${escapeHtml(String(rating.last_match_id).slice(0, 10))}</a>`
+                          ? `<a href="${state.dataPrefix}matches/?match=${encodeURIComponent(rating.last_match_id)}">${escapeHtml(String(rating.last_match_id).slice(0, 10))}</a>`
                           : '\u2014'}
                       </div>
                     </div>
@@ -5518,7 +5518,7 @@
       }).join('');
       // Cross-link target: dashboard with the match loaded and filtered
       // to all selected players via the existing ?players=<csv> contract.
-      const dashHref = `${state.dataPrefix}index.html?match=${encodeURIComponent(r.match_id)}&filter=player&players=${encodeURIComponent(matchSids)}`;
+      const dashHref = `${state.dataPrefix}matches/?match=${encodeURIComponent(r.match_id)}&filter=player&players=${encodeURIComponent(matchSids)}`;
       return `<tr>
         <td><a href="${dashHref}" title="Open match in dashboard">${escapeHtml(r.map || r.match_id)}</a></td>
         <td class="text-secondary">${dateStr}</td>

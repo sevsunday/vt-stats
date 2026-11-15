@@ -499,6 +499,9 @@ def _building_cuts(odf_db: dict[str, dict], odf_index: dict[str, str]) -> dict[s
     declare different cells (stock Matriarch vs the VSR one). Rects are the
     same construction the map uses, without the edge string the static cutter
     needs. The replay rotates them by the model's wrapper when it places one.
+
+    A flat terrain pad is not a cut. Discarding that square leaves an open
+    edge. The replay flattens those vertices instead.
     """
     bounds_cache: dict[str, tuple[list[float], list[float]] | None] = {}
     cuts: dict[str, dict] = {}

@@ -2,8 +2,26 @@
 <html lang="en" data-theme="default" data-mode="dark">
 <head>
   <meta charset="UTF-8">
+  <script>
+    /* Old dashboard links (?match= / ?tab= / ?filter= / ?t=) now live on /matches/. */
+    (function () {
+      try {
+        var p = new URLSearchParams(location.search);
+        if (p.has('match') || p.has('tab') || p.has('filter') || p.has('team') || p.has('players') || p.has('t')) {
+          location.replace('matches/' + location.search + location.hash);
+        }
+      } catch (e) { /* keep the home page */ }
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VT Stats Dashboard</title>
+  <title>VT Stats</title>
+  <meta name="description" content="Battlezone: Combat Commander match statistics. Who is playing, who is climbing, and when the games start.">
+  <link rel="canonical" href="https://vtstats.bz/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="VT Stats">
+  <meta property="og:description" content="Battlezone: Combat Commander match statistics. Who is playing, who is climbing, and when the games start.">
+  <meta property="og:url" content="https://vtstats.bz/">
+  <meta property="og:site_name" content="VT Stats">
   <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
   <link rel="stylesheet" href="css/theme-system.css">
@@ -11,77 +29,38 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/vtstats-theme.css">
-  <link rel="stylesheet" href="css/replay-quality.css">
-  <!-- KaTeX (vendored, v0.16.11). Used to pre-render VTSR-T methodology
-       math in the modal via katex.renderToString(); auto-render contrib is loaded
-       only on docs/index.html. Fonts live in vendor/katex/fonts/ (woff2 only;
-       modern browsers fall back through the @font-face source list). -->
-  <link rel="stylesheet" href="vendor/katex/katex.min.css">
-  <script defer src="vendor/katex/katex.min.js"></script>
+  <link rel="stylesheet" href="css/gw.css">
+  <link rel="stylesheet" href="css/landing.css">
 </head>
-<body>
+<body class="vt-home-body">
 
-  <!-- Navbar and the world-clock bar share one sticky header so the clocks
-       stay pinned under the nav on both the match view and All Matches. -->
   <header class="vt-site-header sticky-top">
     <nav class="navbar navbar-expand-md border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
-      <a class="navbar-brand fw-bold" href="index.html" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
+      <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
-      <!-- Active Game Indicator. Polls the live BZ2 lobby via window.BZ2API
-           every 60s (60s floor while tab hidden, 120s error cap) and surfaces
-           a pulsing LIVE pill whenever a session hosted by an allowlisted
-           Steam64 ID is live. Clicking either the GameWatch button (no match)
-           or the LIVE pill (match found) opens #gamewatch-modal, which embeds
-           the full /gw page in an iframe. Dashboard-only; see
-           js/active-game-indicator.js. -->
-      <div id="vt-active-game" class="vt-active-game" data-state="loading" aria-live="polite">
-        <button type="button"
-                class="vt-active-game-pill"
-                id="vt-active-game-pill"
-                hidden
-                disabled>
-        </button>
-        <a id="vt-active-game-join" class="vt-active-game-join" hidden href="#"
-           rel="noopener noreferrer"
-           title="Join via Steam" aria-label="Join via Steam">
-          <i class="bi bi-play-fill me-1"></i><span class="vt-active-game-join-label">Join</span>
-        </a>
-        <a class="vt-active-game-gamewatch"
-           href="gw/index.html"
-           data-bs-toggle="modal" data-bs-target="#gamewatch-modal"
-           title="Watch every active lobby" aria-label="Open Game Watch">
-          <i class="bi bi-broadcast-pin"></i><span class="vt-active-game-gamewatch-label ms-1">GameWatch</span>
-        </a>
-      </div>
-
-      <!-- Burger (mobile only). On desktop the collapse is always expanded
-           and packs to the right via ms-md-auto. -->
       <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
               data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
               aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
         <i class="bi bi-list"></i>
       </button>
 
-      <!-- Single shared cluster. Dashboard omits a Dashboard link (the
-           brand is home). Docs / Raw / Record are not bar items (Docs is
-           in the gear, Record is the last Tools item). -->
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
           <div class="dropdown vt-nav-dropdown">
-            <button class="vt-nav-icon-btn" id="nav-matches-toggle" type="button"
+            <button class="vt-nav-icon-btn" type="button"
                     data-bs-toggle="dropdown" data-bs-auto-close="true" aria-label="Matches">
               <i class="bi bi-grid-3x3-gap me-1"></i>Matches <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><button type="button" class="dropdown-item" id="nav-matches-recent">
-                <i class="bi bi-clock-history me-2"></i>Most Recent
-              </button></li>
-              <li><button type="button" class="dropdown-item" id="nav-matches-all">
-                <i class="bi bi-grid-3x3-gap me-2"></i>All Matches
-              </button></li>
+              <li><a class="dropdown-item" href="matches/">
+                <i class="bi bi-grid-3x3-gap me-2"></i>Browse matches
+              </a></li>
+              <li><a class="dropdown-item" href="matches/?match=latest">
+                <i class="bi bi-clock-history me-2"></i>Most recent
+              </a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -107,8 +86,7 @@
               <li><a class="dropdown-item" href="explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
             </ul>
           </div>
-          <a href="map/" class="vt-nav-icon-btn"
-             title="Browse the VSR map catalog" aria-label="Maps">
+          <a href="map/" class="vt-nav-icon-btn" title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
           </a>
           <div class="dropdown vt-nav-dropdown">
@@ -126,56 +104,19 @@
             <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
                     data-bs-toggle="dropdown" data-bs-auto-close="true"
                     data-vt-tools-link data-vt-tools-live="0"
-                    title="Lobby tools and Discord timestamps"
-                    aria-label="Tools">
+                    title="Lobby tools and Discord timestamps" aria-label="Tools">
               <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="tools/" data-vt-tools-item
-                     title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)">
-                <i class="bi bi-controller me-2"></i>Live Lobby
-              </a></li>
-              <li><a class="dropdown-item" href="gw/">
-                <i class="bi bi-broadcast-pin me-2"></i>Game Watch
-              </a></li>
-              <li><a class="dropdown-item" href="time/">
-                <i class="bi bi-clock me-2"></i>Discord Time
-              </a></li>
-              <li><a class="dropdown-item" href="discord/"
-                     title="Join the BZ2 Vet Strats Discord">
-                <i class="bi bi-discord me-2"></i>Discord Invite
-              </a></li>
-              <li><a class="dropdown-item" href="record/"
-                     title="How to record your own stats">
-                <i class="bi bi-record-circle me-2"></i>Record Stats
-              </a></li>
-              <li><a class="dropdown-item" href="beta/"
-                     title="Switch to the devtest beta to join VSR games">
-                <i class="bi bi-steam me-2"></i>Beta Versions
-              </a></li>
-              <li><a class="dropdown-item" href="ports/"
-                     title="Router setup for hosting games (Full Cone NAT)">
-                <i class="bi bi-router me-2"></i>Port Forwarding
-              </a></li>
+              <li><a class="dropdown-item" href="tools/" data-vt-tools-item><i class="bi bi-controller me-2"></i>Live Lobby</a></li>
+              <li><a class="dropdown-item" href="gw/"><i class="bi bi-broadcast-pin me-2"></i>Game Watch</a></li>
+              <li><a class="dropdown-item" href="time/"><i class="bi bi-clock me-2"></i>Discord Time</a></li>
+              <li><a class="dropdown-item" href="discord/"><i class="bi bi-discord me-2"></i>Discord Invite</a></li>
+              <li><a class="dropdown-item" href="record/"><i class="bi bi-record-circle me-2"></i>Record Stats</a></li>
+              <li><a class="dropdown-item" href="beta/"><i class="bi bi-steam me-2"></i>Beta Versions</a></li>
+              <li><a class="dropdown-item" href="ports/"><i class="bi bi-router me-2"></i>Port Forwarding</a></li>
             </ul>
           </div>
-
-          <!-- Relocated into the Settings gear by js/cursor-settings.js. -->
-          <button class="vt-nav-icon-btn" id="share-url-btn" hidden data-vt-page-control
-                  title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
-            <i class="bi bi-link-45deg"></i><span class="vt-nav-label ms-2">Share</span>
-          </button>
-          <button class="vt-nav-icon-btn" id="live-sync-toggle" hidden data-vt-page-control
-                  title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
-                  aria-pressed="true">
-            <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
-          </button>
-          <button class="vt-nav-icon-btn" id="replay-quality-btn" type="button" hidden data-vt-page-control
-                  data-bs-toggle="modal" data-bs-target="#replay-quality-modal"
-                  title="Replay quality" aria-label="Replay quality">
-            <i class="bi bi-sliders"></i><span class="vt-nav-label ms-2">Replay quality</span>
-          </button>
-
           <div class="dropdown">
             <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
                     data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
@@ -233,1475 +174,155 @@
     </div>
   </header>
 
-  <!-- Loading -->
-  <div id="loading">
-    <div class="vt-preloader">
-      <div class="vt-preloader-ring" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-      <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats</div>
-      <div class="vt-preloader-detail">
-        <div class="vt-preloader-status" id="vt-boot-title" aria-live="polite">Loading match data</div>
-        <ol class="vt-preloader-log" id="vt-boot-log"></ol>
-      </div>
-    </div>
-  </div>
+  <main id="vt-home">
+    <nav class="vt-home-doors" aria-label="Get in a game">
+      <a class="vt-home-door" href="time/">
+        <i class="bi bi-clock" aria-hidden="true"></i>
+        <span class="vt-home-door-copy">
+          <span class="vt-home-door-title">Discord Time</span>
+          <span class="vt-home-door-line">Turn a clock time into a Discord timestamp.</span>
+        </span>
+      </a>
+      <a class="vt-home-door" href="discord/">
+        <i class="bi bi-discord" aria-hidden="true"></i>
+        <span class="vt-home-door-copy">
+          <span class="vt-home-door-title">Discord Invite</span>
+          <span class="vt-home-door-line">Join the BZ2 Vet Strats Discord.</span>
+        </span>
+      </a>
+      <a class="vt-home-door" href="record/">
+        <i class="bi bi-record-circle" aria-hidden="true"></i>
+        <span class="vt-home-door-copy">
+          <span class="vt-home-door-title">Record Stats</span>
+          <span class="vt-home-door-line">Record a match and add it here.</span>
+        </span>
+      </a>
+      <a class="vt-home-door" href="beta/">
+        <i class="bi bi-steam" aria-hidden="true"></i>
+        <span class="vt-home-door-copy">
+          <span class="vt-home-door-title">Beta Versions</span>
+          <span class="vt-home-door-line">Switch to the devtest branch to play VSR.</span>
+        </span>
+      </a>
+      <a class="vt-home-door" href="ports/">
+        <i class="bi bi-router" aria-hidden="true"></i>
+        <span class="vt-home-door-copy">
+          <span class="vt-home-door-title">Port Forwarding</span>
+          <span class="vt-home-door-line">Give your lobby a Full Cone NAT.</span>
+        </span>
+      </a>
+    </nav>
 
-  <!-- Single Match Dashboard -->
-  <div id="dashboard" class="container-fluid px-3 px-md-4 py-4 d-none">
+    <section class="vt-home-kpis" aria-label="At a glance">
+      <a class="vt-home-kpi" href="gw/">
+        <span class="vt-home-kpi-label">Lobbies live</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-live">…</span>
+        <span class="vt-home-kpi-sub">Game Watch</span>
+      </a>
+      <a class="vt-home-kpi" href="matches/">
+        <span class="vt-home-kpi-label">Games this week</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-week">—</span>
+        <span class="vt-home-kpi-sub" id="vt-home-kpi-week-sub">vs last week</span>
+      </a>
+      <a class="vt-home-kpi" href="player/">
+        <span class="vt-home-kpi-label">Players · 30d</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-players">—</span>
+        <span class="vt-home-kpi-sub">distinct names</span>
+      </a>
+      <a class="vt-home-kpi" href="matches/">
+        <span class="vt-home-kpi-label">Hours recorded</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-hours">—</span>
+        <span class="vt-home-kpi-sub">all matches</span>
+      </a>
+      <a class="vt-home-kpi" href="elo/?tab=vtsr-t">
+        <span class="vt-home-kpi-label">Ranked</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-ranked">—</span>
+        <span class="vt-home-kpi-sub">VTSR-T ladder</span>
+      </a>
+      <a class="vt-home-kpi" href="matches/?match=latest">
+        <span class="vt-home-kpi-label">Last game</span>
+        <span class="vt-home-kpi-value vt-mono" id="vt-home-kpi-last">—</span>
+        <span class="vt-home-kpi-sub">most recent</span>
+      </a>
+    </section>
 
-    <!-- Match Info Banner (always visible above tabs) -->
-    <div id="match-info" class="card mb-4">
-      <div class="card-body d-flex flex-wrap gap-4 align-items-center">
-        <div id="match-void-banner" class="vt-void-banner d-none" role="status">
-          This match is void. It is excluded from ratings and career stats.
+    <div class="vt-home-row vt-home-row--mid">
+      <section class="vt-home-card is-empty" id="vt-home-live" aria-labelledby="vt-home-live-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-live-title"><i class="bi bi-broadcast-pin"></i>Online now</h2>
+          <a href="gw/">Game Watch</a>
         </div>
-        <div class="d-flex flex-wrap gap-4 align-items-center flex-grow-1">
-          <!-- Map thumbnail (top-down, from data/map-registry.json). Hidden
-               when the match's map isn't in the registry. Populated by
-               renderBanner() in js/app.js. Click opens #map-info-modal with
-               the full-resolution image + registry metadata. -->
-          <button id="info-map-thumb-btn" type="button"
-                  class="vt-map-thumb-btn d-none p-0 border-0 bg-transparent"
-                  data-bs-toggle="modal" data-bs-target="#map-info-modal"
-                  title="View map details" aria-label="View map details">
-            <img id="info-map-thumb" class="vt-map-thumb" alt="" decoding="async" loading="lazy">
-            <span class="vt-map-thumb-overlay" aria-hidden="true">
-              <i class="bi bi-zoom-in"></i>
-            </span>
-          </button>
-          <!-- Rich match picker trigger. Looks like a dropdown, opens the
-               #match-picker-modal. Both this trigger and its twin inside
-               #all-matches-view are kept in sync by js/app.js. -->
-          <button id="match-picker-trigger" class="vt-match-picker-trigger" type="button"
-                  data-bs-toggle="modal" data-bs-target="#match-picker-modal"
-                  aria-haspopup="dialog" aria-expanded="false"
-                  aria-label="Change match">
-            <span class="stat-label">Match</span>
-            <span class="vt-match-picker-trigger-primary">
-              <span class="vt-match-picker-trigger-name" id="trigger-name">—</span>
-              <span class="vt-match-picker-trigger-badge d-none" id="trigger-badge">0</span>
-              <i class="bi bi-chevron-down"></i>
-            </span>
-            <span class="vt-match-picker-trigger-secondary">
-              <span id="trigger-sub" class="vt-muted">—</span>
-            </span>
-          </button>
-          <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
-          <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
-          <div><span class="stat-label">Submitted by</span><br><strong id="info-submitter">—</strong></div>
-          <!-- Map dimension fields (size / elevation / base-to-base / author)
-               + description / mod / team names live in the Map Info Modal,
-               opened by clicking the thumbnail above. See renderMapInfoModal()
-               in js/app.js. -->
-          <div class="vt-banner-actions">
-            <a id="info-raw-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" href="raw/" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
-              <i class="bi bi-code-square me-1"></i><span>View Raw Data</span>
-            </a>
-            <!-- Catalog deep-link to the per-map page. Wired by
-                 renderMapBannerFields() in js/app.js to point at
-                 `map/<mapfile>/`; hidden via d-none when the match's
-                 map isn't in the registry (parallel to #info-map-thumb-btn). -->
-            <a id="info-map-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary d-none" href="#"
-               title="View this map's full catalog page">
-              <i class="bi bi-map me-1"></i><span>View Map Page</span>
-            </a>
-            <!-- Watch VOD occupies one grid cell: single video = direct
-                 link; multiple = dropdown. Wrapper hides when unmapped. -->
-            <div class="vt-banner-vod d-none" id="info-video-cell">
-              <a id="info-video-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary d-none" href="#"
-                 target="_blank" rel="noopener" title="Watch this match on YouTube">
-                <i class="bi bi-youtube me-1"></i><span>Watch VOD</span>
-              </a>
-              <div class="dropdown d-none" id="info-video-dropdown">
-                <button id="info-video-dropdown-btn" class="vt-nav-icon-btn vt-nav-icon-btn--secondary dropdown-toggle"
-                        type="button" data-bs-toggle="dropdown" aria-expanded="false"
-                        title="Watch this match on YouTube">
-                  <i class="bi bi-youtube me-1"></i><span>Watch VOD</span>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end" id="info-video-menu"></ul>
-              </div>
-            </div>
-          </div>
+        <div class="vt-home-live-body">
+          <p id="vt-home-live-status" class="vt-home-status">Checking lobbies…</p>
+          <div id="vt-home-live-grid"></div>
+          <p id="vt-home-live-empty" class="vt-home-status" hidden>No community lobbies right now.</p>
+          <p id="vt-home-live-more" hidden></p>
         </div>
-        <div id="filter-bar" class="vt-filter-bar vt-filter-bar--right">
-          <div class="vt-filter-bar-label"><span class="stat-label">Filter</span></div>
-          <div class="d-flex flex-wrap gap-2 align-items-center">
-            <div class="btn-group btn-group-sm" id="filter-mode">
-              <button class="btn btn-outline-secondary active" data-filter-mode="all">All Players</button>
-              <button class="btn btn-outline-secondary" data-filter-mode="team">Team</button>
-              <button class="btn btn-outline-secondary" data-filter-mode="player">Player</button>
-            </div>
-            <select id="filter-team-select" class="form-select form-select-sm d-none" style="width:auto;">
-              <option value="1">Team 1</option>
-              <option value="2">Team 2</option>
-            </select>
-            <div id="filter-player-picker" class="d-none">
-              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="filter-player-btn">
-                Select players&hellip;
-              </button>
-            </div>
-            <button class="btn btn-sm btn-outline-secondary d-none" id="filter-clear" title="Reset to All Players"><i class="bi bi-x-lg"></i></button>
-          </div>
-          <label class="form-check mb-0 mt-2" id="filter-persist-wrap" title="Keep selection when switching matches">
-            <input class="form-check-input" type="checkbox" id="filter-persist-toggle">
-            <span class="form-check-label" style="font-size:0.75rem;color:var(--kb-text-muted);"><i class="bi bi-lock me-1"></i>Persist across matches</span>
-          </label>
+      </section>
+
+      <section class="vt-home-card" aria-labelledby="vt-home-matches-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-matches-title"><i class="bi bi-clock-history"></i>Latest matches</h2>
+          <a href="matches/">Browse</a>
         </div>
-      </div>
+        <div class="vt-home-card-body" id="vt-home-matches">
+          <p class="vt-home-status">Loading matches…</p>
+        </div>
+      </section>
+
+      <section class="vt-home-card" aria-labelledby="vt-home-hour-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-hour-title"><i class="bi bi-bar-chart"></i>When we play</h2>
+          <a href="meta/">Meta</a>
+        </div>
+        <p class="vt-home-hour vt-mono" id="vt-home-hour">—</p>
+        <p class="vt-home-dek" id="vt-home-hour-rest"></p>
+        <div class="vt-home-chart">
+          <canvas id="vt-home-hour-canvas" aria-label="Games by start hour"></canvas>
+        </div>
+      </section>
     </div>
 
-    <!-- Match Tab Navigation -->
-    <div class="vt-tab-scroll-wrap mb-4">
-      <ul class="nav nav-pills" id="match-tabs" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
-        </li>
-        <!-- Economy tab (proto v4 commander telemetry). The whole <li> is
-             hidden by renderMatchData() when the match carries neither
-             economy nor builds data (the entire pre-v4 corpus). -->
-        <li class="nav-item d-none" role="presentation" id="tab-economy-li">
-          <button class="nav-link" id="tab-economy-btn" data-bs-toggle="pill" data-bs-target="#tab-economy" type="button" role="tab" aria-controls="tab-economy" aria-selected="false">Economy</button>
-        </li>
-        <!-- Per-match Elo (VTSR-T). Always visible; empty-state when the
-             match was excluded from rating or elo_history is missing.
-             Match-global (highlights passthrough) — the player filter only
-             preselects a row. -->
-        <li class="nav-item" role="presentation" id="tab-elo-li">
-          <button class="nav-link" id="tab-elo-btn" data-bs-toggle="pill" data-bs-target="#tab-elo" type="button" role="tab" aria-controls="tab-elo" aria-selected="false">Elo</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-rivalries-btn" data-bs-toggle="pill" data-bs-target="#tab-rivalries" type="button" role="tab" aria-controls="tab-rivalries" aria-selected="false">Rivalries</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#tab-weapons" type="button" role="tab" aria-controls="tab-weapons" aria-selected="false">Weapons &amp; Accuracy</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-positioning-btn" data-bs-toggle="pill" data-bs-target="#tab-positioning" type="button" role="tab" aria-controls="tab-positioning" aria-selected="false">Movemint</button>
-        </li>
-        <!-- Storyline tab (match.schema_version 22). Hidden unless the
-             match carries a `storyline` block. Sits immediately left of
-             3D Replay (second-to-last). -->
-        <li class="nav-item d-none" role="presentation" id="tab-storyline-li">
-          <button class="nav-link" id="tab-storyline-btn" data-bs-toggle="pill" data-bs-target="#tab-storyline" type="button" role="tab" aria-controls="tab-storyline" aria-selected="false">Storyline</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">3D Replay</button>
-        </li>
-      </ul>
+    <div class="vt-home-row vt-home-row--low">
+      <section class="vt-home-card" aria-labelledby="vt-home-cmdr-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-cmdr-title"><i class="bi bi-trophy"></i>Rising commanders</h2>
+          <a href="elo/">VTSR-C</a>
+        </div>
+        <div class="vt-home-card-body" id="vt-home-commanders">
+          <p class="vt-home-status">Loading commanders…</p>
+        </div>
+      </section>
+
+      <section class="vt-home-card" aria-labelledby="vt-home-thug-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-thug-title"><i class="bi bi-graph-up-arrow"></i>Rising thugs</h2>
+          <a href="elo/?tab=vtsr-t">VTSR-T</a>
+        </div>
+        <div class="vt-home-card-body" id="vt-home-thugs">
+          <p class="vt-home-status">Loading ratings…</p>
+        </div>
+      </section>
+
+      <section class="vt-home-card" aria-labelledby="vt-home-meta-title">
+        <div class="vt-home-card-head">
+          <h2 id="vt-home-meta-title"><i class="bi bi-pie-chart"></i>Meta</h2>
+          <a href="meta/">Full meta</a>
+        </div>
+        <div class="vt-home-card-body" id="vt-home-meta-body">
+          <p class="vt-home-status">Loading…</p>
+        </div>
+      </section>
     </div>
-
-    <!-- Match Tab Content -->
-    <div class="tab-content" id="match-tab-content">
-
-      <!-- Tab: Overview -->
-      <div class="tab-pane fade show active" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-btn">
-        <div class="card mb-4 d-none" id="section-player-profile">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0" id="player-profile-title">Player Profile</h5>
-          </div>
-          <div class="card-body" id="player-profile-content"></div>
-        </div>
-        <!-- Outcome: team panels first, then a closed Balonce & Elo
-             disclosure (gauge, verdict, how it played out). Rendered
-             together so the overview does not repeat the roster. The read
-             is js/balonce-meter.js::renderMatchSection() from committed
-             JSON (elo_history + elo_commander_history) — match-global,
-             ALWAYS unfiltered. Team panels still render when the match
-             was not rated; the disclosure hides while both slots are empty. -->
-        <div class="card mb-4" id="section-faction">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Outcome</h5>
-              <span id="faction-outcome-badge" class="vt-winner-badge"></span>
-              <i class="bi bi-info-circle vt-col-info" id="outcome-info"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom"
-                 title="How balanced this lobby was before it played, who the rating system favored, and how it actually turned out. The prediction is the same commander-duel formula the ratings themselves use."></i>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <div id="outcome-whatif" class="d-none align-items-center gap-2">
-                <span class="small text-secondary">What-if</span>
-                <ul class="nav nav-pills vt-econ-log-pills mb-0" role="group" aria-label="Open this lobby in Team Balonce">
-                  <li class="nav-item">
-                    <a class="nav-link" id="balonce-whatif-then" target="_blank" rel="noopener"
-                       data-bs-toggle="tooltip" data-bs-placement="bottom"
-                       title="Open Team Balonce with this match’s players, teams, and commanders, scored on the ratings they carried into the game.">As played</a>
-                  </li>
-                  <li class="nav-item">
-                    <a class="nav-link" id="balonce-whatif-now" target="_blank" rel="noopener"
-                       data-bs-toggle="tooltip" data-bs-placement="bottom"
-                       title="Open Team Balonce with this match’s players, teams, and commanders, scored on today’s ratings.">Today</a>
-                  </li>
-                </ul>
-              </div>
-              <button class="btn btn-sm" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="faction-content"></div>
-            <details class="vt-balonce-fold" id="outcome-elo-fold">
-              <summary>
-                <span class="vt-balonce-fold-label">Balonce &amp; Elo</span>
-                <i class="bi bi-chevron-down vt-balonce-fold-chevron" aria-hidden="true"></i>
-              </summary>
-              <div id="outcome-read"></div>
-              <div id="outcome-after"></div>
-            </details>
-          </div>
-        </div>
-        <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Match Highlights</h5>
-          </div>
-          <div class="card-body">
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="highlights-grid"></div>
-          </div>
-        </div>
-        <div class="card mb-4" id="section-leaderboard">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Player Leaderboard</h5>
-            <button class="btn btn-sm" data-expand="section-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="leaderboard" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th data-sort="name">Player</th>
-                  <th data-sort="faction" class="text-center">Team</th>
-                  <th data-sort="pvp_dealt" class="text-end vt-col-split">
-                    PvP
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Dealt</strong><br>Damage dealt directly to other human players.<br>Includes friendly-fire. Subset of Dealt."></i>
-                  </th>
-                  <th data-sort="pve_dealt" class="text-end vt-col-split">
-                    PvE
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Dealt</strong><br>Damage dealt to AI units and world props.<br>Equals Dealt &minus; PvP."></i>
-                  </th>
-                  <th data-sort="dealt" class="text-end">
-                    Dealt
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Unit Dmg)."></i>
-                  </th>
-                  <th data-sort="pvp_received" class="text-end vt-col-split">
-                    PvP In
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvP Received</strong><br>Damage taken from other human players.<br>Subset of Received."></i>
-                  </th>
-                  <th data-sort="pve_received" class="text-end vt-col-split">
-                    PvE In
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>PvE Received</strong><br>Damage taken from AI units and world/environmental sources.<br>Equals Received &minus; PvP In."></i>
-                  </th>
-                  <th data-sort="received" class="text-end">
-                    Received
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Received</strong><br>All damage this player personally took.<br>Equals PvP In + PvE In."></i>
-                  </th>
-                  <th data-sort="net" class="text-end">
-                    Net
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Net Damage</strong><br>Dealt &minus; Received. Positive = more output than taken."></i>
-                  </th>
-                  <th data-sort="ratio" class="text-end">
-                    Ratio
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Damage Ratio</strong><br>Dealt &divide; Received.<br>&infin; shown when the player took zero damage."></i>
-                  </th>
-                  <th data-sort="accuracy" class="text-end">Accuracy</th>
-                  <th data-sort="kills" class="text-end">Kills</th>
-                  <th data-sort="deaths" class="text-end">Deaths</th>
-                  <th data-sort="elo_delta" class="text-end">
-                    <i class="bi bi-graph-up-arrow me-1"></i>VTSR-T
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR-T this game</strong><br>How this match went against what the player&rsquo;s rating expected: Beat expectation, On par, or Below expectation.<br>&mdash; if the match was excluded (&lt;6 players or &lt;5 min)."></i>
-                  </th>
-                  <th data-sort="asset_dealt" class="text-end">
-                    Unit Dmg
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Unit Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt."></i>
-                  </th>
-                  <th data-sort="activity_score" class="text-center" style="min-width:130px;">
-                    <i class="bi bi-compass me-1"></i>Movemint
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movemint Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort."></i>
-                  </th>
-                  <th data-sort="fav_weapon">Fav Weapon</th>
-                  <th data-sort="weapons_used" class="text-end"># Wpns</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
-           unfiltered — same passthrough contract as highlights/kill-feed
-           winner. Sections self-hide when their half of the data is absent:
-           scrap chart + loose chart + pools chart + production economy rows need has_resource_data,
-           build log + production build rows need has_build_data.) -->
-      <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
-        <div class="row g-4 mb-4 d-none" id="section-economy-production">
-          <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
-          <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
-        </div>
-        <div class="card mb-4 d-none" id="section-economy-loose">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Loose Collected Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-loose-windows"
-                  role="radiogroup" aria-label="Loose collected window"></ul>
-              <button class="btn btn-sm" data-expand="section-economy-loose" title="Fullscreen">
-                <i class="bi bi-arrows-fullscreen"></i>
-              </button>
-            </div>
-          </div>
-          <div class="card-body">
-            <p class="text-muted small mb-2" id="economy-loose-caption"></p>
-            <div class="vt-econ-loose-chart"><canvas id="economy-loose-chart"></canvas></div>
-          </div>
-        </div>
-        <div class="card mb-4 d-none" id="section-economy-pools">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Scrap Pools Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="economy-pools-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-sm" data-expand="section-economy-pools" title="Fullscreen">
-                <i class="bi bi-arrows-fullscreen"></i>
-              </button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="vt-econ-pools-lanes">
-              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t1"></canvas></div>
-              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t2"></canvas></div>
-            </div>
-          </div>
-        </div>
-        <div class="card mb-4 d-none" id="section-economy-buildlog">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0 d-flex align-items-center gap-2">
-              Build Order Log
-              <button type="button" class="btn btn-sm vt-econ-log-help-btn"
-                      data-bs-toggle="modal" data-bs-target="#economy-buildlog-help-modal"
-                      title="What the Build Order Log shows" aria-label="About the Build Order Log">
-                <i class="bi bi-info-circle"></i>
-              </button>
-            </h5>
-            <div class="d-flex align-items-center flex-wrap gap-2">
-              <!-- Commander scope. Labels are rewritten per match from
-                   builds.teams{n}.commander.name in renderBuildLog(); picking a
-                   single commander renders that log full width. Radio: one
-                   selection at a time. No data-bs-toggle -- these are not
-                   Bootstrap tabs. -->
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-scope" role="radiogroup" aria-label="Build log commander scope">
-                <li class="nav-item">
-                  <button class="nav-link active" data-buildlog-scope="both" type="button" role="radio" aria-checked="true">Both</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-scope="1" type="button" role="radio" aria-checked="false">Team 1</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-scope="2" type="button" role="radio" aria-checked="false">Team 2</button>
-                </li>
-              </ul>
-              <!-- Type (queues/builds/cancels) AND kind (ships/structures)
-                   checkbox pills. All events is an exclusive reset. No
-                   data-bs-toggle -- these are not Bootstrap tabs. -->
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="queues" type="button" aria-pressed="false">Queues</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link active" data-buildlog-filter="builds" type="button" aria-pressed="true">Builds</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="cancels" type="button" aria-pressed="false">Cancels</button>
-                </li>
-                <li class="nav-item vt-econ-log-pills-gap">
-                  <button class="nav-link" data-buildlog-filter="ships" type="button" aria-pressed="false"
-                          title="Combat vehicles only (tanks, scouts, assault tanks). Same set as Conveyor Belt.">Combat ships</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="structures" type="button" aria-pressed="false">Structures</button>
-                </li>
-                <li class="nav-item vt-econ-log-pills-gap">
-                  <button class="nav-link" data-buildlog-filter="all" type="button" aria-pressed="false">All events</button>
-                </li>
-              </ul>
-              <!-- Presentation. Sum totals the filtered rows by unit; off
-                   keeps chronological order. Persists across match switches
-                   like the type pills. No data-bs-toggle. -->
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-sum" role="group" aria-label="Build log presentation">
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-sum type="button" aria-pressed="false"
-                          title="Total each unit instead of listing every order">Sum</button>
-                </li>
-              </ul>
-              <input type="search" id="economy-buildlog-search"
-                     class="form-control form-control-sm vt-econ-log-search"
-                     placeholder="scav, spire" aria-label="Filter build log by unit or producer. Commas show each term's matches."
-                     autocomplete="off">
-            </div>
-          </div>
-          <div class="card-body" id="economy-buildlog-content"></div>
-        </div>
-
-        <!-- SHELVED: Team Scrap Over Time. Two ~3400-point series over a full
-             match render as an unreadable tangle, so the card is parked at the
-             bottom of the tab, kept permanently `d-none`, and its Chart.js
-             instance is never built (see ECONOMY_SCRAP_CHART_ENABLED in
-             js/app.js -- flip the constant to restore it for good, or append
-             ?scrapchart=1 to peek at it once). Kept in the DOM so restoring is
-             a one-line change; display:none costs no layout or paint. -->
-        <div class="card mb-4 d-none" id="section-economy-scrap">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Team Scrap Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
-        </div>
-      </div>
-
-      <!-- Tab: Elo (commander duel first when one exists, then per-match
-           VTSR-T). Rendered by js/match-elo.js (window.VTMatchElo).
-           Match-global, always unfiltered (highlights passthrough); the
-           player filter only preselects. -->
-      <div class="tab-pane fade" id="tab-elo" role="tabpanel" aria-labelledby="tab-elo-btn">
-        <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Commander ladder this match</h5>
-            <span class="vt-match-elo-why">win/loss rating — not the enemy-damage score</span>
-          </div>
-          <div class="card-body" id="match-elo-vtsrc-body"></div>
-        </div>
-        <!-- Rated 1v1 only (elo_1v1_history.json has this match). The
-             separate head-to-head ladder; hidden on every other match. -->
-        <div class="card mb-4 d-none" id="section-match-elo-1v1">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">1v1 ladder this match</h5>
-            <span class="vt-match-elo-why">separate head-to-head rating — <a href="elo/?tab=1v1">full 1v1 ladder</a></span>
-          </div>
-          <div class="card-body" id="match-elo-1v1-body"></div>
-        </div>
-        <!-- Rated 2v2 only (elo_2v2_history.json has this match). The
-             separate 2v2 ladders; hidden on every other match. -->
-        <div class="card mb-4 d-none" id="section-match-elo-2v2">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">2v2 ladders this match</h5>
-            <span class="vt-match-elo-why">separate 2v2 ratings, experimental — <a href="elo/?tab=2v2c">full 2v2 ladders</a></span>
-          </div>
-          <div class="card-body" id="match-elo-2v2-body"></div>
-        </div>
-        <div class="card mb-4 d-none" id="match-elo-empty">
-          <div class="card-body text-muted" id="match-elo-empty-body"></div>
-        </div>
-        <div class="card mb-4 d-none" id="section-match-elo-lobby">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Lobby rating moves</h5>
-            <span class="vt-match-elo-why d-none d-md-inline">how this match changed each player's VTSR-T — click a row</span>
-          </div>
-          <div class="card-body" id="match-elo-lobby-body"></div>
-        </div>
-        <div class="row g-4 mb-4 d-none" id="section-match-elo-detail">
-          <div class="col-lg-7">
-            <div class="card h-100" id="section-match-elo-player">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0" id="match-elo-player-title">This player's rating</h5>
-              </div>
-              <div class="card-body" id="match-elo-player-body"></div>
-            </div>
-          </div>
-          <div class="col-lg-5">
-            <div class="card h-100" id="section-match-elo-scatter">
-              <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <h5 class="mb-0">Over / under vs expectation</h5>
-                <span class="vt-match-elo-why">above the line = played better than this lobby expected
-                  <i class="bi bi-info-circle vt-col-info vt-match-elo-info" role="img" aria-label="What played better than expected means" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="left" data-elo-expected-tip="1" title=""></i>
-                </span>
-              </div>
-              <div class="card-body">
-                <div class="vt-match-elo-scatter-wrap"><canvas id="match-elo-scatter"></canvas></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: Combat -->
-      <div class="tab-pane fade" id="tab-combat" role="tabpanel" aria-labelledby="tab-combat-btn">
-        <div class="row g-4 mb-4">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-faction-radar">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center gap-2">
-                  <h5 class="mb-0">Team Performance</h5>
-                  <i class="bi bi-info-circle vt-col-info"
-                     data-vt-radar-info="per-match"
-                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                     data-bs-custom-class="vt-katex-tooltip"
-                     title="Loading&hellip;"></i>
-                </div>
-                <button class="btn btn-sm" data-expand="section-faction-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container"><canvas id="faction-radar-canvas"></canvas></div></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-weapon-meta">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Weapon Meta</h5>
-                <button class="btn btn-sm" data-expand="section-weapon-meta" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container"><canvas id="weapon-meta-chart"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="row g-4 mb-4">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-kill-feed">
-              <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2">
-                  <h5 class="mb-0">Kill Feed</h5>
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                  <input type="search" id="kill-feed-search"
-                         class="form-control form-control-sm vt-econ-log-search"
-                         placeholder="Type to filter..." aria-label="Filter kill feed"
-                         autocomplete="off">
-                  <button class="btn btn-sm" data-expand="section-kill-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-                </div>
-              </div>
-              <div class="card-body" id="kill-feed-content"></div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-vehicle-kills">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Vehicle Destruction Breakdown</h5>
-                <button class="btn btn-sm" data-expand="section-vehicle-kills" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="vehicle-kills-content"><div class="chart-container"><canvas id="vehicle-kills-chart"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-        <!-- Snipe Feed auto-hides via .vt-hide when the feed is empty. -->
-        <div class="card mb-4" id="section-snipe-feed">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Snipe Feed</h5>
-            <div class="d-flex align-items-center gap-2">
-              <i class="bi bi-info-circle vt-col-info"
-                 data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                 title="<strong>Snipe Feed</strong> &mdash; pilot snipes (UnitSniped events) for this match. Card hides when no snipes occurred."></i>
-              <button class="btn btn-sm" data-expand="section-snipe-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body" id="snipe-feed-content"></div>
-        </div>
-        <div class="card mb-4" id="section-timeline">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Combat Timeline</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="timeline-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <div class="btn-group btn-group-sm">
-                <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
-                <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
-              </div>
-              <button class="btn btn-sm" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
-        </div>
-      </div>
-
-      <!-- Tab: Rivalries -->
-      <div class="tab-pane fade" id="tab-rivalries" role="tabpanel" aria-labelledby="tab-rivalries-btn">
-        <div class="row g-4 mb-4 vt-rivalry-split">
-          <div class="col-lg-4">
-            <div class="vt-rivalry-menu-slot h-100">
-              <div class="card h-100" id="section-rivalries">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                  <h5 class="mb-0">Top Rivalries</h5>
-                  <button class="btn btn-sm" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-                </div>
-                <div class="card-body" id="rivalries-container"></div>
-              </div>
-            </div>
-          </div>
-          <div class="col-lg-8">
-        <div class="card h-100" id="section-rivalry-radar">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Rivalry Comparison</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-vt-radar-info="per-match"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 data-bs-custom-class="vt-katex-tooltip"
-                 title="Loading&hellip;"></i>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="rivalry-radar-custom-toggle" type="button">
-                <i class="bi bi-person-fill-gear me-1"></i>Pick players
-              </button>
-              <button class="btn btn-sm" data-expand="section-rivalry-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body">
-            <!-- Chip-based two-slot picker. Each slot is a Bootstrap dropdown
-                 (data-bs-toggle="dropdown") so keyboard nav (arrows, Esc,
-                 Enter, focus management) comes for free. Menus are
-                 populated dynamically by renderRivalryRadar() in js/app.js
-                 from the current filtered roster. -->
-            <div class="vt-radar-picker d-none mb-3" id="rivalry-radar-custom-picker">
-              <div class="vt-radar-picker-slots">
-                <div class="dropdown vt-radar-picker-dropdown">
-                  <button class="vt-radar-picker-slot" id="rivalry-radar-slot-a" type="button"
-                          data-bs-toggle="dropdown" data-bs-auto-close="true" data-bs-display="dynamic"
-                          aria-expanded="false" aria-label="Pick first player">
-                    <span class="vt-radar-picker-slot-label">Player A</span>
-                    <span class="vt-radar-picker-slot-name">Pick player</span>
-                    <i class="bi bi-chevron-down vt-radar-picker-slot-caret"></i>
-                  </button>
-                  <ul class="dropdown-menu vt-radar-picker-menu" id="rivalry-radar-menu-a"
-                      aria-labelledby="rivalry-radar-slot-a"></ul>
-                </div>
-                <span class="vt-radar-picker-vs">vs</span>
-                <div class="dropdown vt-radar-picker-dropdown">
-                  <button class="vt-radar-picker-slot" id="rivalry-radar-slot-b" type="button"
-                          data-bs-toggle="dropdown" data-bs-auto-close="true" data-bs-display="dynamic"
-                          aria-expanded="false" aria-label="Pick second player">
-                    <span class="vt-radar-picker-slot-label">Player B</span>
-                    <span class="vt-radar-picker-slot-name">Pick player</span>
-                    <i class="bi bi-chevron-down vt-radar-picker-slot-caret"></i>
-                  </button>
-                  <ul class="dropdown-menu vt-radar-picker-menu" id="rivalry-radar-menu-b"
-                      aria-labelledby="rivalry-radar-slot-b"></ul>
-                </div>
-                <button class="btn btn-sm btn-outline-secondary vt-radar-picker-action" id="rivalry-radar-swap"
-                        type="button" title="Swap A and B" aria-label="Swap A and B">
-                  <i class="bi bi-arrow-left-right"></i>
-                </button>
-                <button class="btn btn-sm btn-outline-secondary vt-radar-picker-action" id="rivalry-radar-clear"
-                        type="button" title="Reset to top rivalry" aria-label="Reset to top rivalry">
-                  <i class="bi bi-arrow-counterclockwise"></i>
-                </button>
-              </div>
-            </div>
-            <div class="chart-container"><canvas id="rivalry-radar-canvas"></canvas></div>
-            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="rivalry-radar-hint">Pick two different players to compare.</p>
-          </div>
-        </div>
-          </div>
-        </div>
-        <div class="card mb-4" id="section-heatmap">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Rivalry Heatmap</h5>
-            <button class="btn btn-sm" data-expand="section-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive">
-            <table id="heatmap" class="table table-sm align-middle text-center mb-0"></table>
-          </div>
-        </div>
-        <div class="card mb-4" id="section-kill-heatmap">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Kill Rivalry Heatmap</h5>
-            <button class="btn btn-sm" data-expand="section-kill-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive" id="kill-heatmap-content">
-            <table id="kill-heatmap" class="table table-sm align-middle text-center mb-0"></table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: Weapons & Accuracy -->
-      <div class="tab-pane fade" id="tab-weapons" role="tabpanel" aria-labelledby="tab-weapons-btn">
-        <div class="card mb-4" id="section-player-weapons">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Per-Player Weapon Breakdown</h5>
-            <button class="btn btn-sm" data-expand="section-player-weapons" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="player-weapons-chart"></canvas></div></div>
-        </div>
-        <div class="card mb-4" id="section-accuracy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Accuracy &amp; Range</h5>
-            <button class="btn btn-sm" data-expand="section-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="accuracy-table" class="table table-hover table-sm align-middle mb-0 vt-sticky-thead" style="font-size: 0.8rem;">
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th class="text-end">Fired</th>
-                  <th class="text-end">Hit</th>
-                  <th class="text-end">Accuracy</th>
-                  <th class="text-end">Range</th>
-                  <th class="text-end">Envelope</th>
-                  <th class="text-end">
-                    T-Key
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top"
-                       title="Share of the match with a T-key target lock active. Display only; not part of VTSR-T."></i>
-                  </th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card mb-4" id="section-weapon-range">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Weapon Engagement Range</h5>
-            <div class="d-flex align-items-center flex-wrap gap-2">
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="weapon-range-unit" role="radiogroup" aria-label="Engagement range unit">
-                <li class="nav-item">
-                  <button class="nav-link active" type="button" role="radio" aria-checked="true" data-range-unit="m">Meters</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-unit="pct">% of max</button>
-                </li>
-              </ul>
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="weapon-range-channel" role="radiogroup" aria-label="Engagement range channel">
-                <li class="nav-item">
-                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-channel="pvp">PvP</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-channel="pve">PvE</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link active" type="button" role="radio" aria-checked="true" data-range-channel="both">Both</button>
-                </li>
-              </ul>
-              <button class="btn btn-sm" data-expand="section-weapon-range" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="weapon-range-chart"></canvas></div></div>
-        </div>
-        <div class="card mb-4" id="section-weapon-accuracy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Weapon Accuracy Ranking</h5>
-            <button class="btn btn-sm" data-expand="section-weapon-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
-        </div>
-      </div>
-
-      <!-- Tab: Positioning -->
-      <div class="tab-pane fade" id="tab-positioning" role="tabpanel" aria-labelledby="tab-positioning-btn">
-        <!-- Always-on intro banner explaining the Movemint Profile concept -->
-        <div class="vt-info-banner mb-4" id="positioning-intro-banner">
-          <i class="bi bi-info-circle"></i>
-          <div>
-            <strong>Movemint Profile (0-100)</strong> &mdash; how much a player roamed the map (high) vs. stayed near their spawn (low). Combines time out of base, farthest venture, and total ground covered. Scores are self-calibrated per match, so <em>Aggressive</em> here means the same thing on every map.
-          </div>
-        </div>
-        <!-- Empty state shown when this match has no UpdateTick data -->
-        <div class="card mb-4 d-none" id="section-positioning-empty">
-          <div class="card-body text-center py-5">
-            <div class="vt-empty-icon mb-3"><i class="bi bi-geo-alt" style="font-size: 2.5rem; color: var(--kb-text-muted);"></i></div>
-            <h5 class="mb-2">No positioning data for this match</h5>
-            <p style="color: var(--kb-text-muted); max-width: 480px; margin: 0 auto;">
-              This session predates player-position capture. Newer recordings will include movement trails, top-down heatmaps, and Movemint Profile scores here.
-            </p>
-          </div>
-        </div>
-
-        <!-- Movemint Leaderboard -->
-        <div class="card mb-4" id="section-movement-leaderboard">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Movemint Leaderboard</h5>
-            <button class="btn btn-sm" data-expand="section-movement-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="movement-leaderboard" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Player</th>
-                  <th class="text-center">Team</th>
-                  <th data-sort="activity_score" class="text-center" style="min-width:160px;">
-                    <i class="bi bi-compass me-1"></i>Movemint Profile
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movemint Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a row for hidden details."></i>
-                  </th>
-                  <th data-sort="mean_dist" class="text-end">Mean Dist</th>
-                  <th data-sort="max_dist" class="text-end">Max Dist</th>
-                  <th data-sort="path_length" class="text-end">Path Length</th>
-                  <th data-sort="time_in_base_pct" class="text-end">Time in Base</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Combined + per-player top-down heatmaps -->
-        <div class="row g-4 mb-4">
-          <div class="col-lg-5">
-            <div class="card h-100" id="section-combined-heatmap">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">All Players Heatmap</h5>
-                <button class="btn btn-sm" data-expand="section-combined-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="vt-heatmap-wrap"><canvas id="combined-heatmap-canvas"></canvas></div></div>
-            </div>
-          </div>
-          <div class="col-lg-7">
-            <div class="card h-100" id="section-heatmap-grid">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Per-Player Movemint Heatmaps</h5>
-                <button class="btn btn-sm" data-expand="section-heatmap-grid" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body">
-                <div class="vt-heatmap-grid" id="heatmap-grid-content"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Ring histogram -->
-        <div class="card mb-4" id="section-ring-histogram">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Time by Distance Band</h5>
-            <button class="btn btn-sm" data-expand="section-ring-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="ring-histogram-chart"></canvas></div></div>
-        </div>
-      </div>
-
-      <!-- Tab: Storyline (match.schema_version 22; storyline block required).
-           All content is rendered by js/storyline.js (window.VTStoryline)
-           from currentData.storyline — match-global, always unfiltered
-           (highlights passthrough contract). Cards self-omit when their
-           data gates fail (e.g. no positioning => no map-control lane). -->
-      <div class="tab-pane fade" id="tab-storyline" role="tabpanel" aria-labelledby="tab-storyline-btn">
-        <div class="card mb-4 d-none" id="story-verdict-card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-clipboard-data me-2"></i>The Verdict</h5>
-            <span class="vt-story-why">where the match was won and lost</span>
-          </div>
-          <div class="card-body">
-            <div class="row g-2" id="story-verdict-grid"></div>
-          </div>
-        </div>
-
-        <div class="card mb-4 d-none" id="story-timeline-card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Match Timeline</h5>
-              <span class="vt-story-why d-none d-md-inline">drag to zoom — all lanes stay in sync; gold flags mark decisive moments</span>
-            </div>
-            <button class="btn btn-sm btn-outline-secondary d-none" id="story-zoom-reset" type="button"
-                    title="Reset zoom on all lanes">Reset zoom</button>
-          </div>
-          <div class="card-body">
-            <div id="story-lane-momentum-wrap">
-              <div class="vt-story-lane-title" id="story-lane-momentum-title"></div>
-              <div class="vt-story-lane vt-story-lane--momentum"><canvas id="story-lane-momentum"></canvas></div>
-              <div class="vt-story-bands" id="story-bands"></div>
-            </div>
-            <div id="story-lane-map-wrap">
-              <div class="vt-story-lane-title" id="story-lane-map-title"></div>
-              <div class="vt-story-lane vt-story-lane--map"><canvas id="story-lane-map"></canvas></div>
-            </div>
-            <div id="story-lane-war-wrap">
-              <div class="vt-story-lane-title" id="story-lane-war-title"></div>
-              <div class="vt-story-lane vt-story-lane--war"><canvas id="story-lane-war"></canvas></div>
-            </div>
-            <div id="story-lane-intensity-wrap">
-              <div class="vt-story-lane-title" id="story-lane-intensity-title"></div>
-              <div class="vt-story-lane vt-story-lane--intensity"><canvas id="story-lane-intensity"></canvas></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card mb-4 d-none" id="story-beats-card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-list-stars me-2"></i>Key Moments</h5>
-            <span class="vt-story-why">hover to locate on the timeline — click to open in the Replay player</span>
-          </div>
-          <div class="card-body">
-            <div class="vt-story-beats" id="story-beats"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tab: Replay (3D viewer iframe injected by js/app.js
-           renderReplayTab() on activation, or empty-state card when the
-           match has no position data / no 3D extract). Expand is owned
-           by the iframe and applied as CSS expand + wrap fullscreen. -->
-      <div class="tab-pane fade" id="tab-replay" role="tabpanel" aria-labelledby="tab-replay-btn"></div>
-
-    </div>
-  </div>
-
-  <!-- All Matches View -->
-  <div id="all-matches-view" class="container-fluid px-3 px-md-4 py-4">
-
-    <!-- Filter-state banner. Visible only when picker filters are active.
-         Surfaces the filtered subset size + a Clear-filters shortcut so the
-         user always knows the aggregate's scope without re-opening the
-         picker modal. Wired in js/app.js loadAllMatches / applyPickerFilters. -->
-    <div class="vt-info-banner mb-4 d-none" id="all-matches-filter-banner" role="status">
-      <i class="bi bi-funnel"></i>
-      <div class="flex-grow-1" id="all-matches-filter-banner-text">
-        Filters are active.
-      </div>
-      <button type="button" class="btn btn-sm btn-outline-secondary" id="all-matches-filter-banner-clear">
-        <i class="bi bi-x-lg me-1"></i>Clear filters
-      </button>
-    </div>
-
-    <!-- All Matches Tab Navigation -->
-    <div class="vt-tab-scroll-wrap mb-4">
-      <ul class="nav nav-pills" id="all-tabs" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="all-tab-overview-btn" data-bs-toggle="pill" data-bs-target="#all-tab-overview" type="button" role="tab" aria-controls="all-tab-overview" aria-selected="true">Overview</button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons</button>
-        </li>
-      </ul>
-    </div>
-
-    <!-- All Matches Tab Content -->
-    <div class="tab-content" id="all-tab-content">
-
-      <!-- All Tab: Overview -->
-      <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
-
-        <!-- Hero band: title + 5-up stat cards. Lives inside Overview so it
-             hides with the other Overview cards on tab switch. Stat cards
-             (#hero-stats) are populated by renderHeroStats() in js/app.js. -->
-        <div class="vt-all-hero card mb-4">
-          <div class="card-body">
-            <div class="vt-all-hero-head">
-              <h4 class="mb-0">All Matches Overview</h4>
-            </div>
-            <div class="vt-hero-stats" id="hero-stats"></div>
-          </div>
-        </div>
-
-        <!-- Player-centric career views (Career Leaderboard, Career
-             Highlights, Commanders, Trends) moved to the Players hub
-             (/player/). Corpus distribution charts moved to /meta/.
-             All Matches stays match-centric: hero stats above, Weapons
-             in the remaining tab. -->
-        <div class="vt-info-banner mb-4" id="all-matches-players-banner" role="note">
-          <i class="bi bi-people-fill"></i>
-          <div class="flex-grow-1">
-            Player careers, leaderboards, commanders and trends live on the
-            <a href="player/" class="fw-semibold">Players</a> hub, with faction / ship / weapon / role filters.
-            Faction win rates and when games are played live on
-            <a href="meta/" class="fw-semibold">Meta</a>.
-          </div>
-          <a href="player/?tab=leaderboards" class="btn btn-sm btn-primary"><i class="bi bi-list-ol me-1"></i>Leaderboards</a>
-          <a href="player/?tab=trends" class="btn btn-sm btn-outline-secondary"><i class="bi bi-graph-up me-1"></i>Trends</a>
-          <a href="meta/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pie-chart me-1"></i>Meta</a>
-        </div>
-      </div>
-
-      <!-- All Tab: Weapons -->
-      <div class="tab-pane fade" id="all-tab-weapons" role="tabpanel" aria-labelledby="all-tab-weapons-btn">
-        <div class="row g-4 mb-4">
-          <div class="col-12">
-            <div class="card h-100" id="section-global-weapon">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Global Weapon Meta</h5>
-                <button class="btn btn-sm" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <div class="modal fade" id="replay-quality-modal" tabindex="-1" aria-labelledby="replay-quality-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="replay-quality-modal-title">Replay quality</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body" id="replay-quality-body"></div>
-        <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-          <button type="button" class="btn btn-primary btn-sm" id="replay-quality-save">Save</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Build Order Log help. Layman key for QUEUE / BUILD / CANCEL, the
-       four scrap columns, and the scrap-status dots. -->
-  <div class="modal fade" id="economy-buildlog-help-modal" tabindex="-1"
-       aria-labelledby="economy-buildlog-help-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="economy-buildlog-help-title">
-            <i class="bi bi-info-circle me-2"></i>Build Order Log
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="text-muted small">
-            Every order this commander queued, finished, or cancelled, in the order it happened.
-          </p>
-
-          <h6 class="mb-2">Events</h6>
-          <ul class="mb-3">
-            <li class="mb-1"><i class="bi bi-plus-circle me-1"></i><strong>Queue</strong> — the commander ordered the unit. If something else is already building, this sits in line and is not paid for yet.</li>
-            <li class="mb-1"><i class="bi bi-check-circle-fill me-1"></i><strong>Build</strong> — the unit finished. Cst, Bnk, Cap, and Pls still show the scrap bank from when it was queued, not when it rolled off the line.</li>
-            <li class="mb-1"><i class="bi bi-x-circle me-1"></i><strong>Cancel</strong> — the commander dropped it from the queue.</li>
-          </ul>
-
-          <h6 class="mb-2">The four columns</h6>
-          <p class="text-muted small mb-3">
-            <strong>Cst</strong> is the scrap cost.
-            <strong>Bnk</strong> is what the commander had to spend when the unit was queued (the engine takes the scrap on the next tick).
-            <strong>Cap</strong> is storage (40 for a live recycler plus 20 per pool).
-            <strong>Pls</strong> is how many extractors they held.
-            A missing reading shows as an em dash.
-          </p>
-
-          <h6 class="mb-2">Find</h6>
-          <p class="text-muted small mb-3">
-            The box matches the unit name, the ODF stem, or the producer.
-            A comma joins separate searches, so <span class="vt-mono">scav, spire</span> lists both.
-            The figure beside each team's count is the scrap cost of the rows in that list, including ones still behind Show more.
-            Sum totals those same rows by unit, one line per name with its count and scrap; when more than one event type is showing, that unit is a line per type, and the heading scrap is still the full list.
-          </p>
-
-          <h6 class="mb-2">The colored dots</h6>
-          <p class="text-muted small mb-2">
-            Scrap regenerates faster when the bank is low. The dot is the band at queue time:
-          </p>
-          <ul class="list-unstyled mb-0">
-            <li class="mb-1"><span class="vt-econ-help-dot" data-status="green"></span><strong>Green</strong> — bank nearly full. Slowest regen.</li>
-            <li class="mb-1"><span class="vt-econ-help-dot" data-status="yellow"></span><strong>Yellow</strong> — mid bank.</li>
-            <li class="mb-1"><span class="vt-econ-help-dot" data-status="red"></span><strong>Red</strong> (can read orange on some themes) — bank low. Fastest regen; usually means the commander was spending as scrap came in.</li>
-            <li class="mb-0"><span class="vt-econ-help-dot" data-status="parallel"></span><strong>Parallel</strong> — unused in VSR.</li>
-          </ul>
-        </div>
-        <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Game Watch Modal. Opened from the topnav GameWatch button (no-match
-       state) and the green LIVE pill (game-of-interest state). Embeds the
-       full /gw page in an iframe (?embed=1 hides its navbar) so users see
-       every active lobby worldwide with community matches pinned first. The
-       iframe src is set lazily on show and torn down on hide by
-       js/active-game-indicator.js so the embedded poller stops while closed.
-       Footer GameWatch button opens the standalone /gw page. -->
-  <div class="modal fade" id="gamewatch-modal" tabindex="-1"
-       aria-labelledby="gamewatch-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title vt-active-game-modal-title" id="gamewatch-modal-title">
-            <i class="bi bi-broadcast-pin me-2"></i>Game Watch
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body p-0">
-          <iframe id="gamewatch-modal-frame" class="vt-gamewatch-frame"
-                  title="Game Watch - all active lobbies" loading="lazy"
-                  referrerpolicy="no-referrer"></iframe>
-        </div>
-        <div class="modal-footer border-top">
-          <a href="gw/index.html" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-broadcast-pin me-1"></i>GameWatch
-          </a>
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Match Picker Modal -->
-  <div class="modal fade vt-match-picker-modal" id="match-picker-modal" tabindex="-1"
-       aria-labelledby="match-picker-title" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="match-picker-title">Select a match</h5>
-          <div class="input-group input-group-sm vt-match-picker-search">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="search" id="match-picker-search" class="form-control"
-                   placeholder="Search map, submitter, players, commander, date..."
-                   aria-label="Filter matches" autocomplete="off">
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <!-- Filter toolbar (Phase 2). All facets AND-combine with each
-               other and with the header search input. Populated by
-               buildMatchPickerFilters(). The pinned "All Matches" card
-               is exempt from every filter and sort. -->
-          <div class="vt-match-picker-filters" id="match-picker-filters" data-expanded="false">
-            <button type="button" class="vt-match-picker-filters-toggle d-md-none" id="match-picker-filters-toggle"
-                    aria-expanded="false" aria-controls="match-picker-filters-body">
-              <i class="bi bi-sliders me-1"></i>Filters
-              <span class="vt-match-picker-filters-badge" id="match-picker-filters-badge-inline">0</span>
-              <i class="bi bi-chevron-down ms-auto"></i>
-            </button>
-            <div class="vt-match-picker-filters-body" id="match-picker-filters-body">
-              <!-- Sort + Clear-all row -->
-              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--controls">
-                <div class="vt-match-picker-filter-controls">
-                  <label class="vt-match-picker-filter-label" for="match-picker-sort">Sort</label>
-                  <select id="match-picker-sort" class="form-select form-select-sm vt-match-picker-sort" aria-label="Sort matches">
-                    <option value="date-desc">Newest first</option>
-                    <option value="date-asc">Oldest first</option>
-                    <option value="duration-desc">Longest</option>
-                    <option value="duration-asc">Shortest</option>
-                    <option value="players-desc">Most players</option>
-                    <option value="players-asc">Fewest players</option>
-                    <option value="name-asc">Map A&ndash;Z</option>
-                  </select>
-                </div>
-                <div class="vt-match-picker-filter-summary">
-                  <span id="match-picker-result-count" class="vt-mono">&mdash;</span>
-                  <button type="button" class="btn btn-sm btn-outline-secondary vt-match-picker-clear d-none" id="match-picker-clear">
-                    <i class="bi bi-x-lg me-1"></i>Clear filters
-                  </button>
-                </div>
-              </div>
-
-              <!-- Duration band (single-select chips) -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Duration</span>
-                <div class="vt-match-picker-chipset" data-facet="duration" role="radiogroup" aria-label="Duration band">
-                  <button type="button" class="vt-match-picker-chip is-active" data-value="any" role="radio" aria-checked="true">Any</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="short" role="radio" aria-checked="false">&lt;10m</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="medium" role="radio" aria-checked="false">10&ndash;20m</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="long" role="radio" aria-checked="false">20m+</button>
-                </div>
-              </div>
-
-              <!-- Has VOD (single-select; client-side join against match_videos.json) -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Has VOD</span>
-                <div class="vt-match-picker-chipset" data-facet="vod" role="radiogroup" aria-label="YouTube VOD mapping">
-                  <button type="button" class="vt-match-picker-chip is-active" data-value="any" role="radio" aria-checked="true">Any</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="yes" role="radio" aria-checked="false" title="Matches with a verified YouTube VOD mapping">Has VOD</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="no" role="radio" aria-checked="false" title="Matches with no YouTube VOD mapping">No VOD</button>
-                </div>
-              </div>
-
-              <!-- Faction pair. Unordered: the two selects are not Team 1 / Team 2.
-                   The second stays disabled until the first is a specific faction. -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label" id="match-picker-faction-label">Faction</span>
-                <div class="vt-match-picker-faction">
-                  <select id="match-picker-faction" class="form-select form-select-sm vt-match-picker-faction-select"
-                          aria-labelledby="match-picker-faction-label" aria-label="First faction">
-                    <option value="any">Any</option>
-                    <option value="i">ISDF</option>
-                    <option value="f">Scion</option>
-                    <option value="e">Hadean</option>
-                  </select>
-                  <span class="vt-match-picker-faction-vs" aria-hidden="true">vs</span>
-                  <select id="match-picker-faction-vs" class="form-select form-select-sm vt-match-picker-faction-select"
-                          aria-label="Second faction" disabled>
-                    <option value="any">Any</option>
-                    <option value="i">ISDF</option>
-                    <option value="f">Scion</option>
-                    <option value="e">Hadean</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Format (multi-select chips, populated from manifest[].match_format:
-                   the same classifier that picks a game's ladder). Empty = any. -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Format</span>
-                <div class="vt-match-picker-chipset" data-facet="formats" id="match-picker-facet-formats" role="group" aria-label="Match format"></div>
-              </div>
-
-              <!-- Player count (multi-select dropdown). Empty = any count.
-                   Options are the distinct active_player_count values. -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Players</span>
-                <div class="dropdown vt-match-picker-count">
-                  <button type="button" class="form-select form-select-sm vt-match-picker-count-toggle text-start"
-                          id="match-picker-count-toggle"
-                          data-bs-toggle="dropdown" data-bs-auto-close="outside"
-                          aria-expanded="false" aria-haspopup="listbox">
-                    Any
-                  </button>
-                  <ul class="dropdown-menu vt-match-picker-count-menu" id="match-picker-facet-players"
-                      role="group" aria-label="Player count"></ul>
-                </div>
-              </div>
-
-              <!-- Submitter (multi-select chips, populated from manifest) -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Submitter</span>
-                <div class="vt-match-picker-chipset" data-facet="submitters" id="match-picker-facet-submitters" role="group" aria-label="Submitter"></div>
-              </div>
-
-              <!-- Players (multi-select chips spanning the full roster, with
-                   own search + Match-mode toggle (Any of these / All of these)
-                   + Role toggle (Any / Commander / Thug). The role is derived
-                   per-match: a name in `team_leaders` is the match's commander,
-                   anyone else in `players[]` is a thug. Collapsed by default;
-                   the toggle row keeps selected names visible. -->
-              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--players" data-expanded="false">
-                <button type="button" class="vt-match-picker-players-toggle" id="match-picker-players-toggle"
-                        aria-expanded="false" aria-controls="match-picker-players-panel">
-                  <span class="vt-match-picker-filter-label">Players</span>
-                  <span class="vt-match-picker-players-summary" id="match-picker-players-summary"></span>
-                  <i class="bi bi-chevron-down vt-match-picker-players-chevron" aria-hidden="true"></i>
-                </button>
-                <div class="vt-match-picker-players" id="match-picker-players-panel" hidden>
-                  <div class="vt-match-picker-players-head">
-                    <div class="input-group input-group-sm vt-match-picker-players-search">
-                      <span class="input-group-text"><i class="bi bi-search"></i></span>
-                      <input type="search" id="match-picker-players-search" class="form-control"
-                             placeholder="Filter player list..." aria-label="Filter player chips" autocomplete="off">
-                    </div>
-                    <ul class="nav nav-pills vt-econ-log-pills mb-0 vt-match-picker-players-mode" role="radiogroup" aria-label="Player match mode">
-                      <li class="nav-item">
-                        <button type="button" class="nav-link active" data-match-mode="any" role="radio" aria-checked="true" title="Match if any selected player was in the match">Any of these</button>
-                      </li>
-                      <li class="nav-item">
-                        <button type="button" class="nav-link" data-match-mode="all" role="radio" aria-checked="false" title="Match only if every selected player was in the match">All of these</button>
-                      </li>
-                    </ul>
-                    <ul class="nav nav-pills vt-econ-log-pills mb-0 vt-match-picker-players-role" role="radiogroup" aria-label="Player role">
-                      <li class="nav-item">
-                        <button type="button" class="nav-link active" data-role="any" role="radio" aria-checked="true" title="Selected players in any role (commander or thug)">Any role</button>
-                      </li>
-                      <li class="nav-item">
-                        <button type="button" class="nav-link" data-role="commander" role="radio" aria-checked="false" title="Selected players must have commanded the match">Commander</button>
-                      </li>
-                      <li class="nav-item">
-                        <button type="button" class="nav-link" data-role="thug" role="radio" aria-checked="false" title="Selected players must have been on the team but not commanding">Thug</button>
-                      </li>
-                    </ul>
-                  </div>
-                  <div class="vt-match-picker-chipset vt-match-picker-chipset--players"
-                       data-facet="players-roster" id="match-picker-facet-players-roster"
-                       role="group" aria-label="Players"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="vt-match-picker-grid" id="match-picker-grid" role="list">
-            <!-- Populated by js/app.js buildMatchPicker() -->
-          </div>
-          <div class="vt-match-picker-empty d-none" id="match-picker-empty" role="status">
-            <i class="bi bi-search me-2"></i><span id="match-picker-empty-text">No matches match your search.</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary ms-2 d-none" id="match-picker-empty-clear">
-              <i class="bi bi-x-lg me-1"></i>Clear filters
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Map Info Modal: opened by clicking #info-map-thumb-btn in the
-       match-info banner. Shows the full-resolution top-down map image
-       plus all map-level metadata available (registry description, author,
-       canonical size / b2b, mod ID, team names) and the this-match terrain
-       fields (terrain size, elevation, empirical b2b). Populated by
-       renderMapBannerFields() in js/app.js.
-
-       The modal title text is wrapped in an anchor (`#map-info-modal-title-link`)
-       and the footer carries a `View full map page` button (`#map-info-modal-page-link`)
-       so users can drill into the full /map/<slug>/ catalog page from the
-       in-context summary. Both links carry `target="_blank" rel="noopener"`
-       so accidental clicks don't yank the user out of their dashboard
-       state — the modal stays open and the catalog page opens in a new
-       tab. Wired in `renderMapInfoModal()` in js/app.js; both controls
-       toggle `d-none` together when `meta.key` is empty/unresolved. -->
-  <div class="modal fade vt-map-info-modal" id="map-info-modal" tabindex="-1"
-       aria-labelledby="map-info-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="map-info-modal-title">
-            <i class="bi bi-map me-2"></i>
-            <a id="map-info-modal-title-link" href="#" target="_blank" rel="noopener"
-               class="vt-map-title-link"
-               title="Open this map's full catalog page (new tab)">
-              <span id="map-info-modal-title-text">&mdash;</span>
-            </a>
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="row g-3">
-            <div class="col-md-6 vt-map-info-image-col" id="map-info-modal-image-col">
-              <img id="map-info-modal-image" class="vt-map-info-image" alt="" decoding="async" loading="lazy">
-              <!-- Author/community blurb from data/map-registry.json[<key>].description.
-                   Hidden when the registry has no description for this map. -->
-              <div class="vt-map-info-description d-none" id="map-info-modal-description"></div>
-            </div>
-            <div class="col-md-6">
-              <dl class="vt-map-info-meta" id="map-info-modal-meta">
-                <!-- Populated by renderMapInfoModal() in js/app.js -->
-              </dl>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer border-top">
-          <a id="map-info-modal-page-link" href="#" target="_blank" rel="noopener"
-             class="btn btn-sm btn-primary d-none">
-            <i class="bi bi-box-arrow-up-right me-1"></i>View full map page
-          </a>
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Fullscreen Modal -->
-  <div class="modal fade" id="fullscreen-modal" tabindex="-1" aria-labelledby="fullscreen-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-fullscreen">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="fullscreen-modal-title"></h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body" id="fullscreen-modal-body" style="overflow:auto"></div>
-      </div>
-    </div>
-  </div>
+  </main>
 
   <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="vendor/chartjs/chart.umd.min.js"></script>
-  <!-- Hammer.js: gesture lib required by chartjs-plugin-zoom for click-drag
-       pan and pinch-zoom. Wheel-zoom alone would work without it, but
-       drag-pan needs it. ~21KB. -->
-  <script src="vendor/chartjs/hammer.min.js"></script>
-  <!-- chartjs-plugin-zoom v2.2.0: enables wheel-zoom + drag-pan on charts
-       that opt in via options.plugins.zoom. The plugin self-registers
-       (Chart.register at the bottom of the UMD bundle). Currently wired
-       only on the Combat Timeline; see js/charts.js renderTimeline(). -->
-  <script src="vendor/chartjs/chartjs-plugin-zoom.umd.min.js"></script>
   <script src="js/theme.js"></script>
-  <!-- Live world-clock pills above the navbar. Dashboard only. -->
   <script src="js/world-clocks.js"></script>
-  <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
-  <script src="js/charts-radar.js"></script>
-  <!-- YouTube VOD timestamp links (window.VTVideoLinks). Loaded before
-       storyline.js and app.js so both consumers can emit Watch-on-YouTube
-       icons. 404-safe; display-only. -->
-  <script src="js/video-links.js"></script>
-  <!-- Storyline tab renderer (window.VTStoryline). Depends on charts.js
-       globals (activeCharts / glassTooltipConfig / getThemeColors /
-       fmtMatchClock) so it loads after it, before app.js. -->
-  <script src="js/storyline.js"></script>
-  <!-- Per-match Elo tab renderer (window.VTMatchElo). Depends on
-       charts.js globals (activeCharts / glassTooltipConfig / getThemeColors)
-       so it loads after it, before app.js. -->
   <script src="js/vtsr-display.js"></script>
-  <script src="js/match-elo.js"></script>
-  <!-- Balonce Meter: shared win-probability model (VTSR-C commander gap +
-       thug VTSR-T handicap) + the per-match Outcome-card read
-       (#outcome-read / #outcome-after inside #section-faction).
-       Also loaded by tools/index.html, where Team Balonce renders the same
-       gauge. Owns the shared 404-safe elo_commander_history loader that
-       js/match-elo.js delegates to, so it loads before app.js. -->
-  <script src="js/balonce-meter.js"></script>
-  <script src="js/positioning-charts.js"></script>
-  <!-- All Matches aggregator: pure summation over a contributions dict.
-       Documented exception to the "no aggregation in JS" rule so the All
-       Matches view honors picker filters without per-match round trips.
-       See js/all-matches-aggregator.js header. -->
-  <script src="js/all-matches-aggregator.js"></script>
-  <!-- Shared Highlights renderer (window.VTHighlights): the per-match
-       Match Highlights grid here and the Career Highlights grid on the
-       Players hub draw from one copy table. Loaded before app.js. -->
-  <script src="js/highlights-render.js"></script>
-  <!-- BZ2API: baked-in VSR_MAP_DATA catalog + iondriver map API client.
-       Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
-       before app.js so window.BZ2API is available during init. -->
-  <script src="js/bz2api.js"></script>
-  <!-- Shared live-session card renderer. Used by both the topnav LIVE
-       pill modal (active-game-indicator.js) and the Tools page Lobby
-       card (js/tools/live-session.js). Must load before
-       active-game-indicator.js. -->
-  <script src="js/live-session-card.js"></script>
-  <!-- Active Game Indicator: dashboard-only topnav widget that polls the
-       BZ2 lobby via window.BZ2API every 60s and surfaces a pulsing LIVE
-       pill + Game Watch iframe modal whenever a session hosted by an
-       allowlisted Steam64 (data/known-hosts.json) is live. Also flips the
-       dashboard Tools dropdown's data-vt-tools-live attribute when the same
-       condition holds. Early-returns on pages without #vt-active-game. -->
-  <script src="js/active-game-indicator.js"></script>
-
-  <!-- Site-wide custom cursor + Settings gear. Self-bootstrapping; injects a
-       gear dropdown into .vt-nav-menu and runs the BZCC cursor overlay. -->
   <script src="js/cursor-settings.js"></script>
-  <script type="module" src="js/replay-quality.js?v=rqsite2"></script>
-  <!-- Shared VTSR-T explainer content + annotated-stage engine (also
-       loaded by elo/index.html). Must precede app.js: renderVtsrTeaser()
-       reads window.VTSRExplain for the methodology modal body. -->
-  <script src="js/vtsr-explainers.js"></script>
-  <script>
-    window.addEventListener('error', function (ev) {
-      var file = ev.filename || '';
-      if (file.indexOf('app.js') === -1) return;
-      var loading = document.getElementById('loading');
-      if (!loading || loading.classList.contains('d-none')) return;
-      var title = document.getElementById('vt-boot-title');
-      var list = document.getElementById('vt-boot-log');
-      var message = String(ev.message || 'Could not start').replace(/^Uncaught\s+/, '');
-      if (title) {
-        title.textContent = 'Dashboard script failed';
-        title.classList.add('is-error');
-      }
-      if (list) {
-        var li = document.createElement('li');
-        li.className = 'is-error';
-        li.textContent = message;
-        list.appendChild(li);
-      }
-    });
-  </script>
-  <script src="js/app.js"></script>
+  <script src="js/landing.js"></script>
 </body>
 </html>

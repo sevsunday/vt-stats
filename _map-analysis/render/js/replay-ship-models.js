@@ -208,6 +208,34 @@ function lookupSpec(odf) {
   return lookupKeyed(_byOdf, odf);
 }
 
+/** Local XZ square of a flat pad, or null when the model has none. */
+function patchFootprint(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+  const minX = Number(p.minX);
+  const minZ = Number(p.minZ);
+  const step = Number(p.step);
+  const cols = Number(p.cols);
+  const rows = Number(p.rows);
+  if (![minX, minZ, step, cols, rows].every(Number.isFinite)) return null;
+  if (cols < 2 || rows < 2 || step <= 0) return null;
+  return {
+    minX,
+    minZ,
+    maxX: minX + (cols - 1) * step,
+    maxZ: minZ + (rows - 1) * step,
+  };
+}
+
+/**
+ * The model's flat pad in local space, null when it has none, or undefined
+ * while the model index is still loading.
+ */
+export function terrainPatchFor(odf) {
+  if (!_byOdf) return undefined;
+  const spec = lookupSpec(odf);
+  return (spec && spec.terrainPatch) || null;
+}
+
 function lookupLego(odf) {
   return lookupKeyed(_legoByOdf, odf);
 }
@@ -274,9 +302,10 @@ async function ensureIndex() {
             teamColor: m.teamColorTextures || [],
             emissive: m.emissiveTextures || [],
             textureSets: Array.isArray(m.textureSets) ? m.textureSets : [],
-            // A height array on the index, not the heights themselves.
-            // Deployed buildings that have one sit on model y = 0.
-            terrainPatch: !!m.terrainPatch,
+            // Flat local-height-0 square. Deployed buildings that have one
+            // sit on model y = 0, and the replay stamps this footprint into
+            // the terrain once the building stands.
+            terrainPatch: patchFootprint(m.terrainPatch),
           };
           if (!_specByStem.has(m.stem)) _specByStem.set(m.stem, spec);
           const keys = [...(m.odfs || [])];

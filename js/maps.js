@@ -1187,7 +1187,7 @@
     const community = m.source === 'f9';
     const dateCell = community
       ? `<span class="vt-map-recent-date-label" title="Community game logged by F9bomber (https://f9bomber.com)">${escapeHtml(dateStr)}</span>`
-      : `<a href="${escapeHtml(`${state.dataPrefix}index.html?match=${encodeURIComponent(m.id || '')}`)}" class="vt-map-recent-link" title="Open this match in the dashboard">${escapeHtml(dateStr)}</a>`;
+      : `<a href="${escapeHtml(`${state.dataPrefix}matches/?match=${encodeURIComponent(m.id || '')}`)}" class="vt-map-recent-link" title="Open this match in the dashboard">${escapeHtml(dateStr)}</a>`;
     const c1 = (m.commanders && m.commanders['1']) || null;
     const c2 = (m.commanders && m.commanders['2']) || null;
     const cmdrCell = `

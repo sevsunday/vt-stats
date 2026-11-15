@@ -15,11 +15,11 @@
  */
 
 import * as THREE from 'three';
-import { worldCutRect } from './replay-ship-models.js?v=pools4';
+import { worldCutRect } from './replay-ship-models.js?v=pads2';
 
 const MAX_CUT_RECTS = 64;
 const SPAN_MARGIN_M = 0.5;
-const CUTS_URL = new URL('../../../data/render/building_cuts.json', import.meta.url).href;
+const CUTS_URL = new URL('../../../data/render/building_cuts.json?v=pads2', import.meta.url).href;
 
 const _rects = [];
 const _spans = [];

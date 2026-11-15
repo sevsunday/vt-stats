@@ -110,6 +110,9 @@
   }
 
   function schedule() {
+    // destroy() flips started off. An in-flight tick still reaches here
+    // from its finally, and must not arm another poll after that.
+    if (!started) return;
     if (pollTimerId !== null) {
       clearTimeout(pollTimerId);
       pollTimerId = null;

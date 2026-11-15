@@ -1,0 +1,142 @@
+/* ============================================================================
+   VT Stats — /matches/
+   The gallery is the match picker, laid out as a page: a header (title,
+   search, sort) and, from the lg breakpoint up, a sticky filter sidebar
+   beside the card grid. Below that the filters collapse the way they do
+   inside the modal. Opening a match moves these nodes back into the modal;
+   the rules below are scoped to #matches-gallery so the modal is unchanged.
+   ============================================================================ */
+
+#matches-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  min-height: calc(100dvh - var(--vt-matches-header, 7rem));
+  margin: 0;
+  padding: 0.9rem 1rem 1.4rem;
+}
+
+@media (min-width: 768px) {
+  #matches-gallery {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+}
+
+.vt-matches-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+}
+
+.vt-matches-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+}
+
+#vt-matches-search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+#vt-matches-search .vt-match-picker-search {
+  max-width: none;
+  width: 100%;
+  margin-left: 0;
+}
+
+#vt-matches-search .vt-match-picker-search > .input-group-text,
+#vt-matches-search .vt-match-picker-search > .form-control {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--kb-text-primary);
+}
+
+#vt-matches-search .vt-match-picker-search > .input-group-text {
+  color: var(--kb-primary);
+}
+
+#vt-matches-search .vt-match-picker-search > .form-control:focus {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--kb-text-primary);
+}
+
+#vt-matches-summary {
+  margin-left: auto;
+}
+
+#vt-matches-summary .vt-match-picker-filter-row--controls {
+  border-bottom: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0.75rem;
+}
+
+.vt-matches-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.vt-matches-results {
+  min-width: 0;
+}
+
+#matches-gallery .vt-match-picker-grid {
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+}
+
+#matches-gallery .vt-match-picker-filters {
+  margin-bottom: 0;
+}
+
+a.vt-match-picker-card {
+  text-decoration: none;
+  color: var(--kb-text-primary);
+}
+
+a.vt-match-picker-card:hover,
+a.vt-match-picker-card:focus-visible {
+  color: var(--kb-text-primary);
+}
+
+@media (min-width: 992px) {
+  .vt-matches-main {
+    grid-template-columns: minmax(16.5rem, 20rem) minmax(0, 1fr);
+    column-gap: 1.1rem;
+  }
+
+  #vt-matches-filters {
+    position: sticky;
+    top: calc(var(--vt-matches-header, 7rem) + 0.4rem);
+    max-height: calc(100dvh - var(--vt-matches-header, 7rem) - 1.4rem);
+    overflow: auto;
+  }
+
+  /* A narrow sidebar reads better with the label above its chips. */
+  #matches-gallery .vt-match-picker-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+
+  #matches-gallery .vt-match-picker-filter-label {
+    flex: none;
+  }
+}
+
+@media (max-width: 480px) {
+  #matches-gallery .vt-match-picker-grid {
+    grid-template-columns: 1fr;
+  }
+}

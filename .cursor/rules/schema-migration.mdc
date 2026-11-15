@@ -88,12 +88,11 @@ Key locations in `scripts/process_stats.py`:
 - **Per-match contribution slice**: `_extract_contribution()` — slim shape consumed by the client-side All Matches aggregator (`js/all-matches-aggregator.js`). The legacy `build_all_matches_aggregate()` Python function remains as reference code only; the pipeline no longer writes `all_matches.json`.
 
 Key locations in `js/app.js`:
-- **Match loading**: `loadMatch()` function
-- **All-matches loading**: `loadAllMatches()` function
-- **Chart registry**: `registerMatchCharts()` and `registerAllMatchesCharts()`
+- **Match loading**: `loadMatch()` in `js/app.js` (the shell is `matches/index.html`)
+- **Gallery**: `showGallery()` / `mountPickerIn()` — a bare `/matches/` visit. There is no All Matches aggregate view.
+- **Chart registry**: `registerMatchCharts()`
 - **Fullscreen modal**: `expandSection()` with `chartRenderers` map
 
 Key locations in `index.html`:
-- **Single match sections**: inside `<div id="dashboard">`
-- **All matches sections**: inside `<div id="all-matches-view">`
+- **Single match sections**: inside `<div id="dashboard">` in `matches/index.html`
 - **Fullscreen modal**: `<div id="fullscreen-modal">`

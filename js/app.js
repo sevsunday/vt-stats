@@ -15,19 +15,16 @@
 (async function () {
   const $loading = document.getElementById('loading');
   const $dashboard = document.getElementById('dashboard');
-  const $allView = document.getElementById('all-matches-view');
+  const $gallery = document.getElementById('matches-gallery');
 
   // --- Match picker DOM handles ---
-  // Two twin triggers (one per hero card) + a shared XL modal containing
-  // the rich card grid. Both triggers reflect the same `currentTarget`
-  // (either a manifest entry or the sentinel string '__all__') via
-  // updateMatchPickerTriggers().
+  // One trigger on the match banner, plus a shared XL modal. The gallery
+  // (/matches/ with no ?match=) shows the same search, filters and cards
+  // inline; mountPickerIn() moves those nodes between the page and the modal.
+  // currentTarget is the open manifest entry, or null on the gallery.
   const $trigger        = document.getElementById('match-picker-trigger');
-  const $triggerAll     = document.getElementById('match-picker-trigger-all');
   const $triggerName    = document.getElementById('trigger-name');
-  const $triggerNameAll = document.getElementById('trigger-name-all');
   const $triggerSub     = document.getElementById('trigger-sub');
-  const $triggerSubAll  = document.getElementById('trigger-sub-all');
   const $pickerModalEl  = document.getElementById('match-picker-modal');
   const $pickerGrid     = document.getElementById('match-picker-grid');
   const $pickerEmpty    = document.getElementById('match-picker-empty');
@@ -36,7 +33,6 @@
   const $pickerSearch   = document.getElementById('match-picker-search');
   // Phase 2: filter toolbar DOM.
   const $triggerBadge       = document.getElementById('trigger-badge');
-  const $triggerBadgeAll    = document.getElementById('trigger-badge-all');
   const $filtersRoot        = document.getElementById('match-picker-filters');
   const $filtersToggle      = document.getElementById('match-picker-filters-toggle');
   const $filtersBadgeInline = document.getElementById('match-picker-filters-badge-inline');
@@ -68,9 +64,8 @@
   // hold a reference so card-click handlers can programmatically dismiss.
   let pickerModalInstance = null;
 
-  // Current selection target. '__all__' for the aggregate view, otherwise
-  // the manifest entry object (not just its id/file — we need name + sub
-  // text for the trigger). null before boot completes.
+  // Current selection target: the manifest entry object (name + sub text
+  // for the trigger), or null on the gallery and before boot completes.
   let currentTarget = null;
 
   // Picker filter + sort state. All AND-combine with each other and with
@@ -134,16 +129,8 @@
     storyline:   'tab-storyline-btn',
     replay:      'tab-replay-btn',
   };
-  // All Matches is match-centric: Overview (hero stats) · Weapons.
-  // The player-centric tabs (career leaderboard, commanders, experimental
-  // schedule/form) moved to the Players hub (/player/). The Meta tab
-  // moved to /meta/. Legacy ?match=all&tab= deep links redirect
-  // (see redirectLegacyAllTab).
-  const ALL_TAB_SLUGS = {
-    overview:            'all-tab-overview-btn',
-    weapons:             'all-tab-weapons-btn',
-    'weapons-rivalries': 'all-tab-weapons-btn',  // legacy alias
-  };
+  // The All Matches aggregate view is gone. These three deep links still
+  // leave /matches/ for the Players hub and the Meta page.
   const LEGACY_ALL_TAB_REDIRECTS = {
     commanders: 'player/?tab=commanders',
     players:    'player/?tab=trends',
@@ -165,13 +152,13 @@
 
   function btnIdToSlug(btnId) {
     for (const [slug, id] of Object.entries(MATCH_TAB_SLUGS)) { if (id === btnId) return slug; }
-    for (const [slug, id] of Object.entries(ALL_TAB_SLUGS))   { if (id === btnId) return slug; }
     return null;
   }
 
   // --- URL State ---
   // URL schema:
-  //   ?match=<id>|all   (omitted => load first match)
+  //   ?match=<id>|latest   (omitted => the gallery; latest => newest open match)
+  //   ?match=all        (legacy aggregate; opens the gallery, picker params kept)
   //   ?filter=all|team|player
   //   ?team=1|2         (only when filter=team)
   //   ?players=<csv>    (only when filter=player; tokens may be canonical names or Steam64 IDs)
@@ -249,8 +236,7 @@
   }
 
   function getActiveTabSlug() {
-    const root = currentTarget === '__all__' ? '#all-tabs' : '#match-tabs';
-    const activeBtn = document.querySelector(root + ' .nav-link.active');
+    const activeBtn = document.querySelector('#match-tabs .nav-link.active');
     return activeBtn ? btnIdToSlug(activeBtn.id) : null;
   }
 
@@ -322,25 +308,20 @@
   function buildShareUrl() {
     const params = new URLSearchParams();
 
-    if (currentTarget === '__all__') {
-      params.set('match', 'all');
-    } else if (currentData) {
+    if (currentData && currentTarget) {
       params.set('match', currentData.match.id);
     }
 
-    const isAllMatchesView = currentTarget === '__all__';
-    if (!isAllMatchesView) {
-      if (filterState.mode === 'team' && filterState.team) {
-        params.set('filter', 'team');
-        params.set('team', String(filterState.team));
-      } else if (filterState.mode === 'player' && filterState.players.length > 0) {
-        params.set('filter', 'player');
-        params.set('players', filterState.players.join(','));
-      }
+    if (filterState.mode === 'team' && filterState.team) {
+      params.set('filter', 'team');
+      params.set('team', String(filterState.team));
+    } else if (filterState.mode === 'player' && filterState.players.length > 0) {
+      params.set('filter', 'player');
+      params.set('players', filterState.players.join(','));
     }
 
     // Picker filter axis — emitted only when non-default so links to the
-    // common case stay short (e.g. `?match=all` with no filters set).
+    // common case stay short (a bare /matches/ is the unfiltered gallery).
     // These hydrate `pickerState` on initial load via parseUrlState() +
     // hydratePickerStateFromUrl(), and apply globally regardless of the
     // currently-loaded match (the picker layer is independent of the
@@ -369,14 +350,12 @@
   }
 
   // Gated URL writer — no-op unless live sync is enabled.
-  // All Matches is the exception: the address bar always becomes
-  // ?match=all (Overview omits tab) so that view can be copied and
-  // shared with Live Sync off. mode 'replace' rewrites the current
-  // entry (boot, catch-up). Anything else pushes once the first load
-  // has finished, so Back walks match / tab / filter changes.
+  // mode 'replace' rewrites the current entry (boot, catch-up). Anything
+  // else pushes once the first load has finished, so Back walks match /
+  // tab / filter changes. The gallery itself does not call this: its URL
+  // is the picker keys only, written by syncPickerUrl().
   function syncUrl(mode) {
-    const onAllMatches = currentTarget === '__all__';
-    if ((!liveSyncEnabled && !onAllMatches) || historyWrites) return;
+    if (!liveSyncEnabled || historyWrites) return;
     const next = buildShareUrl();
     const cur = window.location.pathname + window.location.search;
     if (next === cur) { shownUrl = cur; return; }
@@ -683,6 +662,14 @@
     if (!document.getElementById('vt-boot-log')) {
       $loading.innerHTML = preloaderHtml;
     }
+    // A previous match fades the spinner out and hides #loading on a timer.
+    // Cancel that before the fetch so this shell is the one on screen.
+    if (window.VTFx && VTFx.showPreloader) VTFx.showPreloader();
+    else if ($loading) {
+      $loading.classList.remove('d-none');
+      const pre = $loading.querySelector('.vt-preloader');
+      if (pre) pre.classList.remove('vt-fade-out');
+    }
     if (!bootLogCarry) clearBootLog();
     bootLogCarry = false;
   }
@@ -900,8 +887,9 @@
       ? '<i class="bi bi-youtube vt-match-picker-vod" title="YouTube VOD" aria-hidden="true"></i>'
       : '';
 
+    const href = 'matches/?match=' + encodeURIComponent(entry.id || '');
     return `
-      <button type="button" class="vt-match-picker-card" data-target="${esc(entry.file)}" role="listitem">
+      <a class="vt-match-picker-card" href="${esc(href)}" data-target="${esc(entry.file)}" role="listitem">
         ${thumbHtml}
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
@@ -915,132 +903,18 @@
           </div>
           ${leadersHtml}
         </div>
-      </button>`;
-  }
-
-  function buildMatchPickerAllCardHtml() {
-    // The card's meta + submeta lines are kept generic at build-time and
-    // updated dynamically by updateAllMatchesCardCopy() once the picker
-    // filters apply. That avoids a second buildMatchPicker() pass when
-    // filters change.
-    // Meta is rendered as its own stacked block under the head row (not
-    // inside it) so a long "N matches" string can't squeeze the name down
-    // to "Al..." like it did when both lived in the same flex row.
-    return `
-      <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
-        <div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true">
-          <i class="bi bi-collection"></i>
-        </div>
-        <div class="vt-match-picker-card-body">
-          <div class="vt-match-picker-card-head">
-            <span class="vt-match-picker-card-name">All Matches</span>
-          </div>
-          <div class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches</div>
-          <div class="vt-match-picker-card-submeta">
-            <span class="vt-muted" data-all-card-submeta>Career overview across every recorded match.</span>
-          </div>
-        </div>
-      </button>`;
-  }
-
-  // Debounced re-aggregator for the All Matches view. Coalesces rapid
-  // chip toggles / search keystrokes into a single loadAllMatches() call.
-  // Only fires when the user is actively on the aggregate view; otherwise
-  // the filter state is recorded silently and applied on next selection.
-  let _allRerenderTimer = null;
-  function scheduleAllMatchesReaggregate() {
-    if (currentTarget !== '__all__') return;
-    if (_allRerenderTimer) clearTimeout(_allRerenderTimer);
-    _allRerenderTimer = setTimeout(() => {
-      _allRerenderTimer = null;
-      // Skip the view-transition wrapper for in-place filter updates so
-      // the user gets immediate feedback. URL sync still runs inside
-      // loadAllMatches so the share link reflects the new filter scope.
-      loadAllMatches();
-    }, 120);
-  }
-
-  // Sync the filter-state banner above #all-matches-view. Visible only
-  // when picker filters are active; surfaces the filtered subset size
-  // and a Clear-filters shortcut. Idempotent — safe to call from
-  // loadAllMatches and from applyPickerFilters whenever currentTarget
-  // is '__all__'.
-  function updateAllMatchesFilterBanner(filteredCount) {
-    const banner = document.getElementById('all-matches-filter-banner');
-    if (!banner) return;
-    const txt = document.getElementById('all-matches-filter-banner-text');
-    const filtersOn = hasAnyFilterEngaged(pickerState);
-    if (!filtersOn) {
-      banner.classList.add('d-none');
-      return;
-    }
-    banner.classList.remove('d-none');
-    if (txt) {
-      const k = filteredCount;
-      const N = manifest.length;
-      // Read the latest aggregate meta from the window stash so the
-      // parenthetical reflects whatever VTAggregate.build() last produced
-      // for the current filter scope. May be stale by ~one debounce tick
-      // when filters change rapidly; the next reaggregate fixes it.
-      const aggMeta = (window.__vtAllMatchesData && window.__vtAllMatchesData.meta) || {};
-      const dropped = aggMeta.players_dropped_by_min_matches || 0;
-      const minMatches = aggMeta.min_career_matches || 0;
-      const droppedSuffix = (k > 0 && dropped > 0 && minMatches > 0)
-        ? ` <small class="text-muted">(${dropped} player${dropped === 1 ? '' : 's'} hidden by ${minMatches}-match minimum.)</small>`
-        : '';
-      const formatSuffix = pickerState.formats.length
-        ? ` Format: ${esc(pickerState.formats.map(f => MATCH_FORMAT_LABEL[f] || f).join(', '))}.`
-        : '';
-      txt.innerHTML = k === 0
-        ? `<strong>No matches</strong> match the current filters.`
-        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.${formatSuffix}${droppedSuffix}`;
-    }
-  }
-
-  // Keep the All Matches card's copy in sync with the active filter state.
-  // When filters are engaged, the card reads as "Aggregate of K of N matches
-  // matching filters"; when not, it falls back to the generic career-overview
-  // line. Called from applyPickerFilters() with the filtered count already
-  // computed (avoids a second predicate pass).
-  function updateAllMatchesCardCopy(filteredCount) {
-    if (!$pickerGrid) return;
-    const allCard = $pickerGrid.querySelector('.vt-match-picker-card--all');
-    if (!allCard) return;
-    const metaEl = allCard.querySelector('[data-all-card-meta]');
-    const subEl = allCard.querySelector('[data-all-card-submeta]');
-    if (!metaEl || !subEl) return;
-
-    const total = manifest.length;
-    const filtersOn = hasAnyFilterEngaged(pickerState);
-
-    if (filtersOn) {
-      const k = filteredCount;
-      metaEl.textContent = `${k} of ${total} match${total === 1 ? '' : 'es'}`;
-      subEl.textContent = k === 0
-        ? 'No matches match the current filters.'
-        : `Aggregate of ${k} match${k === 1 ? '' : 'es'} matching filters.`;
-    } else {
-      metaEl.textContent = `${total} match${total === 1 ? '' : 'es'}`;
-      subEl.textContent = 'Career overview across every recorded match.';
-    }
+      </a>`;
   }
 
   function buildMatchPicker() {
     if (!$pickerGrid) return;
     // Newest-first: `manifest` has already been sorted desc-by-date above.
-    const cards = [buildMatchPickerAllCardHtml()]
-      .concat(manifest.map(buildMatchPickerCardHtml));
-    $pickerGrid.innerHTML = cards.join('');
+    $pickerGrid.innerHTML = manifest.map(buildMatchPickerCardHtml).join('');
 
     // Stash a lowercased search blob on each card element. Searched on
     // every keystroke; cheaper than re-querying DOM.
     $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
-      const tgt = el.dataset.target;
-      if (tgt === '__all__') {
-        el.dataset.searchBlob = 'all matches';
-        return;
-      }
-      const entry = manifest.find(m => m.file === tgt);
+      const entry = manifest.find(m => m.file === el.dataset.target);
       if (!entry) return;
       const l1 = entry.team_leaders && entry.team_leaders['1'] && entry.team_leaders['1'].name;
       const l2 = entry.team_leaders && entry.team_leaders['2'] && entry.team_leaders['2'].name;
@@ -1051,80 +925,62 @@
       ].filter(Boolean).join(' ').toLowerCase();
     });
 
-    // Delegated click: one listener for the whole grid.
+    // Plain left-click stays in this page. Modified clicks and middle-click
+    // follow the card's href (matches/?match=<id>) in a new tab.
     $pickerGrid.addEventListener('click', (e) => {
       const card = e.target.closest('.vt-match-picker-card');
       if (!card) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
       selectMatch(card.dataset.target);
     });
   }
 
-  // Resolve a target ('__all__' or a file string) to manifest entry, or null.
+  // Resolve a file string or a manifest entry. '__all__' / 'all' are the
+  // retired aggregate and resolve to null (the gallery).
   function resolveTarget(target) {
-    if (target === '__all__' || target === null) return target;
-    // Accept either a file string or an entry object (for internal callers).
-    if (typeof target === 'object' && target !== null) return target;
+    if (target == null || target === '__all__' || target === 'all') return null;
+    if (typeof target === 'object') return target;
     return manifest.find(m => m.file === target) || null;
   }
 
-  // Click / activation handler — dismisses the modal, updates triggers,
-  // and routes to loadMatch / loadAllMatches with the same view-transition
-  // wrapper the old <select> change handler used.
+  // Click / activation handler — dismisses the modal, updates the trigger,
+  // and opens the match without a full reload.
   function selectMatch(target) {
     const resolved = resolveTarget(target);
-    if (resolved === null) return;
-    // No-op if already on this target (pure click on the active card).
+    if (!resolved) return;
     if (resolved === currentTarget) {
       if (pickerModalInstance) pickerModalInstance.hide();
       return;
     }
     updateMatchPickerTriggers(resolved);
     if (pickerModalInstance) pickerModalInstance.hide();
-    const doLoad = () => {
-      if (resolved === '__all__') loadAllMatches();
-      else loadMatch(resolved.file);
-    };
+    const doLoad = () => loadMatch(resolved.file);
     if (window.VTFx) VTFx.withViewTransition(doLoad);
     else doLoad();
   }
 
-  // Update both trigger buttons + the active-card highlight in the grid.
-  // Called from every place that used to do `$select.value = ...`.
+  // Update the banner trigger, the Matches menu, and the active card.
   function updateMatchPickerTriggers(target) {
     const resolved = resolveTarget(target);
     currentTarget = resolved;
 
     let name, sub;
-    if (resolved === '__all__') {
-      name = 'All Matches';
-      // The trigger subtitle mirrors the All-Matches card subtitle: when
-      // filters are engaged, surface the filtered/total count so the user
-      // sees the aggregate scope right in the hero.
-      if (hasAnyFilterEngaged(pickerState)) {
-        const k = countFilteredManifest();
-        sub = `Aggregate of ${k} of ${manifest.length} matches matching filters`;
-      } else {
-        const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
-        sub = `${manifest.length} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
-      }
-    } else if (resolved && typeof resolved === 'object') {
+    if (resolved && typeof resolved === 'object') {
       name = resolved.name || resolved.id;
       const rawMap = resolved.map && resolved.map !== resolved.name ? `${resolved.map} \u00B7 ` : '';
       sub = `${rawMap}${fmtDateFull(resolved.date)}`;
     } else {
-      name = '—';
-      sub = '—';
+      name = 'Matches';
+      const n = manifest ? manifest.length : 0;
+      sub = n === 1 ? '1 recorded match' : n + ' recorded matches';
     }
 
-    if ($triggerName)    $triggerName.textContent = name;
-    if ($triggerNameAll) $triggerNameAll.textContent = name;
-    if ($triggerSub)     $triggerSub.textContent = sub;
-    if ($triggerSubAll)  $triggerSubAll.textContent = sub;
+    if ($triggerName) $triggerName.textContent = name;
+    if ($triggerSub)  $triggerSub.textContent = sub;
 
-    const onAll = resolved === '__all__';
     const newest = newestOpenMatch();
-    const onRecent = !onAll && !!(newest && resolved && resolved.file === newest.file);
+    const onRecent = !!(newest && resolved && resolved.file === newest.file);
     const markNavMatch = (id, on) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1132,14 +988,11 @@
       if (on) el.setAttribute('aria-current', 'page');
       else el.removeAttribute('aria-current');
     };
-    markNavMatch('nav-matches-all', onAll);
+    markNavMatch('nav-matches-browse', !resolved);
     markNavMatch('nav-matches-recent', onRecent);
 
-    // Active-card highlight in the grid.
     if ($pickerGrid) {
-      const activeKey = resolved === '__all__'
-        ? '__all__'
-        : (resolved && typeof resolved === 'object' ? resolved.file : null);
+      const activeKey = resolved && typeof resolved === 'object' ? resolved.file : null;
       $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
         el.classList.toggle('is-active', el.dataset.target === activeKey);
       });
@@ -1383,55 +1236,35 @@
     if (!$pickerGrid) return;
     const state = pickerState;
     const cards = Array.from($pickerGrid.querySelectorAll('.vt-match-picker-card'));
-    const allCard = cards.find(c => c.dataset.target === '__all__');
-    const regularCards = cards.filter(c => c.dataset.target !== '__all__');
 
     // Build a file->entry index once for O(1) lookup during sort/filter.
     const entryByFile = new Map(manifest.map(m => [m.file, m]));
 
-    // Sort the regular cards by comparator; reorder DOM (cheap: 8-ish nodes).
     const comparator = comparatorForSort(state.sort);
-    regularCards.sort((a, b) => {
+    cards.sort((a, b) => {
       const ea = entryByFile.get(a.dataset.target);
       const eb = entryByFile.get(b.dataset.target);
       if (!ea || !eb) return 0;
       return comparator(ea, eb);
     });
+    cards.forEach(c => $pickerGrid.appendChild(c));
 
-    // Reinsert in sorted order (all-card stays first).
-    if (allCard) $pickerGrid.appendChild(allCard);
-    regularCards.forEach(c => $pickerGrid.appendChild(c));
-
-    // Filter visibility.
     let visibleRegular = 0;
-    regularCards.forEach(el => {
+    cards.forEach(el => {
       const entry = entryByFile.get(el.dataset.target);
       if (!entry) { el.classList.add('d-none'); return; }
       const ok = entryMatchesState(entry, state);
       el.classList.toggle('d-none', !ok);
       if (ok) visibleRegular++;
     });
-    if (allCard) allCard.classList.remove('d-none');
 
     // Stamp the YouTube mark after the store loads. Cards are built once
     // before match_videos.json arrives; rebuilding the grid would stack
     // another delegated click listener.
-    regularCards.forEach((el) => {
+    cards.forEach((el) => {
       const entry = entryByFile.get(el.dataset.target);
       if (entry) stampPickerVodMark(el, entry);
     });
-
-    // Update the All Matches card copy to reflect the filtered count.
-    // When the user is currently viewing the aggregate (currentTarget ===
-    // '__all__'), also re-sync the hero trigger subtitles + the live
-    // banner above the view, and schedule a debounced re-aggregate so
-    // the career table / radar / global meta reflect the new subset.
-    updateAllMatchesCardCopy(visibleRegular);
-    if (currentTarget === '__all__') {
-      updateMatchPickerTriggers('__all__');
-      updateAllMatchesFilterBanner(visibleRegular);
-      scheduleAllMatchesReaggregate();
-    }
 
     // Result counter.
     if ($resultCount) {
@@ -1453,11 +1286,10 @@
 
     // Active-filter badge on both triggers + inline (mobile toolbar).
     const count = activeFilterCount(state);
-    [$triggerBadge, $triggerBadgeAll].forEach(el => {
-      if (!el) return;
-      el.textContent = String(count);
-      el.classList.toggle('d-none', count === 0);
-    });
+    if ($triggerBadge) {
+      $triggerBadge.textContent = String(count);
+      $triggerBadge.classList.toggle('d-none', count === 0);
+    }
     if ($filtersBadgeInline) {
       $filtersBadgeInline.textContent = String(count);
       $filtersBadgeInline.classList.toggle('d-none', count === 0);
@@ -1880,10 +1712,6 @@
 
   if ($clearBtn) $clearBtn.addEventListener('click', clearAllFilters);
   if ($pickerEmptyClear) $pickerEmptyClear.addEventListener('click', clearAllFilters);
-  // Banner-side Clear filters button (visible inside the All Matches view
-  // when filters are active). Same effect as the picker-modal Clear-all.
-  const $allBannerClear = document.getElementById('all-matches-filter-banner-clear');
-  if ($allBannerClear) $allBannerClear.addEventListener('click', clearAllFilters);
 
   // --- Wiring: mobile Filters disclosure ---
 
@@ -1936,7 +1764,6 @@
       }
       // Reflect aria-expanded on both triggers.
       if ($trigger) $trigger.setAttribute('aria-expanded', 'true');
-      if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'true');
       // The roster chip cloud starts collapsed on every open. Selected
       // names stay on the toggle row via applyPickerStateToUI.
       setPlayersPanelOpen(false);
@@ -1960,7 +1787,6 @@
     });
     $pickerModalEl.addEventListener('hidden.bs.modal', () => {
       if ($trigger) $trigger.setAttribute('aria-expanded', 'false');
-      if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'false');
       // Filter state (query + facets) persists in sessionStorage so it
       // survives close/reopen within a tab. No reset here.
     });
@@ -1973,17 +1799,9 @@
     updateMatchPickerTriggers(bootMatch);
   }
 
-  // Brand-home is a plain `<a href="index.html">` — let the browser do
-  // its native navigation to the canonical root URL. Per
-  // project-overview.mdc, any visit to index.html without an explicit
-  // ?match= / ?tab= / ?filter= URL intent opens straight into the
-  // most-recent match, which is exactly what we want here.
-  // Picker state (sessionStorage) survives the reload so user
-  // preferences aren't trampled by a brand click.
-  // No JS handler — that makes the brand link consistent with every
-  // other standalone shell (raw, docs, tools, per-player + per-map
-  // stubs) and ensures the URL bar always reflects "true root" after
-  // the click, even with live URL sync disabled.
+  // Brand-home is a plain `<a href="index.html">` (the site root, via
+  // <base> on /matches/). A bare visit there is the front page, not a
+  // match. No JS handler — same as every other shell.
 
   // --- Lazy Tab Rendering ---
   const tabRendered = {};
@@ -3288,10 +3106,83 @@
   // `urlState` is provided on initial page load only. When present, its
   // filter/tab fields take precedence over any in-memory state or persist
   // preference — URL is explicit user intent.
+  // Move the shared picker nodes between the gallery page and the modal.
+  // Listeners stay attached; only the parent changes.
+  function mountPickerIn(where) {
+    const search = document.querySelector('.vt-match-picker-search');
+    const filters = document.getElementById('match-picker-filters');
+    const grid = document.getElementById('match-picker-grid');
+    const empty = document.getElementById('match-picker-empty');
+    const controls = document.querySelector('.vt-match-picker-filter-row--controls');
+    const filtersBody = document.getElementById('match-picker-filters-body');
+    if (where === 'gallery') {
+      const searchSlot = document.getElementById('vt-matches-search');
+      const summary = document.getElementById('vt-matches-summary');
+      const filtersSlot = document.getElementById('vt-matches-filters');
+      const gridSlot = document.getElementById('vt-matches-grid');
+      const emptySlot = document.getElementById('vt-matches-empty');
+      if (searchSlot && search) searchSlot.appendChild(search);
+      if (summary && controls) summary.appendChild(controls);
+      if (filtersSlot && filters) filtersSlot.appendChild(filters);
+      if (gridSlot && grid) gridSlot.appendChild(grid);
+      if (emptySlot && empty) emptySlot.appendChild(empty);
+      return;
+    }
+    const header = document.querySelector('#match-picker-modal .modal-header');
+    const closeBtn = header && header.querySelector('.btn-close');
+    if (header && search && closeBtn) header.insertBefore(search, closeBtn);
+    if (filtersBody && controls) filtersBody.insertBefore(controls, filtersBody.firstChild);
+    const body = document.querySelector('#match-picker-modal .modal-body');
+    if (!body) return;
+    if (filters) body.appendChild(filters);
+    if (grid) body.appendChild(grid);
+    if (empty) body.appendChild(empty);
+  }
+
+  function fitMatchesHeader() {
+    const header = document.querySelector('.vt-site-header');
+    if (!header || !$gallery) return;
+    const h = Math.ceil(header.getBoundingClientRect().height);
+    if (h > 0) $gallery.style.setProperty('--vt-matches-header', h + 'px');
+  }
+  window.addEventListener('resize', fitMatchesHeader);
+
+  function hideGallery() {
+    mountPickerIn('modal');
+    if ($gallery) $gallery.classList.add('d-none');
+    document.title = 'VT Stats Dashboard';
+  }
+
+  async function showGallery() {
+    mountPickerIn('gallery');
+    fitMatchesHeader();
+    $dashboard.classList.add('d-none');
+    document.title = 'VT Stats — Matches';
+    // The gallery is a real history entry, so the first match opened from
+    // it pushes ?match= and Back returns here.
+    dashboardHistoryLive = true;
+    const urlState = parseUrlState();
+    pickerState = DEFAULT_PICKER_STATE();
+    hydratePickerStateFromUrl(urlState.picker);
+    applyPickerStateToUI();
+    applyPickerFilters();
+    updateMatchPickerTriggers(null);
+    const reveal = () => {
+      if ($gallery) $gallery.classList.remove('d-none');
+    };
+    if ($loading && !$loading.classList.contains('d-none')) {
+      await revealAfterBoot('Opening matches', reveal);
+    } else {
+      if (window.VTFx) VTFx.hidePreloader();
+      $loading.classList.add('d-none');
+      reveal();
+    }
+  }
+
   async function loadMatch(file, urlState) {
+    hideGallery();
     clearAllMatchesUrl();
     $dashboard.classList.add('d-none');
-    $allView.style.display = 'none';
     $loading.classList.remove('d-none');
     // Restore the preloader shell if a prior error replaced it. The first
     // call keeps the index and catalog lines; later calls start fresh.
@@ -3575,168 +3466,6 @@
   }
   window.vtSteam64FromName = vtSteam64FromName;
 
-  async function loadAllMatches(urlState) {
-    $dashboard.classList.add('d-none');
-    $allView.style.display = 'none';
-    $loading.classList.remove('d-none');
-    prepareBootLog();
-    clearReplayTab();
-    if (window.VTBalonce) VTBalonce.destroyMatchSection();
-    destroyAllCharts();
-    resetTabState();
-
-    // Fetch contributions once per session, cache on window so subsequent
-    // filter changes re-aggregate without a network round trip.
-    let contributions = window.__vtContributions;
-    const contribPrefix = 'Career totals · match_contributions.json';
-    if (!contributions) {
-      bootRow('contrib', contribPrefix, 'active');
-      try {
-        contributions = await fetchJsonWithProgress('data/processed/match_contributions.json', (got, total, phase) => {
-          bootRow('contrib', fetchLabel(contribPrefix, got, total, phase), 'active');
-        });
-        window.__vtContributions = contributions;
-        bootRow('contrib', contribPrefix, 'done');
-      } catch {
-        bootRow('contrib', contribPrefix, 'error');
-        return;
-      }
-    }
-
-    // elo_current.json + elo_history.json are fetched once per session via
-    // the shared ensureEloLoaded() helper (defined above loadAllMatches).
-    // Both are needed before the VTSR-T leaderboard renders: elo_current
-    // powers the table rows + axis_means; elo_history powers the per-row
-    // expand panel's Last-Match Axis Breakdown section. Graceful 404 on
-    // either: hide the dedicated VTSR-T card and fall through to em-dash
-    // placeholders. Also consumed by the per-match leaderboard's new
-    // VTSR-T Δ column via getEloDeltaIndexForCurrentMatch().
-    const showRatings = window.__vtElo === undefined;
-    if (showRatings) bootRow('ratings', 'Ratings and links', 'active');
-    await ensureEloLoaded();
-    if (showRatings) bootRow('ratings', 'Ratings and links', 'done');
-
-    if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
-      bootRow('agg', 'Aggregator unavailable', 'error');
-      return;
-    }
-
-    // Resolve the filtered subset of match files. When filters are active,
-    // narrow to manifest entries that pass the picker predicate; otherwise
-    // include every contribution key (full career view).
-    const filtersOn = hasAnyFilterEngaged(pickerState);
-    const fileIds = filtersOn
-      ? manifest.filter(m => entryMatchesState(m, pickerState)).map(m => m.file)
-      : Object.keys(contributions);
-
-    // Empty filtered set short-circuits to a friendly empty state.
-    if (filtersOn && fileIds.length === 0) {
-      await revealAfterBoot('Rendering career view', () => {
-        $allView.style.display = 'block';
-      });
-      updateAllMatchesFilterBanner(0);
-      // Render an explicit empty view so the previous match's data isn't
-      // left lingering in already-rendered tabs.
-      renderAggMeta({
-        match_count: 0,
-        total_duration_sec: 0,
-        maps_played: [],
-        date_range: [],
-        submitters: [],
-        matches_with_positioning: 0,
-        matches_with_target_lock_data: 0,
-        total_sentinel_damage_dropped: 0,
-        matches_with_sentinel_damage: [],
-      });
-      window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
-      tabRendered['#all-tab-overview'] = true;
-      registerTabRenderer('#all-tab-weapons', () => {
-        renderGlobalWeaponMeta('global-weapon-chart', []);
-      });
-      const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
-      if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
-        const allOverviewBtn = document.getElementById('all-tab-overview-btn');
-        if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
-      }
-      syncUrl(dashboardHistoryLive ? 'push' : 'replace');
-      dashboardHistoryLive = true;
-      return;
-    }
-
-    bootRow('agg', 'Building career totals', 'active');
-    await nextFrame();
-    const data = window.VTAggregate.build(contributions, fileIds, getActiveElo());
-    bootRow('agg', 'Building career totals', 'done');
-
-    await revealAfterBoot('Rendering career view', () => {
-      $allView.style.display = 'block';
-    });
-
-    // Stash the aggregate data on window so the Career Radar event handlers
-    // can re-render without having to thread the object through tab renderers.
-    // Done *before* updateAllMatchesFilterBanner() so the banner can read
-    // the freshly-built meta (players_dropped_by_min_matches) for the
-    // hidden-count parenthetical.
-    window.__vtAllMatchesData = data;
-
-    // Surface filter-aware banner + filtered subset size.
-    updateAllMatchesFilterBanner(fileIds.length);
-
-    // Match-centric Overview: hero stats only. Career leaderboard, career
-    // highlights, VTSR teaser, career radar and the Commanders / Experimental
-    // tabs live on the Players hub (/player/).
-    renderAggMeta(data.meta);
-    tabRendered['#all-tab-overview'] = true;
-
-    if (window.VTFx) {
-      const allOverviewPane = document.getElementById('all-tab-overview');
-      const heroCard = document.querySelector('#all-tab-overview > .vt-all-hero');
-      requestAnimationFrame(() => {
-        // Animate the hero card directly with a 0ms delay, then run the
-        // existing tab-pane stagger. Calling staggerEntrance on a parent
-        // that contains both the hero and the tab content would double-
-        // index the tab cards' delays, so we apply the entrance class
-        // manually to the single hero card.
-        if (heroCard) {
-          heroCard.style.setProperty('--vt-delay', '0ms');
-          heroCard.classList.add('vt-enter');
-          heroCard.addEventListener('animationend', function onEnd() {
-            heroCard.classList.remove('vt-enter');
-            heroCard.style.removeProperty('--vt-delay');
-            heroCard.removeEventListener('animationend', onEnd);
-          });
-        }
-        VTFx.staggerEntrance(allOverviewPane);
-      });
-    }
-
-    registerTabRenderer('#all-tab-weapons', () => {
-      renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
-    });
-
-    registerAllMatchesCharts(data);
-
-    // Deep-link tab activation MUST come after every registerTabRenderer
-    // above: bootstrap's shown.bs.tab -> renderTabIfNeeded fires
-    // synchronously on .show(), and a renderer registered after the
-    // activation would never run (tabRendered stays false, but nothing
-    // re-triggers the check for an already-active pane). This ordering
-    // bug made ?match=all&tab=commanders land on unrendered panes.
-    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
-    if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
-      const allOverviewBtn = document.getElementById('all-tab-overview-btn');
-      if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
-    }
-    // Bootstrap does not re-fire shown.bs.tab when that pill is already
-    // active, so a picker re-aggregate while Weapons is open would leave
-    // the chart destroyed. Render the open pane if it has not run yet.
-    const activeAllBtn = document.querySelector('#all-tabs .nav-link.active');
-    const activeAllTarget = activeAllBtn && activeAllBtn.getAttribute('data-bs-target');
-    if (activeAllTarget) renderTabIfNeeded(activeAllTarget);
-
-    syncUrl(dashboardHistoryLive ? 'push' : 'replace');
-    dashboardHistoryLive = true;
-  }
 
   function renderTimelineSection(data) {
     const canvas = document.getElementById('timeline-chart');
@@ -5017,7 +4746,7 @@
       const seg = (v.segments || [])[0];
       const t = seg ? Math.max(0, Math.floor(Number(seg.video_sec) || 0)) : 0;
       const base = v.url || '';
-      if (!base) return '#';
+      if (!base) return '';
       return `${base}${base.indexOf('?') >= 0 ? '&' : '?'}t=${t}s`;
     };
     if (videos.length === 1) {
@@ -5026,7 +4755,9 @@
         const v = videos[0];
         const ch = (v.channel && v.channel.name) || 'YouTube';
         const link = VTVideoLinks.linkForMatchSec(info.id, 0);
-        linkEl.href = (link && link.url) || firstHref(v);
+        const href = (link && link.url) || firstHref(v);
+        if (!href) { hide(); return; }
+        linkEl.href = href;
         linkEl.title = `Watch on YouTube \u2014 ${ch}`;
         linkEl.classList.remove('d-none');
       }
@@ -5035,10 +4766,11 @@
     if (linkEl) linkEl.classList.add('d-none');
     if (dropWrap && menuEl) {
       menuEl.innerHTML = videos.map((v) => {
+        const href = firstHref(v);
+        if (!href) return '';
         const ch = esc((v.channel && v.channel.name) || 'YouTube');
         const title = esc(v.title || v.video_id || 'VOD');
-        const href = esc(firstHref(v));
-        return `<li><a class="dropdown-item vt-video-chip" href="${href}" target="_blank" rel="noopener">` +
+        return `<li><a class="dropdown-item vt-video-chip" href="${esc(href)}" target="_blank" rel="noopener">` +
           `<i class="bi bi-youtube me-1" aria-hidden="true"></i>${ch} \u2014 ${title}</a></li>`;
       }).join('');
       dropWrap.classList.remove('d-none');
@@ -5205,7 +4937,7 @@
         mapLink.setAttribute('href', `map/${encodeURIComponent(meta.key)}/`);
         mapLink.classList.remove('d-none');
       } else {
-        mapLink.setAttribute('href', '#');
+        mapLink.setAttribute('href', 'map/');
         mapLink.classList.add('d-none');
       }
     }
@@ -5251,7 +4983,7 @@
     // map key is resolvable so we don't show a CTA leading nowhere
     // (mirrors the #info-map-thumb-btn / #info-map-link visibility
     // contract on the banner).
-    const mapPageHref = meta.key ? `map/${encodeURIComponent(meta.key)}/` : '#';
+    const mapPageHref = meta.key ? `map/${encodeURIComponent(meta.key)}/` : 'map/';
     if (titleLinkEl) titleLinkEl.setAttribute('href', mapPageHref);
     if (pageLinkEl) {
       pageLinkEl.setAttribute('href', mapPageHref);
@@ -6947,140 +6679,6 @@
     table.innerHTML = html;
   }
 
-  // --- All Matches ---
-  // Compact "Apr 16" / "May 12" formatter for the Date Range hero card.
-  // Falls back to the raw ISO when parsing fails so we never silently swallow
-  // an upstream format change.
-  function fmtShortDate(iso) {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  }
-
-  // Hero stat cards (5-up at desktop). Reads `meta` directly from the
-  // aggregate; tolerates partial payloads (used by both the happy path and
-  // the empty-filter-set branch in loadAllMatches).
-  function renderHeroStats(meta) {
-    const container = document.getElementById('hero-stats');
-    if (!container) return;
-    const matchCount = meta.match_count || 0;
-    const dur = meta.total_duration_sec || 0;
-    const totalMin = Math.floor(dur / 60);
-    const hours = Math.floor(totalMin / 60);
-    const mins = totalMin % 60;
-    const playTime = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-    const mapsCount = (meta.maps_played || []).length;
-    const submitters = meta.submitters || [];
-    const dr = meta.date_range || [];
-
-    let dateValue = '—';
-    let dateSub = '';
-    if (dr.length === 2) {
-      const [start, end] = dr;
-      dateValue = `${fmtShortDate(start)} \u2014 ${fmtShortDate(end)}`;
-      const startMs = new Date(start).getTime();
-      const endMs   = new Date(end).getTime();
-      if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
-        const days = Math.max(1, Math.round((endMs - startMs) / 86400000) + 1);
-        dateSub = `${days}-day span`;
-      }
-    }
-
-    const submitterValue = submitters.length;
-    const submitterSub = submitters.length === 0 ? '\u2014'
-      : submitters.length <= 2 ? submitters.join(', ')
-      : `${submitters.slice(0, 2).join(', ')} +${submitters.length - 2}`;
-
-    container.innerHTML = `
-      <div class="vt-hero-stat">
-        <i class="bi bi-collection-play vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Recorded</span>
-        <span class="vt-hero-stat-value">${matchCount}</span>
-        <span class="vt-hero-stat-sub">across ${mapsCount} ${mapsCount === 1 ? 'map' : 'maps'}</span>
-      </div>
-      <div class="vt-hero-stat" id="hero-stat-community">
-        <i class="bi bi-journal-text vt-hero-stat-icon" aria-hidden="true"></i>
-        <a class="vt-hero-stat-label" id="hero-stat-community-label" href="https://f9bomber.com" target="_blank" rel="noopener">F9bomber Matches</a>
-        <span class="vt-hero-stat-value" id="hero-stat-community-value">\u2014</span>
-        <span class="vt-hero-stat-sub" id="hero-stat-community-sub"></span>
-      </div>
-      <div class="vt-hero-stat">
-        <i class="bi bi-clock-history vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Play Time</span>
-        <span class="vt-hero-stat-value">${matchCount > 0 ? playTime : '\u2014'}</span>
-        <span class="vt-hero-stat-sub">${matchCount > 0 ? `${totalMin} min total` : ''}</span>
-      </div>
-      <div class="vt-hero-stat">
-        <i class="bi bi-calendar-range vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Date Range</span>
-        <span class="vt-hero-stat-value" style="font-size:1.1rem">${dateValue}</span>
-        <span class="vt-hero-stat-sub">${dateSub}</span>
-      </div>
-      <div class="vt-hero-stat">
-        <i class="bi bi-person-circle vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Submitters</span>
-        <span class="vt-hero-stat-value">${submitterValue}</span>
-        <span class="vt-hero-stat-sub" title="${esc(submitters.join(', '))}">${esc(submitterSub)}</span>
-      </div>`;
-  }
-
-  function paintHeroCommunity(comm) {
-    const valueEl = document.getElementById('hero-stat-community-value');
-    const subEl = document.getElementById('hero-stat-community-sub');
-    const labelEl = document.getElementById('hero-stat-community-label');
-    if (!valueEl || !subEl) return;
-    const prov = (comm && comm.provider) || {};
-    if (labelEl) labelEl.href = prov.url || 'https://f9bomber.com';
-    if (!comm || !(comm.duel_count > 0)) {
-      valueEl.textContent = '\u2014';
-      subEl.textContent = '\u2014';
-      return;
-    }
-    const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
-    const ledgerDay = (iso) => fmtShortDate(iso ? String(iso).slice(0, 10) + 'T12:00:00' : '');
-    valueEl.textContent = comm.duel_count.toLocaleString();
-    subEl.textContent = `${ledgerDay(range[0])} \u2013 ${ledgerDay(range[1])}`;
-  }
-
-  // Public entry point used by loadAllMatches. The previous #agg-meta
-  // inline-text renderer was retired in favour of #hero-stats.
-  function renderAggMeta(meta) {
-    renderHeroStats(meta);
-    ensureF9CommunityLoaded().then(paintHeroCommunity);
-  }
-
-  // ---- F9bomber's stats (display-only, never folded into VTAggregate) --
-  // Static rollup of F9bomber's hand-kept match ledger
-  // (data/external/f9_community.json). Corpus-wide reference data:
-  // deliberately NOT merged into faction_stats / meta_charts. 404-safe.
-  // Fetched once per session for the All Matches hero. The Meta page
-  // fetches the same file on its own.
-  let f9CommunityCache; // undefined = not fetched; null = 404/absent
-  let _f9CommunityFetch = null;
-  function ensureF9CommunityLoaded() {
-    if (f9CommunityCache !== undefined) return Promise.resolve(f9CommunityCache);
-    if (!_f9CommunityFetch) {
-      _f9CommunityFetch = fetch('data/external/f9_community.json')
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null)
-        .then(json => { f9CommunityCache = json || null; return f9CommunityCache; });
-    }
-    return _f9CommunityFetch;
-  }
-
-  function careerPerMatchAvg(total, matchesPlayed) {
-    const m = matchesPlayed || 0;
-    return m > 0 ? total / m : 0;
-  }
-
-  function careerRatioSortValue(c) {
-    const d = c.total_dealt || 0;
-    const r = c.total_received || 0;
-    if (r > 0) return d / r;
-    if (d > 0) return 1e9;
-    return 0;
-  }
 
   // Per-axis metadata: label + formula + description per ELO axis.
   // Consumed by the per-match leaderboard's top-axis-contributor labels.
@@ -7384,11 +6982,6 @@
     // postMessage); no chart-fullscreen registration is needed.
   }
 
-  function registerAllMatchesCharts(data) {
-    registerChartRenderer('section-global-weapon', (canvasId) => {
-      return renderGlobalWeaponMeta(canvasId, data.global_weapon_meta);
-    });
-  }
 
   // --- Helpers ---
   function fmt(n) { return Math.round(n).toLocaleString(); }
@@ -7430,8 +7023,8 @@
   // replaces #loading; prepareBootLog() puts the shell back on the next load.
 
   function showMatchNotFound(badId) {
+    hideGallery();
     $dashboard.classList.add('d-none');
-    $allView.style.display = 'none';
     clearReplayTab();
     if (window.VTBalonce) VTBalonce.destroyMatchSection();
     destroyAllCharts();
@@ -7446,7 +7039,6 @@
         <label for="vt-error-match-picker" class="stat-label d-block mb-2">Pick a match instead:</label>
         <select id="vt-error-match-picker" class="form-select form-select-sm" style="max-width:320px;margin:0 auto;">
           <option value="" disabled selected>Select a match&hellip;</option>
-          <option value="__all__">All Matches</option>
           ${manifest.map(m => {
             const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
             return `<option value="${esc(m.file)}">${esc(m.name)} — ${shortDate}</option>`;
@@ -7467,31 +7059,29 @@
       // match, so clearing is unambiguous intent.
       history.replaceState(null, '', window.location.pathname);
       shownUrl = window.location.pathname;
-      if (val === '__all__') {
-        updateMatchPickerTriggers('__all__');
-      } else {
-        const entry = manifest.find(m => m.file === val);
-        if (entry) updateMatchPickerTriggers(entry);
-      }
-      const doLoad = () => {
-        if (val === '__all__') loadAllMatches();
-        else loadMatch(val);
-      };
+      const entry = manifest.find(m => m.file === val);
+      if (entry) updateMatchPickerTriggers(entry);
+      const doLoad = () => loadMatch(val);
       if (window.VTFx) VTFx.withViewTransition(doLoad);
       else doLoad();
     });
   }
 
   // --- Matches menu ---
-  // Topnav dropdown (between Record and ODF). Most Recent opens
-  // newestOpenMatch(), which is also the no-URL landing. All Matches opens
-  // the aggregate. selectMatch no-ops when that target is already open.
-  // updateMatchPickerTriggers marks the matching item current.
-  document.getElementById('nav-matches-recent')?.addEventListener('click', () => {
-    const entry = newestOpenMatch();
-    if (entry) selectMatch(entry);
-  });
-  document.getElementById('nav-matches-all')?.addEventListener('click', () => selectMatch('__all__'));
+  // Browse matches and Most recent are real anchors (matches/ and
+  // matches/?match=latest). updateMatchPickerTriggers marks the current one.
+
+  function dropAggregateParams() {
+    const cur = new URLSearchParams(window.location.search);
+    if (cur.get('match') !== 'all') return;
+    cur.delete('match');
+    cur.delete('tab');
+    cur.delete('t');
+    const qs = paramsToString(cur);
+    const next = window.location.pathname + (qs ? '?' + qs : '');
+    history.replaceState(null, '', next);
+    shownUrl = next;
+  }
 
   function restoreDashboardFromUrl(urlState) {
     pickerState = DEFAULT_PICKER_STATE();
@@ -7501,29 +7091,33 @@
 
     const want = urlState.match;
     if (want === 'all') {
-      if (currentTarget !== '__all__') {
-        updateMatchPickerTriggers('__all__');
-        loadAllMatches(urlState);
-        return;
-      }
-    } else if (want) {
+      dropAggregateParams();
+      showGallery();
+      return;
+    }
+    const openEntry = (entry) => {
+      if (!entry) return false;
+      if (currentTarget && currentTarget.file === entry.file) return false;
+      updateMatchPickerTriggers(entry);
+      loadMatch(entry.file, urlState);
+      return true;
+    };
+    if (want === 'latest') {
+      openEntry(newestOpenMatch());
+      return;
+    }
+    if (want) {
       const entry = manifest.find(m => m.id === want);
-      if (entry && currentTarget !== entry.file) {
-        updateMatchPickerTriggers(entry);
-        loadMatch(entry.file, urlState);
-        return;
-      }
+      if (openEntry(entry)) return;
     }
 
-    if (currentData && currentTarget !== '__all__') {
+    if (currentData && currentTarget) {
       hydrateFilterFromUrl(urlState, currentData.leaderboard);
       syncFilterUI();
       applyFilter();
     }
-    const slugMap = currentTarget === '__all__' ? ALL_TAB_SLUGS : MATCH_TAB_SLUGS;
-    if (!activateTabFromSlug(urlState.tab, slugMap)) {
-      const id = currentTarget === '__all__' ? 'all-tab-overview-btn' : 'tab-overview-btn';
-      const btn = document.getElementById(id);
+    if (!activateTabFromSlug(urlState.tab, MATCH_TAB_SLUGS)) {
+      const btn = document.getElementById('tab-overview-btn');
       if (btn && !btn.classList.contains('active')) {
         if (historyWrites) {
           btn._vtQuiet = true;
@@ -7540,30 +7134,47 @@
     if (!manifest) return;
     shownUrl = now;
     historyWrites++;
-    try { restoreDashboardFromUrl(parseUrlState()); }
+    try {
+      const urlState = parseUrlState();
+      if (urlState.match === 'all' && redirectLegacyAllTab(new URLSearchParams(window.location.search))) return;
+      const intent = urlState.match || urlState.tab || urlState.filter || urlState.team
+        || (urlState.players && urlState.players.length);
+      if (!intent || urlState.match === 'all') {
+        if (urlState.match === 'all') dropAggregateParams();
+        showGallery();
+      }
+      else {
+        hideGallery();
+        restoreDashboardFromUrl(urlState);
+      }
+    }
     finally { historyWrites--; }
   });
 
   // --- Initial Boot ---
 
-  // Branch to the appropriate loader based on the URL state we already
-  // parsed earlier (during picker init — `const initialUrlState` is in
-  // scope from the Phase 2 init block above). Shared URLs (any
-  // match/tab/filter/team/players intent) always win. When no URL intent
-  // is present we default to the most-recent match. The All Matches
-  // aggregate stays reachable via ?match=all, the match picker, and the
-  // topnav Matches menu.
+  // Shared URLs (any match/tab/filter/team/players intent) open that match.
+  // ?match=latest is the newest open match. ?match=all is the retired
+  // aggregate and opens the gallery, keeping picker params. A bare visit
+  // is the gallery.
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team
     || (initialUrlState.players && initialUrlState.players.length);
 
   function runInitialBoot() {
-    // ?match=all&tab=commanders|players|meta now live elsewhere.
     if (redirectLegacyAllTab(new URLSearchParams(window.location.search))) return;
     if (initialUrlState.match === 'all') {
-      updateMatchPickerTriggers('__all__');
-      loadAllMatches(initialUrlState);
+      dropAggregateParams();
+      showGallery();
+    } else if (initialUrlState.match === 'latest') {
+      const entry = newestOpenMatch();
+      if (entry) {
+        updateMatchPickerTriggers(entry);
+        loadMatch(entry.file, initialUrlState);
+      } else {
+        showGallery();
+      }
     } else if (initialUrlState.match) {
       const entry = manifest.find(m => m.id === initialUrlState.match);
       if (entry) {
@@ -7578,12 +7189,8 @@
       const entry = newestOpenMatch();
       updateMatchPickerTriggers(entry);
       loadMatch(entry.file, initialUrlState);
-    } else if (manifest.length > 0) {
-      // No URL intent at all — default to the newest match that still
-      // counts. Void matches stay reachable via ?match= and the picker.
-      const entry = newestOpenMatch();
-      updateMatchPickerTriggers(entry);
-      loadMatch(entry.file);
+    } else {
+      showGallery();
     }
   }
 

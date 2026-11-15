@@ -29,7 +29,7 @@ import {
 import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
 import { buildPropsGroup } from './props.js?v=props4';
 import { mountLiquids } from './liquids.js?v=terrain1';
-import { buildTerrainSurface, buildTunnelIndex, tunnelAt } from './terrain-owners.js?v=3';
+import { buildTerrainSurface, buildTunnelIndex, tunnelAt, stampStructurePads } from './terrain-owners.js?v=pads2';
 
 import { sampleSheetHeight, sampleTerrainHeight, unmeshedPools } from './objects.js?v=pools4';
 import {
@@ -60,13 +60,14 @@ import {
   applyVitalBars,
   applyShipModelMode,
   setActorShadowPrep,
-} from './replay-actors.js?v=shadows1';
+} from './replay-actors.js?v=pads2';
 import {
   initModelsPref,
   modelsEnabled,
   setModelsEnabled,
   ensureMatchModels,
-} from './replay-ship-models.js?v=pools4';
+  terrainPatchFor,
+} from './replay-ship-models.js?v=pads2';
 import {
   ensureQualityChosen,
   openReplayDialog,
@@ -120,13 +121,14 @@ import {
   recyclerPadXZ,
   enemyBaseOf,
   setStructureShadowPrep,
-} from './replay-structures.js?v=pools5';
+  STRUCTURE_GROUND_LIFT,
+} from './replay-structures.js?v=pads2';
 import {
   installTerrainCuts,
   createCutDepthMaterial,
   updateTerrainCuts,
   loadBuildingCuts,
-} from './terrain-cuts.js?v=pools4';
+} from './terrain-cuts.js?v=pads2';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -2534,6 +2536,21 @@ function renderFrame(dtSec = 0) {
   }
   const cutItems = STATE.structures || STATE.recyclers;
   if (cutItems) updateTerrainCuts(cutItems, STATE.camera);
+  if (STATE.terrainSurface && STATE.terrainMesh) {
+    const padItems = [];
+    if (STATE.structures) padItems.push(...STATE.structures);
+    if (STATE.recyclers) padItems.push(...STATE.recyclers);
+    if (padItems.length) {
+      stampStructurePads(
+        STATE.terrainSurface,
+        STATE.terrainMesh.geometry,
+        padItems,
+        STATE.progressSec,
+        terrainPatchFor,
+        STRUCTURE_GROUND_LIFT,
+      );
+    }
+  }
   if (STATE.armoryDrops && STATE.armoryDrops.length) {
     updateArmoryDrops(STATE.worldGroup, STATE.armoryDrops, dtSec || 0.016);
   }

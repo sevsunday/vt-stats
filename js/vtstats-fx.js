@@ -157,20 +157,33 @@
   // Preloader Lifecycle
   // =========================================================================
 
+  // Bumped by showPreloader so a fade started for the previous match
+  // cannot hide the shell of the one just opened.
+  let preloaderHideGen = 0;
+
   function hidePreloader() {
     const preloader = document.querySelector('.vt-preloader');
     if (!preloader) return;
 
+    const gen = ++preloaderHideGen;
     preloader.classList.add('vt-fade-out');
-    preloader.addEventListener('transitionend', () => {
+    const finish = () => {
+      if (gen !== preloaderHideGen) return;
       const loadingEl = document.getElementById('loading');
       if (loadingEl) loadingEl.classList.add('d-none');
-    }, { once: true });
+    };
+    preloader.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, 400);
+  }
 
-    setTimeout(() => {
-      const loadingEl = document.getElementById('loading');
-      if (loadingEl) loadingEl.classList.add('d-none');
-    }, 400);
+  function showPreloader() {
+    preloaderHideGen++;
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.classList.remove('d-none');
+    const preloader = loadingEl
+      ? loadingEl.querySelector('.vt-preloader')
+      : document.querySelector('.vt-preloader');
+    if (preloader) preloader.classList.remove('vt-fade-out');
   }
 
   // =========================================================================
@@ -179,7 +192,11 @@
 
   function withViewTransition(callback) {
     if (document.startViewTransition) {
-      document.startViewTransition(callback);
+      // Do not return callback()'s promise. startViewTransition waits for
+      // one, which holds the old page until an async match load finishes
+      // and hides the preloader. The new snapshot is the shell the
+      // callback shows before its first await.
+      document.startViewTransition(() => { callback(); });
     } else {
       callback();
     }
@@ -216,6 +233,7 @@
     animateCounters,
     staggerHeatmapCells,
     hidePreloader,
+    showPreloader,
     withViewTransition,
     getCSSVar,
   };

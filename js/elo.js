@@ -1319,7 +1319,7 @@
       const myFac = facs[String(side)] || '?';
       const oppFac = facs[String(3 - side)] || '?';
       const matchLink = duel.match_id
-        ? `<a href="../index.html?match=${encodeURIComponent(duel.match_id)}" class="text-muted"
+        ? `<a href="../matches/?match=${encodeURIComponent(duel.match_id)}" class="text-muted"
               title="Open this match on the dashboard" aria-label="Open this match on the dashboard"><i class="bi bi-box-arrow-up-right"></i></a>`
         : '';
       return `<tr>
@@ -1599,7 +1599,7 @@
         : `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
               title="Pre-game win chance from both commanders' and both thugs' 2v2 ratings.">${Math.round((exp || 0) * 100)}%</td>`;
       const link = g.match_id
-        ? `<a href="../index.html?match=${encodeURIComponent(g.match_id)}" class="text-muted"
+        ? `<a href="../matches/?match=${encodeURIComponent(g.match_id)}" class="text-muted"
               title="Open this match on the dashboard" aria-label="Open this match on the dashboard"><i class="bi bi-box-arrow-up-right"></i></a>`
         : '';
       return `<tr>

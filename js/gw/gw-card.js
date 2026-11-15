@@ -26,8 +26,12 @@
   'use strict';
 
   const PLAYER_LINK_TARGET = '_blank';
-  // Terminal map-thumbnail fallback, kept alongside the local map images.
-  const NOMAP_IMG = '../data/maps/nomap.svg';
+  // /gw and /tools sit one level down. The dashboard landing is at the
+  // site root, so the same card has to prefix map art and map links.
+  function sitePrefix() {
+    const path = (typeof location !== 'undefined' && location.pathname) || '';
+    return /\/(?:gw|tools)(?:\/|$)/.test(path) ? '../' : '';
+  }
 
   // ---------------------------------------------------------------- Dependencies (late-bound)
 
@@ -175,10 +179,11 @@
     // a catalog miss) -> vsrmaplist remote -> nomap.svg terminal fallback.
     // nomap.svg lives alongside the local map images and never 404s, so an
     // <img> is ALWAYS rendered (no empty/hidden thumb).
-    const localImg = slug ? `../data/maps/${encodeURIComponent(slug)}.png` : '';
+    const prefix = sitePrefix();
+    const localImg = slug ? `${prefix}data/maps/${encodeURIComponent(slug)}.png` : '';
     const remoteImg = session.mapImageUrl || '';
     const vsrImg = (vsrEntry && vsrEntry.Image) ? vsrEntry.Image : '';
-    const candidates = [localImg, remoteImg, vsrImg, NOMAP_IMG]
+    const candidates = [localImg, remoteImg, vsrImg, `${prefix}data/maps/nomap.svg`]
       .filter((v, i, a) => v && a.indexOf(v) === i);
     const primary = candidates[0];
     const fallbacks = candidates.slice(1).join('|');
@@ -241,7 +246,7 @@
     const slug = mapSlug(session);
     const name = session.mapName || session.mapFile || 'Unknown map';
     if (slug) {
-      return `<a class="gw-map-link" href="../map/${encodeURIComponent(slug)}/" target="${PLAYER_LINK_TARGET}" rel="noopener">${escapeHtml(name)}</a>`;
+      return `<a class="gw-map-link" href="${sitePrefix()}map/${encodeURIComponent(slug)}/" target="${PLAYER_LINK_TARGET}" rel="noopener">${escapeHtml(name)}</a>`;
     }
     return escapeHtml(name);
   }

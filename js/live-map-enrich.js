@@ -30,9 +30,13 @@
     'data/map-registry.json',
   ];
 
-  // Relative path the live-session card resolves its <img> against. Both
-  // /gw/ and /tools/ live in a subdirectory, so local PNGs are one level up.
-  const LOCAL_MAP_IMG_PREFIX = '../data/maps/';
+  // /gw and /tools sit one level down. The dashboard landing is at the
+  // site root, so the same enrich has to point at the local PNG either way.
+  function localMapPrefix() {
+    const path = (typeof location !== 'undefined' && location.pathname) || '';
+    const root = /\/(?:gw|tools)(?:\/|$)/.test(path) ? '../' : '';
+    return root + 'data/maps/';
+  }
 
   // ---------------------------------------------------------------- State
 
@@ -89,7 +93,7 @@
       if (entry) {
         s.mapName = entry.title || s.mapFile || null;
         s.mapDescription = entry.description || null;
-        s.mapImageUrl = `${LOCAL_MAP_IMG_PREFIX}${encodeURIComponent(slug)}.png`;
+        s.mapImageUrl = `${localMapPrefix()}${encodeURIComponent(slug)}.png`;
         const nv = entry.net_vars || {};
         s.teamNames = {
           team1: nv.svar1 || null,

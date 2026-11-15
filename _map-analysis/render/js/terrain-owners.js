@@ -798,3 +798,82 @@ export function tunnelAt(index, wx, wz, refAbsY, groundAbs) {
   }
   return null;
 }
+
+// Same axis swap as worldCutRect: the structure wrapper is +90° and mirrored
+// in Z, so a local (x, z) corner lands at parent (z, -x).
+function padWorldBox(patch, px, pz) {
+  const xLo = Math.min(patch.minZ, patch.maxZ);
+  const xHi = Math.max(patch.minZ, patch.maxZ);
+  const zLo = -Math.max(patch.minX, patch.maxX);
+  const zHi = -Math.min(patch.minX, patch.maxX);
+  return {
+    x0: px + xLo,
+    x1: px + xHi,
+    z0: pz + zLo,
+    z1: pz + zHi,
+  };
+}
+
+/**
+ * Flatten terrain inside each built structure's pad the first time it stands.
+ * Vertices outside the square keep their height, so the shared triangles slope
+ * into the pad. The stamp is not undone when the structure is destroyed.
+ * resolvePatch(odf) returns the local footprint, null, or undefined if the
+ * model index is not loaded yet.
+ */
+export function stampStructurePads(surface, geometry, items, tSec, resolvePatch, lift) {
+  if (!surface || !surface.positions || !surface.base || !items || !resolvePatch) return;
+  if (!surface.stampedPads) surface.stampedPads = new Set();
+  const stamped = surface.stampedPads;
+  const attr = geometry && geometry.attributes && geometry.attributes.position;
+  const pos = (attr && attr.array) || surface.positions;
+  const base = surface.base;
+  const n = Math.min(base.length, (pos.length / 3) | 0);
+  const raise = Number(lift) || 0;
+  let moved = false;
+  for (const it of items) {
+    if (!it || it.showingMobile) continue;
+    const id = it.inst && it.inst.id;
+    if (!id || stamped.has(id)) continue;
+    const spawn = Number(it.spawnSec);
+    if (Number.isFinite(spawn) && tSec + 1e-3 < spawn) continue;
+    if (it.deploySec != null) {
+      const deploy = Number(it.deploySec);
+      if (tSec + 1e-3 < deploy) continue;
+      // Died while still the mobile hull. That form never owns a pad.
+      if (it.deathSec != null && Number(it.deathSec) <= deploy) {
+        stamped.add(id);
+        continue;
+      }
+    }
+    const mesh = it.deployedMesh || it.mesh;
+    if (!mesh || !mesh.userData || !mesh.userData.replayModel) continue;
+    if (String(mesh.userData.modelStem || '').indexOf('lego:') === 0) {
+      stamped.add(id);
+      continue;
+    }
+    const odf = (it.inst && it.inst.odf) || it.deployedOdf;
+    const patch = resolvePatch(odf);
+    if (patch === undefined) continue;
+    if (!patch) {
+      stamped.add(id);
+      continue;
+    }
+    const box = padWorldBox(patch, mesh.position.x, mesh.position.z);
+    const y = mesh.position.y - raise;
+    if (!Number.isFinite(y)) continue;
+    for (let i = 0; i < n; i++) {
+      const x = pos[i * 3];
+      const z = pos[i * 3 + 2];
+      if (x < box.x0 - EPS || x > box.x1 + EPS || z < box.z0 - EPS || z > box.z1 + EPS) continue;
+      if (Math.abs(pos[i * 3 + 1] - y) <= 1e-4 && Math.abs(base[i] - y) <= 1e-4) continue;
+      pos[i * 3 + 1] = y;
+      base[i] = y;
+      moved = true;
+    }
+    stamped.add(id);
+  }
+  if (!moved || !attr) return;
+  attr.needsUpdate = true;
+  if (geometry.computeVertexNormals) geometry.computeVertexNormals();
+}

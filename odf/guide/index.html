@@ -45,10 +45,24 @@
       </div>
 
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
-        <!-- Guide-only topnav: Dashboard / Maps / ELO / Tools are deliberately
-             omitted here so the search field has room. The brand links home
-             and the gear still carries Docs. -->
+        <!-- Guide-only topnav: Maps / Players / Tools stay off so the search
+             field has room. Matches is the way back to recorded games. The
+             brand links home and the gear still carries Docs. -->
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Matches">
+              <i class="bi bi-grid-3x3-gap me-1"></i>Matches <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../../matches/">
+                <i class="bi bi-grid-3x3-gap me-2"></i>Browse matches
+              </a></li>
+              <li><a class="dropdown-item" href="../../matches/?match=latest">
+                <i class="bi bi-clock-history me-2"></i>Most recent
+              </a></li>
+            </ul>
+          </div>
           <a class="btn btn-primary btn-sm vt-guide-steam-btn"
              href="https://steamcommunity.com/sharedfiles/filedetails/?id=1423355866"
              target="_blank" rel="noopener">

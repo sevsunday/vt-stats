@@ -348,9 +348,17 @@
     return `https://steamcommunity.com/profiles/${steam64}/`;
   }
 
+  // /gw and /tools sit one level down. The dashboard landing is at the
+  // site root, so profile links from a reused Game Watch card resolve there.
+  function sitePrefix() {
+    const path = (typeof location !== 'undefined' && location.pathname) || '';
+    return /\/(?:gw|tools)(?:\/|$)/.test(path) ? '../' : '';
+  }
+
   function buildVtstatsUrl(steam64, slug) {
-    if (slug) return `../player/${encodeURIComponent(slug)}/`;
-    if (steam64) return `../player/index.html?p=${encodeURIComponent(steam64)}`;
+    const prefix = sitePrefix();
+    if (slug) return `${prefix}player/${encodeURIComponent(slug)}/`;
+    if (steam64) return `${prefix}player/index.html?p=${encodeURIComponent(steam64)}`;
     return null;
   }
 

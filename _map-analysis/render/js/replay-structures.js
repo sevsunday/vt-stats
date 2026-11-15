@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from './objects.js?v=pools4';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
-import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=pools4';
+import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=pads2';
 
 let prepareShadow = null;
 
@@ -57,7 +57,7 @@ const Y_OFF_RECYCLER = 4;
 const Y_OFF_BUILDING = 3.5;
 // Catalog floors are coplanar with the heightfield, so the terrain shows
 // through the pads. A fraction of a meter clears that without reading as a hover.
-const STRUCTURE_GROUND_LIFT = 0.35;
+export const STRUCTURE_GROUND_LIFT = 0.35;
 const POOL_SNAP_M = 8;
 const DROP_DURATION = 1.15;
 

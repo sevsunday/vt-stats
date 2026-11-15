@@ -82,7 +82,9 @@ SITE_URL = "https://vtstats.bz"
 # v30 adds Discord Invite to the Tools dropdown.
 # v31 replaces Analysis with Meta in the Players dropdown.
 # v32 adds Game Watch to the Tools dropdown.
-PLAYER_TEMPLATE_VERSION = 32
+# v33 replaces the Dashboard link with a Matches dropdown
+# (Browse matches, Most recent).
+PLAYER_TEMPLATE_VERSION = 33
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

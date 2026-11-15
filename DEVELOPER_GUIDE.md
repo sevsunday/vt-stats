@@ -1245,7 +1245,7 @@ HTML attributes: `<html data-theme="default" data-mode="dark">`.
 
 Dashboard content is organized into Bootstrap nav-pills tabs:
 - **Per-match:** Overview, Economy (v4 matches only), Elo, Combat, Rivalries, Weapons & Accuracy, Assets, Movemint, Storyline (v4 matches only), 3D Replay
-- **All Matches:** Overview (hero stats + a link to the Players hub), Weapons, Meta. The former Career Leaderboard / Career Highlights / VTSR-T teaser / Career Radar cards and the Commanders + Experimental tabs live on the Players hub (`/player/`, §14.7); `?match=all&tab=commanders` / `&tab=players` redirect there.
+- There is no All Matches tab set. Career leaderboards, highlights and commanders live on the Players hub (`/player/`, §14.7); faction and play-time charts live on `/meta/`. `?match=all&tab=commanders` / `&tab=players` / `&tab=meta` still redirect there. A bare `?match=all` opens the `/matches/` gallery.
 
 Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. Global filter changes also trigger the same lazy re-render pipeline — `destroyAllCharts()` + `resetTabState()` + re-register deferred renderers + re-register fullscreen chart renderers.
 
@@ -1315,13 +1315,13 @@ Any combination of match, filter, and tab is shareable via query parameters.
 
 **History.** The first load and `setLiveSync(true)` use `history.replaceState` on the entry you already landed on. After that, a user change to match, tab, or the per-match filter **pushes** when Live Sync is on, so Back and Forward walk those views. `popstate` applies the URL with writes suppressed. Picker facets always write (Live Sync off included) and push the same way; the first committed search query pushes and later commits while that field stays focused replace. Replay fullscreen still pushes a same-URL sentinel, and Back on that entry only exits fullscreen.
 
-**URL writes for match / tab / filter are gated by the Live Sync toggle** (Settings gear, `bi-broadcast`). It is ON by default: every state change writes to the URL. When the user turns it OFF, `syncUrl()` is a no-op and those clicks leave the URL alone, so Back leaves the page. The preference persists in `localStorage` under the `vt-url-sync` key; only an explicit `'false'` turns it off. The one-time `vt-url-sync-default-on-v1` flag switched every existing visitor on once (an older stored `'false'` included); a later toggle-off sticks. Share includes the Has VOD facet (`vod`), matching the picker URL. All Matches is the exception: opening it writes `?match=all` even with Live Sync off (Overview is that URL with no `tab`; other All Matches tabs still add `tab`). Leaving All Matches for a single match with Live Sync off removes `match=all` so a refresh does not jump back.
+**URL writes for match / tab / filter are gated by the Live Sync toggle** (Settings gear, `bi-broadcast`). It is ON by default: every state change writes to the URL. When the user turns it OFF, `syncUrl()` is a no-op and those clicks leave the URL alone, so Back leaves the page. The preference persists in `localStorage` under the `vt-url-sync` key; only an explicit `'false'` turns it off. The one-time `vt-url-sync-default-on-v1` flag switched every existing visitor on once (an older stored `'false'` included); a later toggle-off sticks. Share includes the Has VOD facet (`vod`), matching the picker URL. The gallery does not write `?match=`. A leftover `?match=all` is replaced with the gallery URL (picker params kept) on boot.
 
 The Share button (Settings gear, `bi-link-45deg`) copies a URL representing the current state to the clipboard regardless of the Live Sync toggle — it calls `buildShareUrl()` directly. The button briefly flips to a checkmark on success or a warning on failure. The Clipboard API is used when available (`navigator.clipboard.writeText` under a secure context), with a hidden-textarea + `document.execCommand('copy')` fallback for `file://` and plain `http://` contexts.
 
 | Param | Values | Notes |
 |---|---|---|
-| `match` | match ID (e.g. `2026-04-16T01-27-48`) or `all` | Omitted -> load first match in manifest |
+| `match` | match ID (e.g. `2026-04-16T01-27-48`), `latest`, or legacy `all` | On `/matches/`. Omitted -> the gallery. `latest` -> the newest non-void match, then the URL is rewritten to that id when Live Sync is on. `all` -> the gallery (picker params kept). A root `index.html` URL that carries `match`, `tab`, `filter`, `team`, `players` or `t` is forwarded to `/matches/` with the same query. |
 | `filter` | `all` \| `team` \| `player` | Omitted or `all` means no filter |
 | `team` | `1` \| `2` | Only valid when `filter=team` |
 | `players` | comma-separated canonical names or Steam64 IDs | Only valid when `filter=player`; tokens are resolved case-insensitively |
@@ -1329,9 +1329,9 @@ The Share button (Settings gear, `bi-link-45deg`) copies a URL representing the 
 | `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once on initial load: `js/app.js` converts the tick to seconds and boots the 3D replay iframe at `?t=<sec>`. |
 
 **Valid tab slugs (per-match):** `overview`, `economy`, `elo`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `storyline`, `replay`
-**Valid tab slugs (all-matches):** `overview`, `weapons-rivalries` (`weapons` is the canonical pill; `weapons-rivalries` stays an alias). `commanders`, `players`, and `meta` are legacy redirects (`player/?tab=commanders`, `player/?tab=trends`, `meta/`).
+`commanders`, `players`, and `meta` on `?match=all` are legacy redirects (`player/?tab=commanders`, `player/?tab=trends`, `meta/`). Any other `?match=all` opens the gallery.
 
-Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
+Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` at the top of `js/app.js`.
 
 The 3D replay's transport state (play position, speed, camera) is **not** URL-synced, except the one-shot `?t=` seek. Keeping URLs small means sharing a match + filter + tab slug is enough context; detailed playback scrubbing is an in-session interaction.
 
@@ -1350,10 +1350,13 @@ The 3D replay's transport state (play position, speed, camera) is **not** URL-sy
 
 On page init, `parseUrlState()` reads all params once and the boot block branches:
 
-- `match=all` -> `loadAllMatches(urlState)`
+- `match=all` with `tab=commanders|players|meta` -> `redirectLegacyAllTab()`
+- `match=all` otherwise -> gallery (`showGallery()`), picker params kept
+- `match=latest` -> `loadMatch()` of the newest non-void match
 - `match=<valid ID>` -> `loadMatch(file, urlState)`
-- `match=<unknown ID>` -> `showMatchNotFound(badId)` renders an error panel with a match-picker dropdown built from the manifest (mirrors the topnav selector). Selecting from it triggers a normal load.
-- No `match` param -> load first match, still pass `urlState` so filter/tab hydrate correctly.
+- `match=<unknown ID>` -> `showMatchNotFound(badId)` renders an error panel with a match dropdown built from the manifest. Selecting from it triggers a normal load.
+- No `match` param, but `tab` / `filter` / `team` / `players` -> newest non-void match, then that URL state
+- No match intent -> the gallery. The site root (`index.html`) is the home dashboard, not this shell.
 
 Inside the loader, `hydrateFilterFromUrl()` applies the URL's filter state. **URL wins over the persist preference on initial load** — URL is explicit user intent. The `vt-filter-persist` checkbox stays at whatever the user set; the preference governs subsequent in-session match switches but not the initial URL-driven load.
 
@@ -1377,14 +1380,16 @@ Two specific paths bypass the `liveSyncEnabled` gate and write to the URL uncond
 
 | Input | Behavior |
 |---|---|
-| Default home visit, Live Sync off | URL stays clean (no params); preloader shows, first match loads silently |
-| Default home visit, Live Sync on | First load `replaceState`s `?match=<newest>` onto the landed entry (no extra Back step) |
+| Bare `/matches/` visit | The gallery. Live Sync does not add `?match=`. |
+| `?match=latest`, Live Sync on | Opens the newest non-void match and `replaceState`s `?match=<id>` onto that entry |
+| Root `/?match=<id>` (or `?tab=` / `?filter=` / `?t=`) | `location.replace` to `/matches/` with the same query, before the home page paints |
 | Later match / tab / filter change, Live Sync on | `pushState`; Back restores the previous view without reloading past it |
 | Picker chip or search | `pushState` even when Live Sync is off (search refines with `replaceState` while the field stays focused) |
 | Replay fullscreen, then Back | URL unchanged, so Back only exits fullscreen |
 | Shared URL opened, Live Sync off | Applied on load, URL preserved verbatim (even if some players unresolvable) |
 | Shared URL opened, Live Sync on | Applied, then rewritten cleanly by `syncUrl()` at end of load |
-| `?match=all&filter=team` | Filter ignored on All Matches view; `buildShareUrl()` omits it |
+| `?match=all&tab=weapons` | Gallery. `match` and `tab` are dropped; picker params stay |
+| `?match=all&filter=team` | `filter` is a per-match param. The gallery ignores it. Opening a match from there applies it if Live Sync rewrites the URL |
 | `?filter=team` missing `team=` | Falls back to `all` |
 | `?filter=player` with empty/unresolved players | Falls back to `all` |
 | Some `players=` tokens unresolved, some valid | Valid ones kept; if list empties, falls back to `all` |
@@ -1638,7 +1643,7 @@ Actor ODF is the acting ship's stem (`shooterOdf`, else `killerOdf`, else `picke
 
 **Schema-aware Reconcile** — `computePersonalReceived(s64)` reads from `damageReceived` rows on v1 and from `damageDealt` rows (with `r.victim == s64`) on v2. `computePersonalPvpDealt(s64)` reads paired-DR victim on v1 and direct `r.victim` on v2. `computeSentinelSummary()` is schema-agnostic — one logical record per matching `damageDealt` row regardless of schema.
 
-**Cross-link to Replay** — clicking a row navigates to `../index.html?match=<id>&tab=replay&t=<tick>`. On load, `js/app.js` converts that tick to seconds and boots the 3D replay iframe at `?t=<sec>`. The jump is consumed once; later scrubs stay inside the iframe.
+**Cross-link to Replay** — clicking a row navigates to `../matches/?match=<id>&tab=replay&t=<tick>`. On load, `js/app.js` converts that tick to seconds and boots the 3D replay iframe at `?t=<sec>`. The jump is consumed once; later scrubs stay inside the iframe.
 
 ### Search + JSONPath subset (tree mode)
 
