@@ -181,7 +181,12 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 61 -> 62: gun-tower handles. A turret BUILD with a non-zero build_handle
 # is drawn and removed only when UnitDestroyed.victim_handle matches.
 # Handle 0 keeps death_reason untracked. Display-only. Ratings unmoved.
-PIPELINE_VERSION = 62
+# 62 -> 63: building orientation (match.schema_version 37). BUILD feed
+# rows and constructor structures.instances carry
+# BuildEvent.build_orientation ({x,y,z,w} or null). The 3D replay
+# applies it once. Display-only. Ratings unmoved.
+# structures.schema_version 3.
+PIPELINE_VERSION = 63
 
 # Building damage inside this many seconds of the last recorded tick is
 # reported separately as `enemy_structure_dealt_late` (the winners' end-of-
@@ -6251,12 +6256,56 @@ def _apply_turret_handle_deaths(instances, kills):
                 break
 
 
+def _wire_build_orientation(be):
+    """BuildEvent.build_orientation as {x,y,z,w} at 5 dp, or None.
+
+    Absent on QUEUE/CANCEL and on sessions recorded before field 8.
+    A zero-length quat is treated as absent.
+    """
+    if not be.HasField("build_orientation"):
+        return None
+    q = be.build_orientation
+    x, y, z, w = float(q.x), float(q.y), float(q.z), float(q.w)
+    if x * x + y * y + z * z + w * w < 1e-12:
+        return None
+    return {
+        "x": round(x, 5),
+        "y": round(y, 5),
+        "z": round(z, 5),
+        "w": round(w, 5),
+    }
+
+
+def _orientation_from_feed(row):
+    """Copy a feed orientation onto a constructor instance, or None."""
+    orient = row.get("orientation") if isinstance(row, dict) else None
+    if not isinstance(orient, dict):
+        return None
+    try:
+        x = float(orient["x"])
+        y = float(orient["y"])
+        z = float(orient["z"])
+        w = float(orient["w"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if x * x + y * y + z * z + w * w < 1e-12:
+        return None
+    return {
+        "x": round(x, 5),
+        "y": round(y, 5),
+        "z": round(z, 5),
+        "w": round(w, 5),
+    }
+
+
 def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants=None):
     """Derive the match-global structures[] block.
 
     Starting recyclers (one per team) plus one instance per constructor
     BUILD that carries xyz. Factory/armory/recycler *lane* pads are
-    units, not buildings. Deaths come from UnitDestroyed / kill feed
+    units, not buildings. Constructor instances copy the BUILD row's
+    orientation quaternion; recyclers and pool plants do not. Deaths
+    come from UnitDestroyed / kill feed
     only -- never HP inference. Turret-class instances with no
     build_handle stay death_reason='untracked'. A non-zero handle is
     drawn and removed only when victim_handle matches.
@@ -6365,6 +6414,7 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         }
         if tracked:
             inst["handle"] = handle
+        inst["orientation"] = _orientation_from_feed(row)
         instances.append(inst)
 
     _apply_turret_handle_deaths(instances, kills)
@@ -6431,7 +6481,7 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
         pool.remove(chosen)
 
     block = {
-        "schema_version": 2,
+        "schema_version": 3,
         "turret_deaths_reliable": bool(TURRET_DEATHS_RELIABLE),
         "instances": instances,
     }
@@ -8701,6 +8751,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     )
                     else None
                 ),
+                # v37: wire Quat BuildEvent.build_orientation. Same BUILD
+                # gate as position (the collector writes it only when the
+                # built object exists). QUEUE/CANCEL and pre-field sessions
+                # emit null. 5 dp keeps a unit quat usable as a rotation.
+                "orientation": (
+                    _wire_build_orientation(be)
+                    if _etype == "build"
+                    else None
+                ),
             }
             _bhandle = _handle_u32(getattr(be, "build_handle", 0))
             if _etype == "build" and _bhandle:
@@ -10450,10 +10509,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Mine-entity blasts (v1: mine-only ordnance) move from
             # asset_dealt to the layer when that player had piloted a
             # carrier of the mine. match.mine_attribution audits the move.
-            # v36 (this version): economy.loose_bucket_sec and
+            # v36: economy.loose_bucket_sec and
             # economy.teams{n}.loose_buckets -- 60s loose collected,
             # display-only. Sums to income_loose. Not in contributions.
-            "schema_version": 36,
+            # v37 (this version): builds.feed[].orientation and
+            # constructor structures.instances[].orientation from
+            # BuildEvent.build_orientation. {x,y,z,w} or null.
+            # Display-only. Not in contributions.
+            "schema_version": 37,
             "event_calibration": {
                 "r_by_weapon": event_calibration["r_by_weapon"],
                 "r_lobby": event_calibration["r_lobby"],

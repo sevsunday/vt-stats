@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 import { worldCutRect } from './replay-ship-models.js?v=pads2';
+import { orientedCutRect } from './structure-orientation.js?v=orient1';
 
 const MAX_CUT_RECTS = 64;
 const SPAN_MARGIN_M = 0.5;
@@ -169,8 +170,11 @@ export function updateTerrainCuts(items, camera) {
       const rec = lookupCuts(odf);
       if (!rec) continue;
       const lift = mesh.userData.seatLift || 0;
+      const orient = it.inst && it.inst.orientation;
       for (let r = 0; r < rec.rects.length; r++) {
-        const world = worldCutRect(rec.rects[r], mesh.position.x, mesh.position.y, mesh.position.z, lift);
+        const world = orientedCutRect(
+          rec.rects[r], mesh.position.x, mesh.position.y, mesh.position.z, lift, orient,
+        ) || worldCutRect(rec.rects[r], mesh.position.x, mesh.position.y, mesh.position.z, lift);
         placed.push(world);
       }
     }

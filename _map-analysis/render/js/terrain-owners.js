@@ -25,6 +25,8 @@
  * Surface heights (`base`) are metres minus hm.baseOffsetM.
  */
 
+import { orientedXzAabb } from './structure-orientation.js?v=orient1';
+
 const EPS = 1e-3;
 const SPAN_MARGIN_M = 0.5;
 
@@ -859,7 +861,9 @@ export function stampStructurePads(surface, geometry, items, tSec, resolvePatch,
       stamped.add(id);
       continue;
     }
-    const box = padWorldBox(patch, mesh.position.x, mesh.position.z);
+    const orient = it.inst && it.inst.orientation;
+    const box = orientedXzAabb(patch, mesh.position.x, mesh.position.z, orient)
+      || padWorldBox(patch, mesh.position.x, mesh.position.z);
     const y = mesh.position.y - raise;
     if (!Number.isFinite(y)) continue;
     for (let i = 0; i < n; i++) {

@@ -29,7 +29,7 @@ import {
 import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
 import { buildPropsGroup } from './props.js?v=props4';
 import { mountLiquids } from './liquids.js?v=terrain1';
-import { buildTerrainSurface, buildTunnelIndex, tunnelAt, stampStructurePads } from './terrain-owners.js?v=pads2';
+import { buildTerrainSurface, buildTunnelIndex, tunnelAt, stampStructurePads } from './terrain-owners.js?v=orient1';
 
 import { sampleSheetHeight, sampleTerrainHeight, unmeshedPools } from './objects.js?v=pools4';
 import {
@@ -122,13 +122,13 @@ import {
   enemyBaseOf,
   setStructureShadowPrep,
   STRUCTURE_GROUND_LIFT,
-} from './replay-structures.js?v=pads2';
+} from './replay-structures.js?v=orient1';
 import {
   installTerrainCuts,
   createCutDepthMaterial,
   updateTerrainCuts,
   loadBuildingCuts,
-} from './terrain-cuts.js?v=pads2';
+} from './terrain-cuts.js?v=orient1';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================

@@ -14,6 +14,7 @@ import { sampleTerrainHeight } from './objects.js?v=pools4';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
 import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=pads2';
+import { applyStructureOrientation } from './structure-orientation.js?v=orient1';
 
 let prepareShadow = null;
 
@@ -268,9 +269,12 @@ function deploySecFor(matchData, team) {
   return Math.max(0, queueSec - DEPLOY_LEAD_SEC);
 }
 
-function placeStructureMesh(mesh, hm, x, z, isModel, yOff) {
+function placeStructureMesh(mesh, hm, x, z, isModel, yOff, orientation) {
   const clearance = isModel ? STRUCTURE_GROUND_LIFT : 0;
   mesh.position.set(x, placeY(hm, x, z, (isModel ? 0 : yOff) + clearance), z);
+  // Missing quat stays at identity: the pre-orientation east facing.
+  // The mobile recycler hull is a vehicle and never receives one.
+  applyStructureOrientation(mesh, orientation);
 }
 
 function stampStructureMesh(mesh, label, team) {
@@ -487,7 +491,9 @@ export function buildStructuresLayer(matchData, mapData) {
     const deploySec = opening ? deploySecFor(matchData, inst.team) : null;
     const mobileOdf = deploySec != null ? mobileRecyclerOdf(inst.odf) : null;
     const deployed = makeStructureVisual(inst.odf, inst.team, instanceSize(inst), `struct-${inst.id || inst.odf}`, true);
-    placeStructureMesh(deployed.mesh, hm, pad.x, pad.z, deployed.isModel, instanceYOff(inst));
+    placeStructureMesh(
+      deployed.mesh, hm, pad.x, pad.z, deployed.isModel, instanceYOff(inst), inst.orientation,
+    );
     const label = prettyStructName(odfMap, inst.odf);
     stampStructureMesh(deployed.mesh, label, inst.team);
     deployed.mesh.visible = false;
@@ -548,7 +554,10 @@ export function applyStructureModelMode(items, mapData) {
       if (oldMesh && parent) parent.remove(oldMesh);
       disposeMesh(oldMesh);
       const built = makeStructureVisual(nextOdf, team, boxSize, name, deployedPose);
-      placeStructureMesh(built.mesh, hm, it.x, it.z, built.isModel, yOff);
+      placeStructureMesh(
+        built.mesh, hm, it.x, it.z, built.isModel, yOff,
+        deployedPose ? (it.inst && it.inst.orientation) : null,
+      );
       stampStructureMesh(built.mesh, label, team);
       built.mesh.visible = false;
       if (parent) parent.add(built.mesh);
