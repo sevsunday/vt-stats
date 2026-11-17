@@ -273,6 +273,24 @@
     return Number.isFinite(raw) ? raw : 0;
   }
 
+  function alsoRecordedNames(also) {
+    const names = [];
+    const list = Array.isArray(also) ? also : [];
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      const name = item && typeof item === 'object' ? item.submitter : item;
+      if (name && names.indexOf(name) < 0) names.push(name);
+    }
+    return names;
+  }
+
+  function submitterCreditText(submitter, also) {
+    const extra = alsoRecordedNames(also).filter(name => name !== submitter);
+    if (!submitter) return extra.join(', ') || '—';
+    if (!extra.length) return submitter;
+    return submitter + ', also ' + extra.join(', ');
+  }
+
   function matchStats(m) {
     const parts = [];
     const players = activePlayers(m);
@@ -283,8 +301,9 @@
     if (dur) {
       parts.push('<span class="vt-home-stat" title="Duration"><i class="bi bi-clock"></i><span class="vt-mono">' + esc(dur) + '</span></span>');
     }
-    if (m.submitter) {
-      parts.push('<span class="vt-home-stat vt-home-stat--who" title="Submitted by ' + esc(m.submitter) + '"><i class="bi bi-upload"></i><span>' + esc(m.submitter) + '</span></span>');
+    if (m.submitter || (m.also_recorded_by && m.also_recorded_by.length)) {
+      const who = submitterCreditText(m.submitter, m.also_recorded_by);
+      parts.push('<span class="vt-home-stat vt-home-stat--who" title="Submitted by ' + esc(who) + '"><i class="bi bi-upload"></i><span>' + esc(who) + '</span></span>');
     }
     return parts.length ? '<span class="vt-home-match-stats">' + parts.join('') + '</span>' : '';
   }

@@ -320,6 +320,8 @@ The Python pipeline (`scripts/process_stats.py`) transforms raw protobuf data in
 
 The pipeline scans `data/sessions/` for username subdirectories. Within each, it finds all `.binpb.gz` files (gzip-compressed protobuf). Each file is paired with its submitter username (the parent folder name). Files are sorted by name within each user folder.
 
+After every session is processed, recordings of the same game collapse to one published match (`collapse_duplicate_recordings()`). Two recordings cluster when the map stem matches, the Steam64 rosters overlap by at least 0.8 Jaccard, and the shorter span shares at least 60% of itself with the longer. The keeper is the latest wall-clock end (ends within 2 seconds are the same coverage), then the longer tick span, then the larger source file, then the earlier match id. The others are not rated. A discarded span that sits inside the keeper's span, with 120 seconds of slack, is deleted (`data/sessions/`, the per-match JSON, and the replay). A discarded span that sticks out past the keeper keeps its raw file and is printed as a review line. Either way the receipt `data/duplicate_recordings.json` is written first, and the keeper's `also_recorded_by` is rebuilt from it on later runs, including after the raw file is gone. `sync_upstream()` will not copy a removed raw file back.
+
 ### Step 2: Protobuf Parsing
 
 Each `.binpb.gz` file is decompressed with `gzip.open()` and parsed into a `ClientStatSession` protobuf message. This gives the pipeline access to the header and the complete event stream.
@@ -743,7 +745,8 @@ An array of match summaries used to populate the match selector dropdown.
 | `duration_sec` | `number` | Match duration in seconds |
 | `player_count` | `number` | Raw occupied-slot count (`StatHeader.player_count`, or `len(nick_map)` after the identity shim). Includes campod and partial players. ELO's fewer-than-6 gate and the per-match banner read this. |
 | `active_player_count` | `number` | Named `leaderboard[]` rows with `is_campod`, `is_low_activity`, and `is_zero_damage` all false. The Select-a-match card badge, player-count dropdown, and Most/Fewest players sort. Display-only; not a rating input. |
-| `submitter` | `string` | Username of who submitted the session file |
+| `submitter` | `string` | Username of who submitted the session file that was kept. Other clients who recorded the same game are `also_recorded_by`. |
+| `also_recorded_by` | `string[]` | Absent when one client recorded the match. Otherwise the other submitters, in credit order. The picker matches a submitter chip against this list as well as `submitter`. The per-match JSON keeps `{submitter, source_file, duration_sec}` rows under the same name. |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). |
 | `winner_adjudicated` | `boolean` | v16. `true` once a human signed off on this match's outcome. |
 | `winner_team` | `number \| null` | `1` or `2` when `match.winner.team` is a team. `null` for draw, cancelled, and unclear. The picker draws a `--kb-warning` ring on that commander's dot. Display-only. |
@@ -762,7 +765,8 @@ Each match file has these top-level keys:
 |---|---|---|
 | `id` | `string` | Unique match ID |
 | `source_file` | `string` | Source `.binpb.gz` filename |
-| `submitter` | `string` | Submitter username |
+| `submitter` | `string` | Submitter username of the recording that was kept |
+| `also_recorded_by` | `object[]` | Absent when this match has one recording. Each other client is `{submitter, source_file, duration_sec}`. Rebuilt every run from `data/duplicate_recordings.json`, so the credit stays after that client's raw file is deleted. Display-only. The manifest copies the names. |
 | `map` | `string` | Raw map name |
 | `date` | `string` | ISO datetime |
 | `duration_sec` | `number` | Duration in seconds |
@@ -2659,8 +2663,11 @@ as permanently unclear), `d` (defer: publish with the interim ladder
 resolution and re-prompt next run).
 
 Answers persist in **`data/match_outcome_adjudications.json`**
-(committed; keyed by match id so dual recordings of one game share one
-answer; flushed after every prompt so Ctrl+C keeps progress). Application
+(committed; keyed by match id; flushed after every prompt so Ctrl+C keeps
+progress). Two clients who recorded one game do not share a match id — the
+id is the start time to the second. `collapse_duplicate_recordings()`
+publishes one recording and drops the other's adjudication key before this
+store is applied. Application
 is a pure winner-block rewrite by `scripts/adjudication.py::apply_outcome`:
 
 - **Confirmed** the current resolution → `decided_by` unchanged

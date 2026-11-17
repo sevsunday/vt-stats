@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import statsgate_pb2          # v3 (current schema: header.players roster + game_outcome)
@@ -333,6 +333,24 @@ POSITIONING_SAMPLE_RATE_HZ = 1  # downsample UpdateTicks to 1 Hz regardless of s
 # hp/ammo 255 = no resolvable ship cap. speed is NaN when the sample
 # had none. t is (tick - min_tick) / tick_rate, same origin as trail.t.
 REPLAY_TRACK_DIR = OUTPUT_DIR / "replay"
+# Near-duplicate recordings (two clients in the same lobby). Match ids are
+# the start time to the second, so a one-second clock skew is a second
+# match. collapse_duplicate_recordings() publishes one of them and credits
+# the rest. The receipt outlives the deleted raw file.
+DUPLICATE_RECORDINGS_PATH = PROJECT_ROOT / "data" / "duplicate_recordings.json"
+DUPLICATE_RECORDINGS_SCHEMA = 1
+# Roster overlap required before two recordings can be the same game.
+DUP_ROSTER_JACCARD = 0.8
+# The shorter recording must share this much of its own span with the longer.
+DUP_OVERLAP_FRACTION = 0.60
+# A discarded span may stick out of the keeper by this much (lobby / score
+# screen) and still count as contained, which is what allows deleting it.
+DUP_CONTAIN_SLACK_SEC = 120.0
+# Client clocks disagree by about a second. Ends inside this band are the
+# same coverage; tick span, then file size, then the earlier match id break
+# the tie. Strategy Arena 2026-10-06 is the case: Nomad's end is 1s later,
+# the tick spans match, and Sev's file is 4 bytes larger.
+DUP_END_TIE_SEC = 2.0
 REPLAY_TRACK_MAGIC = b"VTR1"
 REPLAY_TRACK_VERSION = 1
 REPLAY_RATIO_MISSING = 255
@@ -2634,6 +2652,416 @@ def discover_sessions():
     return sources
 
 
+def load_duplicate_recordings():
+    """Return the {discarded_match_id: entry} receipt, or {} when absent.
+
+    A corrupt file must not brick the pipeline; the next collapse rebuilds
+    the decisions it can see from the sessions that are still on disk.
+    """
+    try:
+        with open(DUPLICATE_RECORDINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  WARN: could not read {DUPLICATE_RECORDINGS_PATH.name} ({e}); treating as empty")
+        return {}
+    recs = data.get("recordings") if isinstance(data, dict) else None
+    return recs if isinstance(recs, dict) else {}
+
+
+def save_duplicate_recordings(recordings):
+    """Write the duplicate-recording receipt. Sorted keys, stable diffs."""
+    payload = {
+        "schema_version": DUPLICATE_RECORDINGS_SCHEMA,
+        "_comment": (
+            "Recordings collapsed out of the published corpus. Keyed by the "
+            "discarded match id. keeper_id is the match that was kept. "
+            "also_recorded_by on that match is rebuilt from this file, so "
+            "the credit survives after the raw file is deleted. "
+            "contained=true means the discarded span sat inside the keeper "
+            "(120s slack) and the raw file was removed. A recording that "
+            "sticks out past the keeper stays on disk (raw_removed=false) "
+            "and is still not published."
+        ),
+        "recordings": {k: recordings[k] for k in sorted(recordings)},
+    }
+    DUPLICATE_RECORDINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DUPLICATE_RECORDINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def _removed_duplicate_sources(recordings=None):
+    """(submitter, source_file) pairs whose raw file the collapse deleted.
+
+    sync_upstream() refuses to copy these back out of the statsgate clone.
+    """
+    if recordings is None:
+        recordings = load_duplicate_recordings()
+    out = set()
+    for rec in recordings.values():
+        if not isinstance(rec, dict) or not rec.get("raw_removed"):
+            continue
+        sub = rec.get("submitter")
+        src = rec.get("source_file")
+        if sub and src:
+            out.add((sub, src))
+    return out
+
+
+def _parse_match_start(date_str):
+    dt = datetime.fromisoformat(date_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _recording_fingerprint(match_data):
+    """Wall-clock span, map stem, and Steam64 roster for one recording."""
+    m = match_data.get("match") or {}
+    start = _parse_match_start(m["date"])
+    duration = float(m.get("duration_sec") or 0)
+    ticks = m.get("tick_range") or [0, 0]
+    try:
+        tick_span = float(ticks[1]) - float(ticks[0])
+    except (TypeError, ValueError, IndexError):
+        tick_span = 0.0
+    roster = set()
+    teams = m.get("teams") or {}
+    if isinstance(teams, dict):
+        for side in teams.values():
+            if not isinstance(side, list):
+                continue
+            for player in side:
+                if not isinstance(player, dict):
+                    continue
+                s64 = player.get("steam64")
+                if s64:
+                    roster.add(str(s64))
+    return {
+        "match_data": match_data,
+        "id": str(m.get("id") or ""),
+        "submitter": m.get("submitter") or "",
+        "source_file": m.get("source_file") or "",
+        "source_size_bytes": int(m.get("source_size_bytes") or 0),
+        "map_stem": re.sub(r"\.bzn$", "", m.get("map") or "", flags=re.IGNORECASE).lower(),
+        "start": start,
+        "end": start + timedelta(seconds=duration),
+        "duration_sec": duration,
+        "tick_span": tick_span,
+        "roster": roster,
+    }
+
+
+def _roster_jaccard(a, b):
+    union = a | b
+    if not union:
+        return 0.0
+    return len(a & b) / len(union)
+
+
+def _overlap_sec(a, b):
+    latest_start = max(a["start"], b["start"])
+    earliest_end = min(a["end"], b["end"])
+    return max(0.0, (earliest_end - latest_start).total_seconds())
+
+
+def _same_game(a, b):
+    """True when two recordings are one lobby, not a restart on the same map.
+
+    A restart starts after the first recording has already ended, so the
+    spans do not overlap and this returns False.
+    """
+    if not a["map_stem"] or a["map_stem"] != b["map_stem"]:
+        return False
+    if _roster_jaccard(a["roster"], b["roster"]) < DUP_ROSTER_JACCARD:
+        return False
+    shorter = min(a["duration_sec"], b["duration_sec"])
+    if shorter <= 0:
+        return False
+    return _overlap_sec(a, b) / shorter >= DUP_OVERLAP_FRACTION
+
+
+def _cluster_recordings(fingerprints):
+    """Union-find groups of recordings that pairwise pass _same_game."""
+    parent = list(range(len(fingerprints)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[rj] = ri
+
+    for i in range(len(fingerprints)):
+        for j in range(i + 1, len(fingerprints)):
+            if _same_game(fingerprints[i], fingerprints[j]):
+                union(i, j)
+    groups = defaultdict(list)
+    for i, fp in enumerate(fingerprints):
+        groups[find(i)].append(fp)
+    return list(groups.values())
+
+
+def _pick_keeper(group):
+    """The recording that covers the game.
+
+    Latest wall-clock end wins. Ends within DUP_END_TIE_SEC are the same
+    coverage (client clocks skew by about a second). Then the longer tick
+    span, then the larger source file, then the earlier match id.
+    """
+    return min(
+        group,
+        key=lambda fp: (
+            -int(fp["end"].timestamp() // DUP_END_TIE_SEC),
+            -fp["tick_span"],
+            -fp["source_size_bytes"],
+            fp["id"],
+        ),
+    )
+
+
+def _span_contained(loser, keeper):
+    """True when loser's span sits inside the keeper's, plus slack."""
+    slack = timedelta(seconds=DUP_CONTAIN_SLACK_SEC)
+    return (
+        loser["start"] >= keeper["start"] - slack
+        and loser["end"] <= keeper["end"] + slack
+    )
+
+
+def _credit_rows(recordings, keeper_id):
+    """also_recorded_by rows for one keeper, stable and de-duplicated."""
+    rows = []
+    seen = set()
+    for rec in recordings.values():
+        if not isinstance(rec, dict) or rec.get("keeper_id") != keeper_id:
+            continue
+        row = {
+            "submitter": rec.get("submitter") or "",
+            "source_file": rec.get("source_file") or "",
+            "duration_sec": rec.get("duration_sec"),
+        }
+        key = (row["submitter"], row["source_file"])
+        if not row["submitter"] or key in seen:
+            continue
+        seen.add(key)
+        rows.append(row)
+    rows.sort(key=lambda r: (r["submitter"].lower(), r["source_file"]))
+    return rows
+
+
+def _write_match_json(match_data):
+    match_id = (match_data.get("match") or {}).get("id")
+    if not match_id:
+        return
+    out_path = OUTPUT_DIR / f"{match_id}.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(match_data, f, indent=2, ensure_ascii=False)
+
+
+def _unlink_quiet(path):
+    """Remove path. Missing is success. Returns False only on a real error."""
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError as e:
+        print(f"  WARN: could not remove {path} ({e})")
+        return False
+
+
+def _reconcile_duplicate_adjudications(decisions):
+    """Drop the discarded match's sign-off. The keeper's answer stays.
+
+    When only the discarded copy was signed off, that answer moves onto
+    the keeper so the published match is not prompted again. A disagreement
+    keeps the keeper's answer and warns; the discarded key still goes,
+    because that match id is no longer published.
+    """
+    if not decisions:
+        return
+    import adjudication as adjudication_module
+    store = adjudication_module.load_adjudications()
+    changed = False
+    for decision in decisions:
+        lid = decision["id"]
+        kid = decision["keeper_id"]
+        loser_entry = store.get(lid)
+        if not isinstance(loser_entry, dict):
+            continue
+        keeper_entry = store.get(kid)
+        if not isinstance(keeper_entry, dict):
+            store[kid] = loser_entry
+            del store[lid]
+            changed = True
+            print(f"  adjudication {lid} moved onto keeper {kid} ({loser_entry.get('outcome')})")
+            continue
+        same = (
+            keeper_entry.get("outcome") == loser_entry.get("outcome")
+            and bool(keeper_entry.get("void")) == bool(loser_entry.get("void"))
+        )
+        if not same:
+            print(
+                f"  WARN: adjudication for {lid} ({loser_entry.get('outcome')}) "
+                f"disagrees with keeper {kid} ({keeper_entry.get('outcome')}); "
+                f"keeping the keeper"
+            )
+        del store[lid]
+        changed = True
+    if changed:
+        adjudication_module.save_adjudications(store)
+
+
+def collapse_duplicate_recordings(all_match_data):
+    """Publish one recording per game and credit every other submitter.
+
+    Runs after the cache/process loop and before the map registry,
+    adjudication, the manifest, and the rating scripts. A loser whose
+    span sits inside the keeper's (DUP_CONTAIN_SLACK_SEC) loses its raw
+    file, its processed JSON, and its replay. A loser that sticks out
+    past the keeper keeps its raw file, loses the published outputs, and
+    is printed as a review line. Either way it does not stay in
+    all_match_data, so it is not rated.
+
+    The receipt is written before any delete. Next run the credit is
+    re-stamped from the receipt onto the keeper, including after the raw
+    file is gone. No pipeline or match schema bump: the field is optional
+    and only the keeper's JSON is rewritten.
+    """
+    if not all_match_data:
+        return all_match_data
+
+    fingerprints = [_recording_fingerprint(md) for md in all_match_data]
+    by_obj = {id(fp["match_data"]): fp for fp in fingerprints}
+    decisions = []
+    drop_objs = set()
+    for group in _cluster_recordings(fingerprints):
+        if len(group) < 2:
+            continue
+        keeper = _pick_keeper(group)
+        for other in group:
+            if other is keeper:
+                continue
+            decisions.append({
+                "id": other["id"],
+                "keeper_id": keeper["id"],
+                "submitter": other["submitter"],
+                "source_file": other["source_file"],
+                "duration_sec": other["duration_sec"],
+                "contained": _span_contained(other, keeper),
+                "match_data": other["match_data"],
+            })
+            drop_objs.add(id(other["match_data"]))
+
+    published_ids = {
+        fp["id"] for fp in fingerprints if id(fp["match_data"]) not in drop_objs
+    }
+    recordings = load_duplicate_recordings()
+    for decision in decisions:
+        recordings[decision["id"]] = {
+            "keeper_id": decision["keeper_id"],
+            "submitter": decision["submitter"],
+            "source_file": decision["source_file"],
+            "duration_sec": decision["duration_sec"],
+            "contained": decision["contained"],
+            # Intent, written before the delete. A failed unlink is warned
+            # below; the next run sees the file and tries again.
+            "raw_removed": bool(decision["contained"]),
+        }
+    # A receipt row whose keeper was itself discarded this run follows
+    # the chain onto the recording that is actually published.
+    redirect = {d["id"]: d["keeper_id"] for d in decisions}
+    for rec in recordings.values():
+        if not isinstance(rec, dict):
+            continue
+        keeper_id = rec.get("keeper_id")
+        seen = set()
+        while keeper_id in redirect and keeper_id not in seen:
+            seen.add(keeper_id)
+            keeper_id = redirect[keeper_id]
+        rec["keeper_id"] = keeper_id
+    decision_ids = {d["id"] for d in decisions}
+    for discarded_id in list(recordings):
+        rec = recordings.get(discarded_id)
+        if not isinstance(rec, dict):
+            del recordings[discarded_id]
+            continue
+        # A match id that is published this run is not a discarded recording.
+        # Same-id pairs are the exception: the keeper's id equals the
+        # loser's, and that row is a decision we just wrote.
+        if discarded_id in published_ids and discarded_id not in decision_ids:
+            del recordings[discarded_id]
+            continue
+        keeper_id = rec.get("keeper_id")
+        if keeper_id not in published_ids and discarded_id not in decision_ids:
+            # The keeper itself is gone and this row was not rewritten
+            # onto a recording we are publishing.
+            del recordings[discarded_id]
+
+    if decisions or recordings:
+        save_duplicate_recordings(recordings)
+
+    surviving_json_ids = published_ids
+    for decision in decisions:
+        tag = f"{decision['id']} ({decision['submitter'] or '?'})"
+        keeper_tag = decision["keeper_id"]
+        if decision["contained"]:
+            print(f"  drop {tag} -> keep {keeper_tag} (span contained, raw removed)")
+            session_path = SESSIONS_DIR / decision["submitter"] / decision["source_file"]
+            if decision["submitter"] and decision["source_file"]:
+                _unlink_quiet(session_path)
+            else:
+                print(f"  WARN: {tag} has no session path; raw file left in place")
+        else:
+            print(
+                f"  REVIEW {tag} overlaps {keeper_tag} but is not contained; "
+                f"raw kept, not published"
+            )
+        # Same-id collision shares the keeper's JSON and replay. Deleting
+        # those paths would remove the recording we are keeping.
+        if decision["id"] and decision["id"] not in surviving_json_ids:
+            _unlink_quiet(OUTPUT_DIR / f"{decision['id']}.json")
+            _unlink_quiet(REPLAY_TRACK_DIR / f"{decision['id']}.bin.gz")
+
+    if decisions:
+        _reconcile_duplicate_adjudications(decisions)
+
+    kept = [md for md in all_match_data if id(md) not in drop_objs]
+    rewritten = 0
+    for md in kept:
+        fp = by_obj.get(id(md))
+        if fp is None:
+            continue
+        credit = _credit_rows(recordings, fp["id"])
+        match = md.setdefault("match", {})
+        previous = match.get("also_recorded_by")
+        changed = False
+        if credit:
+            if previous != credit:
+                match["also_recorded_by"] = credit
+                changed = True
+        elif "also_recorded_by" in match:
+            match.pop("also_recorded_by", None)
+            changed = True
+        if changed:
+            _write_match_json(md)
+            rewritten += 1
+
+    if decisions or rewritten:
+        print(
+            f"Duplicate recordings: {len(decisions)} dropped, "
+            f"{rewritten} keeper file(s) credited"
+        )
+    return kept
+
+
 def sync_upstream():
     """Pull upstream statsgate clone + mirror new .binpb.gz into data/sessions/.
 
@@ -2645,7 +3073,9 @@ def sync_upstream():
 
     The mirror copy is strictly additive: never deletes from data/sessions/
     (protects local-only submitter folders) and never overwrites existing
-    files (size mismatches warn but don't clobber). git pull uses
+    files (size mismatches warn but don't clobber). It also never copies a
+    recording collapse_duplicate_recordings() already removed (the receipt
+    at data/duplicate_recordings.json). git pull uses
     --ff-only so a divergent local statsgate clone fails loudly instead
     of auto-merging.
     """
@@ -2675,11 +3105,16 @@ def sync_upstream():
 
     copied: list[str] = []
     skipped_size_mismatch: list[Path] = []
+    skipped_duplicate: list[str] = []
+    removed_sources = _removed_duplicate_sources()
     for user_dir in sorted(STATSGATE_SESSIONS_DIR.iterdir()):
         if not user_dir.is_dir():
             continue
         for src in sorted(user_dir.iterdir()):
             if src.suffix != ".gz" or not src.stem.endswith(".binpb"):
+                continue
+            if (user_dir.name, src.name) in removed_sources:
+                skipped_duplicate.append(f"{user_dir.name}/{src.name}")
                 continue
             dest = SESSIONS_DIR / user_dir.name / src.name
             if dest.exists():
@@ -2693,6 +3128,8 @@ def sync_upstream():
     print(f"Synced {len(copied)} new file(s)")
     for c in copied:
         print(f"  [copy] {c}")
+    for name in skipped_duplicate:
+        print(f"  [duplicate] not restored: {name}")
     for s in skipped_size_mismatch:
         print(f"  WARN: size mismatch, NOT overwritten: {s.relative_to(SESSIONS_DIR)}")
 
@@ -11877,6 +12314,16 @@ def main():
 
     print(f"\nMatches: {n_cache_hit} cached, {n_processed} reprocessed")
 
+    # One published match per game. Two clients a second apart used to
+    # become two rated matches, because the match id is the start time
+    # to the second. This drops the extra recording before the registry,
+    # adjudication, the manifest, and every ladder see all_match_data.
+    all_match_data = collapse_duplicate_recordings(all_match_data)
+    submitter_by_id = {
+        md["match"]["id"]: (md.get("match") or {}).get("submitter") or ""
+        for md in all_match_data
+    }
+
     # Build/refresh the map registry BEFORE the manifest so we can resolve
     # each match's display name from the iondriver `title` field (with
     # `XYZ: ` prefixes stripped). Non-blocking: per-map network failures
@@ -11940,14 +12387,16 @@ def main():
     # Every proto v3+ match gets a one-time console sign-off: the operator
     # confirms (or overrides) the outcome the host attested / the kill feed
     # inferred. Answers persist in data/match_outcome_adjudications.json
-    # (committed; keyed by match id, so dual recordings of one game share a
-    # single answer) and the match never prompts again. Deferred matches
-    # publish with their interim trust-ladder resolution and re-prompt next
-    # interactive run. Positioned AFTER the registry build (prompt shows
-    # resolved map titles) and BEFORE every aggregate emit (manifest /
-    # contributions / ELO / map stats all rebuild from the mutated
-    # all_match_data below, so a corrected winner propagates everywhere in
-    # the same run). See scripts/adjudication.py for the full contract.
+    # (committed; keyed by match id) and the match never prompts again.
+    # Near-duplicate recordings are already collapsed to one match id by
+    # collapse_duplicate_recordings(); the discarded id's answer is dropped
+    # there (or moved onto the keeper when the keeper had none). Deferred
+    # matches publish with their interim trust-ladder resolution and
+    # re-prompt next interactive run. Positioned AFTER the registry build
+    # (prompt shows resolved map titles) and BEFORE every aggregate emit
+    # (manifest / contributions / ELO / map stats all rebuild from the
+    # mutated all_match_data below, so a corrected winner propagates
+    # everywhere in the same run). See scripts/adjudication.py.
     import adjudication as adjudication_module
     adj_store = adjudication_module.load_adjudications()
     interactive = (sys.stdin.isatty() and not args.no_prompt) or args.force_prompt
@@ -11976,8 +12425,9 @@ def main():
         adjudication_module.set_external_hints(hints)
         f9_hint_ids = frozenset(hints)
 
-    # Dedupe prompt candidates by match id (dual recordings appear twice in
-    # all_match_data); reconciliation below still touches every dict.
+    # Near-duplicate recordings are already gone (collapse_duplicate_recordings).
+    # This dedupes a same-id pair that was not the same game, so the prompt
+    # asks once; reconciliation below still touches every dict.
     # --adjudicate-f9 widens candidacy to hinted matches even in the
     # grandfathered v1/v2 proto era (the F9-overlap window is v2-heavy).
     force_ids = f9_hint_ids if args.adjudicate_f9 else frozenset()
@@ -12097,7 +12547,12 @@ def main():
         winner_team = (match_data["match"].get("winner") or {}).get("team")
         if winner_team not in (1, 2):
             winner_team = None
-        manifest.append({
+        also_recorded_by = []
+        for row in (match_data["match"].get("also_recorded_by") or []):
+            name = row.get("submitter") if isinstance(row, dict) else None
+            if name and name != submitter_by_id.get(match_id, "") and name not in also_recorded_by:
+                also_recorded_by.append(name)
+        entry = {
             "id": match_id,
             "name": resolve_match_name(match_data["match"]["map"], registry),
             "file": f"{match_id}.json",
@@ -12139,7 +12594,13 @@ def main():
             # Operator void (`v` on the outcome prompt). The match stays
             # in the picker; ratings, career, and map counts skip it.
             "void": bool(match_data["match"].get("void")),
-        })
+        }
+        # Other clients who recorded this same game. Names only; the
+        # per-match JSON keeps source file and duration. Absent when
+        # this match has a single recording. Display / picker only.
+        if also_recorded_by:
+            entry["also_recorded_by"] = also_recorded_by
+        manifest.append(entry)
 
     manifest.sort(key=lambda m: m["date"])
 

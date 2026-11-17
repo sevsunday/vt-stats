@@ -19,10 +19,13 @@ provenance fields (`attested`, `disputed`, `agreement`, `inferred`,
 
 Storage: `data/match_outcome_adjudications.json` --
     {"schema_version": 1, "adjudications": {"<match_id>": {...}}}
-Keyed by match id (dedupes dual recordings of the same game), keys sorted
+Keyed by match id, keys sorted
 on write for stable git diffs, human-editable: delete an entry to re-prompt,
 edit an `outcome` value and the pipeline's reconciliation pass rewrites the
-match's winner block on the next run (no --force needed).
+match's winner block on the next run (no --force needed). Two clients who
+recorded one game do not share a match id (the id is the start time to the
+second). collapse_duplicate_recordings() in scripts/process_stats.py publishes
+one of them and drops the other's adjudication key before this module runs.
 
 Wired into `scripts/process_stats.py::main()` between the registry build
 and the manifest write. Pure console UX by design (the pipeline is a

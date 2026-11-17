@@ -898,7 +898,7 @@
           </div>
           ${mapRaw}
           <div class="vt-match-picker-card-submeta">
-            <span class="vt-match-picker-card-submitter"><i class="bi bi-person-circle"></i> ${esc(entry.submitter || '—')}</span>
+            <span class="vt-match-picker-card-submitter"><i class="bi bi-person-circle"></i> ${esc(submitterCreditText(entry.submitter, entry.also_recorded_by))}</span>
             <span class="vt-match-picker-card-date">${esc(fmtDateFull(entry.date))}</span>
           </div>
           ${leadersHtml}
@@ -919,7 +919,7 @@
       const l1 = entry.team_leaders && entry.team_leaders['1'] && entry.team_leaders['1'].name;
       const l2 = entry.team_leaders && entry.team_leaders['2'] && entry.team_leaders['2'].name;
       el.dataset.searchBlob = [
-        entry.name, entry.map, entry.submitter,
+        entry.name, entry.map, ...entrySubmitters(entry),
         fmtDateFull(entry.date),
         l1, l2,
       ].filter(Boolean).join(' ').toLowerCase();
@@ -1011,6 +1011,35 @@
     long:   { min: 1200, max: Infinity }, // 20m+
   };
 
+  // also_recorded_by is submitter names on the manifest and
+  // {submitter, source_file, duration_sec} rows on the per-match JSON.
+  function alsoRecordedNames(also) {
+    const names = [];
+    const list = Array.isArray(also) ? also : [];
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      const name = item && typeof item === 'object' ? item.submitter : item;
+      if (name && names.indexOf(name) < 0) names.push(name);
+    }
+    return names;
+  }
+
+  function entrySubmitters(entry) {
+    const names = [];
+    if (entry && entry.submitter) names.push(entry.submitter);
+    alsoRecordedNames(entry && entry.also_recorded_by).forEach(name => {
+      if (names.indexOf(name) < 0) names.push(name);
+    });
+    return names;
+  }
+
+  function submitterCreditText(submitter, also) {
+    const extra = alsoRecordedNames(also).filter(name => name !== submitter);
+    if (!submitter) return extra.join(', ') || '—';
+    if (!extra.length) return submitter;
+    return submitter + ', also ' + extra.join(', ');
+  }
+
   // Derive unique facet option lists from the manifest once.
   //
   // `roster` is the union of every `manifest[].players[]` (which always
@@ -1025,7 +1054,7 @@
     )).sort((a, b) => a - b);
 
     const submitters = Array.from(new Set(
-      manifest.map(m => m.submitter).filter(Boolean)
+      manifest.flatMap(m => entrySubmitters(m))
     )).sort((a, b) => a.localeCompare(b));
 
     const roster = Array.from(new Set(
@@ -1118,8 +1147,9 @@
     // Format (multi-select: match any selected ladder bucket).
     if (state.formats && state.formats.length && !state.formats.includes(pickerMatchFormat(entry))) return false;
 
-    // Submitter (multi-select: match any selected).
-    if (state.submitters.length && !state.submitters.includes(entry.submitter)) return false;
+    // Submitter (multi-select: match any selected). A collapsed duplicate
+    // stays visible under every client who recorded it.
+    if (state.submitters.length && !entrySubmitters(entry).some(s => state.submitters.includes(s))) return false;
 
     // Players (multi-select chips, with two orthogonal toggles):
     //   - matchMode: 'any' | 'all'  -> at least one vs. every selected name
@@ -1189,7 +1219,7 @@
     const tl = entry.team_leaders || {};
     const roster = Array.isArray(entry.players) ? entry.players : [];
     return [
-      entry.name, entry.map, entry.submitter,
+      entry.name, entry.map, ...entrySubmitters(entry),
       fmtDateFull(entry.date),
       tl['1'] && tl['1'].name, tl['2'] && tl['2'].name,
       ...roster,
@@ -4708,7 +4738,8 @@
     const s = Math.floor(info.duration_sec % 60);
     document.getElementById('info-duration').textContent = `${m}m ${s}s`;
     document.getElementById('info-players').textContent = info.player_count;
-    document.getElementById('info-submitter').textContent = info.submitter || '—';
+    document.getElementById('info-submitter').textContent =
+      submitterCreditText(info.submitter, info.also_recorded_by);
     const voidBanner = document.getElementById('match-void-banner');
     if (voidBanner) voidBanner.classList.toggle('d-none', !info.void);
     const rawLink = document.getElementById('info-raw-link');
