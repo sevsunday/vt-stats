@@ -613,15 +613,69 @@ body.vt-home-body {
   --gw-thumb: 3.6rem;
 }
 
+/* Joinable known-host lobby. open = a seat is free (green). full = the
+   count has reached the cap (blue). The pulse matches the Tools button,
+   and the color comes from this card so the nav animation stays green. */
+#vt-home-live[data-vt-live="open"] { --vt-home-live: var(--kb-success); }
+#vt-home-live[data-vt-live="full"] { --vt-home-live: var(--kb-info); }
+
+#vt-home-live[data-vt-live="open"],
+#vt-home-live[data-vt-live="full"] {
+  border-color: color-mix(in oklab, var(--vt-home-live) 65%, transparent);
+  background: color-mix(in oklab, var(--vt-home-live) 10%, var(--kb-bg-card));
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--vt-home-live) 50%, transparent);
+  animation: vtHomeLivePulse 2.2s ease-in-out infinite;
+}
+
+#vt-home-live[data-vt-live="open"] .vt-home-card-head h2,
+#vt-home-live[data-vt-live="open"] .vt-home-card-head h2 i,
+#vt-home-live[data-vt-live="full"] .vt-home-card-head h2,
+#vt-home-live[data-vt-live="full"] .vt-home-card-head h2 i {
+  color: var(--vt-home-live);
+}
+
+@keyframes vtHomeLivePulse {
+  0%   { box-shadow: 0 0 0 0   color-mix(in oklab, var(--vt-home-live) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 7px color-mix(in oklab, var(--vt-home-live) 0%,  transparent); }
+  100% { box-shadow: 0 0 0 0   color-mix(in oklab, var(--vt-home-live) 0%,  transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #vt-home-live[data-vt-live="open"],
+  #vt-home-live[data-vt-live="full"] {
+    animation: none;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--vt-home-live) 45%, transparent);
+  }
+}
+
 #vt-home-live-grid .gw-card {
   font-size: 0.78rem;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-shadow: none;
+}
+
+#vt-home-live[data-vt-live] .gw-card--interest {
+  border-color: color-mix(in oklab, var(--vt-home-live) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--vt-home-live) 50%, transparent);
 }
 
 #vt-home-live .gw-card-bar,
 #vt-home-live .gw-card-foot {
   padding: 0.32rem 0.6rem;
   min-height: 0;
+  min-width: 0;
+}
+
+#vt-home-live .gw-bar-left,
+#vt-home-live .gw-bar-right {
+  min-width: 0;
+}
+
+#vt-home-live .gw-bar-left {
+  flex-wrap: wrap;
 }
 
 #vt-home-live .gw-card-info {

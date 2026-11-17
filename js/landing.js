@@ -592,6 +592,25 @@
     return !!(id && resolver.getKnownHosts().has(id));
   }
 
+  // '' stays plain. open is a joinable known-host lobby with a free seat.
+  // full is that same lobby once playerCount has reached maxPlayers.
+  // Locked and passworded lobbies stay plain even when the host is known.
+  function liveTone(session) {
+    if (!session || !session.__ofInterest) return '';
+    if (session.isLocked || session.hasPassword) return '';
+    const n = session.playerCount;
+    const max = session.maxPlayers;
+    if (Number.isFinite(n) && Number.isFinite(max) && max > 0 && n >= max) return 'full';
+    return 'open';
+  }
+
+  function setLiveTone(tone) {
+    const el = document.getElementById('vt-home-live');
+    if (!el) return;
+    if (tone === 'open' || tone === 'full') el.dataset.vtLive = tone;
+    else delete el.dataset.vtLive;
+  }
+
   function stateRank(session) {
     const st = (session && session.state ? String(session.state) : '').toUpperCase();
     if (st === 'INGAME') return 0;
@@ -628,13 +647,14 @@
 
   function showLiveCard(grid, session) {
     const key = sessionKey(session);
+    const ofInterest = liveTone(session) !== '';
     const existing = grid.querySelector('.gw-card');
     if (existing && existing.dataset.sessionId === key) {
-      VTGwCard.patch(existing, session, { ofInterest: !!session.__ofInterest });
+      VTGwCard.patch(existing, session, { ofInterest: ofInterest });
       return;
     }
     clearLiveCards();
-    const card = VTGwCard.create(session, { ofInterest: !!session.__ofInterest });
+    const card = VTGwCard.create(session, { ofInterest: ofInterest });
     card.classList.remove('gw-enter-init');
     card.dataset.sessionId = key;
     grid.appendChild(card);
@@ -749,6 +769,7 @@
       clearLiveCards();
     }
     setLiveEmpty(shown.length === 0);
+    setLiveTone(shown.length ? liveTone(shown[0]) : '');
     if (empty) empty.hidden = shown.length !== 0;
     if (more) {
       if (rest > 0) {
@@ -771,6 +792,7 @@
 
   function paintLiveError() {
     if (liveKnown) return;
+    setLiveTone('');
     setLiveEmpty(true);
     const status = document.getElementById('vt-home-live-status');
     const empty = document.getElementById('vt-home-live-empty');
