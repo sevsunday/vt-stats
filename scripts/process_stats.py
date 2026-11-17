@@ -6441,8 +6441,11 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
     BUILD becomes the upgrade mesh. Every other plant is the faction base
     pool, including a replant after the previous pool was destroyed.
     Plants and pool-stem kills are applied in tick order, kills first on
-    a shared tick, so a replant sees the death. Returns how many plants
-    were kept (team 0 and unpositioned rows are dropped).
+    a shared tick, so a replant sees the death. A present plant quat is
+    copied onto the base-pool instance, or replaces the paired upgrade's
+    BUILD quat. A missing quat leaves the key off the base and leaves the
+    BUILD quat alone. Returns how many plants were kept (team 0 and
+    unpositioned rows are dropped).
     """
     if not plants:
         return 0
@@ -6457,11 +6460,14 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
         tick = int(raw.get("tick") or 0)
         if tick < min_tick:
             tick = min_tick
-        kept.append((tick, side, float(raw["x"]), float(raw.get("y") or 0.0), float(raw["z"])))
+        kept.append((
+            tick, side, float(raw["x"]), float(raw.get("y") or 0.0), float(raw["z"]),
+            _orientation_from_feed(raw),
+        ))
     if not kept:
         return 0
     kept.sort(key=lambda row: row[0])
-    for tick, side, x, y, z in kept:
+    for tick, side, x, y, z, _orient in kept:
         _assign_pool_site(sites, x, z)
 
     object_window = int(round(UPGRADE_OBJECT_SEC * max(1, tick_rate)))
@@ -6501,7 +6507,7 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
         return best
 
     classified = []
-    for tick, side, x, y, z in kept:
+    for tick, side, x, y, z, orient in kept:
         site = _assign_pool_site(sites, x, z)
         build = _pair_build(side, x, z, tick)
         classified.append({
@@ -6510,6 +6516,7 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
             "x": x,
             "y": y,
             "z": z,
+            "orientation": orient,
             "site_id": site["id"],
             "build": build,
         })
@@ -6594,12 +6601,17 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
         site_id = plant["site_id"]
         build = plant["build"]
         holder = _holder(side, site_id, tick)
+        orient = plant.get("orientation")
         if build is not None:
             if holder is not None and holder is not build:
                 _retire(holder, tick, "upgraded")
             build["spawn_tick"] = tick
             build["_pool_linked"] = True
             build["site"] = site_id
+            # The plant quat is the placed extractor. It replaces the
+            # BUILD quat when present and leaves that quat alone otherwise.
+            if orient:
+                build["orientation"] = orient
             return
         if holder is not None:
             _retire(holder, tick, "census")
@@ -6611,6 +6623,8 @@ def _apply_pool_plants(instances, plants, match_data, ship_caps, odf_map, tick_r
             plant["x"], plant["y"], plant["z"], tick, ship_caps,
         )
         inst["id"] = f"pool-{side}-{seq[side]}"
+        if orient:
+            inst["orientation"] = orient
         instances.append(inst)
 
     def _apply_orphan(inst):
@@ -6693,15 +6707,15 @@ def _apply_turret_handle_deaths(instances, kills):
                 break
 
 
-def _wire_build_orientation(be):
-    """BuildEvent.build_orientation as {x,y,z,w} at 5 dp, or None.
+def _wire_quat(msg, field):
+    """A proto quat field as {x,y,z,w} at 5 dp, or None.
 
-    Absent on QUEUE/CANCEL and on sessions recorded before field 8.
-    A zero-length quat is treated as absent.
+    A missing field and a zero-length quat are both absent. Shared by
+    BuildEvent.build_orientation and PoolPlanted.orientation.
     """
-    if not be.HasField("build_orientation"):
+    if not msg.HasField(field):
         return None
-    q = be.build_orientation
+    q = getattr(msg, field)
     x, y, z, w = float(q.x), float(q.y), float(q.z), float(q.w)
     if x * x + y * y + z * z + w * w < 1e-12:
         return None
@@ -6711,6 +6725,15 @@ def _wire_build_orientation(be):
         "z": round(z, 5),
         "w": round(w, 5),
     }
+
+
+def _wire_build_orientation(be):
+    """BuildEvent.build_orientation as {x,y,z,w} at 5 dp, or None.
+
+    Absent on QUEUE/CANCEL and on sessions recorded before field 8.
+    A zero-length quat is treated as absent.
+    """
+    return _wire_quat(be, "build_orientation")
 
 
 def _orientation_from_feed(row):
@@ -6741,7 +6764,10 @@ def compute_structures(match_data, turret_odfs=None, ship_caps=None, pool_plants
     Starting recyclers (one per team) plus one instance per constructor
     BUILD that carries xyz. Factory/armory/recycler *lane* pads are
     units, not buildings. Constructor instances copy the BUILD row's
-    orientation quaternion; recyclers and pool plants do not. Deaths
+    orientation quaternion. A base pool copies PoolPlanted.orientation
+    when that quat is present and omits the key otherwise. A plant quat
+    on a paired upgrade replaces the BUILD quat. Opening recyclers omit
+    it. Deaths
     come from UnitDestroyed / kill feed
     only -- never HP inference. Turret-class instances with no
     build_handle stay death_reason='untracked'. A non-zero handle is
@@ -9377,13 +9403,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             _side = _slot_side(int(pp.teamnum))
             if _side in (1, 2) and pp.HasField("position"):
                 _pos = pp.position
-                pool_plants.append({
+                _plant = {
                     "tick": int(pp.tick),
                     "team": _side,
                     "x": float(_pos.x),
                     "y": float(_pos.y),
                     "z": float(_pos.z),
-                })
+                }
+                # Same quat as BuildEvent.build_orientation. Absent on
+                # recordings from before field 4, and a zero-length quat
+                # is dropped so the instance omits the key.
+                _orient = _wire_quat(pp, "orientation")
+                if _orient:
+                    _plant["orientation"] = _orient
+                pool_plants.append(_plant)
             i += 1
 
         else:
@@ -10952,7 +10985,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # v37 (this version): builds.feed[].orientation and
             # constructor structures.instances[].orientation from
             # BuildEvent.build_orientation. {x,y,z,w} or null.
-            # Display-only. Not in contributions.
+            # A PoolPlanted.orientation quat, same shape, is copied onto
+            # the base-pool instance or replaces the paired upgrade's
+            # BUILD quat. The key is omitted when the plant quat is
+            # absent. Display-only. Not in contributions.
             "schema_version": 37,
             "event_calibration": {
                 "r_by_weapon": event_calibration["r_by_weapon"],

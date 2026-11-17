@@ -117,6 +117,7 @@
     'eventStream.*.buildEvent.buildPosition': 'Vec3',
     'eventStream.*.poolPlanted': 'PoolPlanted',
     'eventStream.*.poolPlanted.position': 'Vec3',
+    'eventStream.*.poolPlanted.orientation': 'Quat',
     'eventStream.*.magnetForce': 'MagnetForce',
     'eventStream.*.updateTick.team1Resources': 'ResourceState',
     'eventStream.*.updateTick.team2Resources': 'ResourceState',

@@ -1074,7 +1074,7 @@ Each instance:
 | `kind` | `string` | `"recycler"` on the opening recycler. `"extractor"` on a base pool. `"extractor_upgrade"` on a constructor `*bscup` BUILD (a plant never mints an upgrade row). Other buildings omit it |
 | `site` | `string` | Pool pad id (`site-N`). Plants and `*bscup` builds within `POOL_SITE_M` (8 m) share one. Omitted on recyclers and other buildings |
 | `x`/`y`/`z` | `number` | World meters, 2 dp |
-| `orientation` | `object\|null` | **v37, constructor instances only.** `{x,y,z,w}` copied from the BUILD row's `orientation` (wire `BuildEvent.build_orientation`, 5 dp). `null` when that recording has no quat. Opening recyclers and pool plants omit the key. The 3D replay applies it once; a missing quat keeps the east-facing default |
+| `orientation` | `object\|null` | **v37.** `{x,y,z,w}` at 5 dp. Constructor instances copy the BUILD row's `orientation` (wire `BuildEvent.build_orientation`); `null` when that recording has no quat. A base pool copies `PoolPlanted.orientation` when that quat is present and omits the key otherwise. A plant quat on a paired upgrade replaces the BUILD quat. Opening recyclers omit the key. The 3D replay applies it once; a missing quat keeps the east-facing default |
 | `spawn_tick` | `number` | 0 for starting recyclers; BUILD tick, or the plant tick for a pool. A joined upgrade's spawn is moved to the plant tick so the swap is one frame |
 | `max_hp` | `number\|null` | `GameObjectClass.maxHealth` via `ship_caps` |
 | `death_tick` | `number\|null` | Kill-feed tick, the upgrade plant tick, the census tick, or `null` if still standing / untracked |
