@@ -78,7 +78,8 @@ SITE_URL = "https://vtstats.bz"
 # v22 adds Game Watch to the Tools dropdown.
 # v23 replaces the Dashboard link with a Matches dropdown
 # (Browse matches, Most recent).
-MAP_TEMPLATE_VERSION = 23
+# v24 adds YouTube to the Tools dropdown, after Discord Time.
+MAP_TEMPLATE_VERSION = 24
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently

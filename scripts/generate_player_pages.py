@@ -84,7 +84,8 @@ SITE_URL = "https://vtstats.bz"
 # v32 adds Game Watch to the Tools dropdown.
 # v33 replaces the Dashboard link with a Matches dropdown
 # (Browse matches, Most recent).
-PLAYER_TEMPLATE_VERSION = 33
+# v34 adds YouTube to the Tools dropdown, after Discord Time.
+PLAYER_TEMPLATE_VERSION = 34
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

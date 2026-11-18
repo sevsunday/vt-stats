@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube — VT Stats</title>
+  <meta name="description" content="Community Battlezone VODs from the VT Stats inbox. A match link appears after the HUD check confirms the game.">
+
+  <link rel="canonical" href="https://vtstats.bz/youtube/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="YouTube — VT Stats">
+  <meta property="og:description" content="Community Battlezone VODs from the VT Stats inbox.">
+  <meta property="og:url" content="https://vtstats.bz/youtube/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/youtube.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Matches">
+              <i class="bi bi-grid-3x3-gap me-1"></i>Matches <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../matches/">
+                <i class="bi bi-grid-3x3-gap me-2"></i>Browse matches
+              </a></li>
+              <li><a class="dropdown-item" href="../matches/?match=latest">
+                <i class="bi bi-clock-history me-2"></i>Most recent
+              </a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../weapons/"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../explorer/"><i class="bi bi-joystick me-2"></i>Game Explorer</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Players and ratings">
+              <i class="bi bi-people me-1"></i>Players <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../meta/"><i class="bi bi-pie-chart me-2"></i>Meta</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--tools" type="button"
+                    data-bs-toggle="dropdown" data-bs-auto-close="true"
+                    data-vt-tools-link data-vt-tools-live="0" aria-current="page"
+                    title="Lobby tools and Discord timestamps"
+                    aria-label="Tools">
+              <i class="bi bi-controller me-1"></i>Tools <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../tools/">
+                <i class="bi bi-controller me-2"></i>Live Lobby
+              </a></li>
+              <li><a class="dropdown-item" href="../gw/">
+                <i class="bi bi-broadcast-pin me-2"></i>Game Watch
+              </a></li>
+              <li><a class="dropdown-item" href="../time/">
+                <i class="bi bi-clock me-2"></i>Discord Time
+              </a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page">
+                <i class="bi bi-youtube me-2"></i>YouTube
+              </a></li>
+              <li><a class="dropdown-item" href="../discord/">
+                <i class="bi bi-discord me-2"></i>Discord Invite
+              </a></li>
+              <li><a class="dropdown-item" href="../record/">
+                <i class="bi bi-record-circle me-2"></i>Record Stats
+              </a></li>
+              <li><a class="dropdown-item" href="../beta/">
+                <i class="bi bi-steam me-2"></i>Beta Versions
+              </a></li>
+              <li><a class="dropdown-item" href="../ports/">
+                <i class="bi bi-router me-2"></i>Port Forwarding
+              </a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid px-3 px-md-4 py-4 flex-grow-1">
+    <header class="mb-3">
+      <h1 class="h3 mb-1"><i class="bi bi-youtube me-2" aria-hidden="true"></i>YouTube</h1>
+      <p class="text-muted mb-0" id="yt-count">Community recordings from the inbox.</p>
+    </header>
+
+    <form class="row g-2 align-items-end mb-3" id="yt-filters">
+      <div class="col-12 col-md-4">
+        <label class="form-label small mb-1" for="yt-q">Search</label>
+        <input class="form-control" id="yt-q" type="search" placeholder="Title, commander, map" autocomplete="off">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="yt-channel">Channel</label>
+        <select class="form-select" id="yt-channel"></select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="yt-commander">Commander</label>
+        <select class="form-select" id="yt-commander"></select>
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label small mb-1" for="yt-faction">Faction</label>
+        <select class="form-select" id="yt-faction"></select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="yt-map">Map</label>
+        <select class="form-select" id="yt-map"></select>
+      </div>
+      <div class="col-12 col-md-1">
+        <label class="form-label small mb-1" for="yt-linked">Match</label>
+        <select class="form-select" id="yt-linked">
+          <option value="">Any</option>
+          <option value="yes">Linked</option>
+          <option value="no">Not linked</option>
+        </select>
+      </div>
+    </form>
+
+    <div id="yt-empty" class="text-muted d-none">No videos in this view.</div>
+    <div class="row g-3" id="yt-grid"></div>
+  </main>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+  <script src="../js/youtube.js"></script>
+</body>
+</html>

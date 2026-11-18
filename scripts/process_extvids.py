@@ -51,10 +51,14 @@ MAPPER_PATH = PROJECT_ROOT / "scripts" / "map_match_video.py"
 
 TAIL_STEP_SEC = 15.0
 TAIL_MAX_SEC = 480.0
-DURATION_TOL_SEC = 20.0
+DURATION_TOL_SEC = 30.0
 LEDGER_DURATION_TOL_SEC = 30.0
 LEDGER_LINKS_SCHEMA = 1
 CHANNELS_SCHEMA = 1
+# Earliest saved VOD. Matches and ledger rows before this day are ignored.
+VOD_MATCH_FLOOR = date(2026, 5, 11)
+# A title with no map must not OCR a wide commander+date slice.
+MAPLESS_SHORTLIST_CAP = 8
 
 VS_RE = re.compile(r"^(.*?)\s+vs\.?\s+(.*)$", re.IGNORECASE)
 DATE_RE = re.compile(
@@ -230,6 +234,39 @@ def shortlist(manifest: dict, parsed: dict, pov: str,
     return hits
 
 
+def shortlist_mapless(manifest: dict, parsed: dict, pov: str,
+                      name_aliases: dict) -> list[dict]:
+    """Commanders, recording date, and POV. Used only when the map is empty."""
+    record_date = parsed.get("record_date")
+    if record_date is None:
+        return []
+    hits = []
+    for entry in manifest.values():
+        if not commanders_match(entry, parsed["commanders"], name_aliases):
+            continue
+        if not date_matches(entry, record_date):
+            continue
+        if not pov_present(entry, pov):
+            continue
+        hits.append(entry)
+    return hits
+
+
+def on_or_after_floor(raw_date: str) -> bool:
+    try:
+        played = date.fromisoformat((raw_date or "")[:10])
+    except ValueError:
+        return False
+    return played >= VOD_MATCH_FLOOR
+
+
+def floored_manifest(manifest: dict) -> dict:
+    return {
+        key: entry for key, entry in manifest.items()
+        if on_or_after_floor(entry.get("date") or "")
+    }
+
+
 def stored_video_ids(store: dict) -> set[str]:
     out = set()
     for entries in (store.get("matches") or {}).values():
@@ -375,6 +412,27 @@ def shortlist_ledger(duels: list[dict], parsed: dict, pov: str,
             continue
         hits.append(duel)
     return hits
+
+
+def shortlist_ledger_mapless(duels: list[dict], parsed: dict, pov: str,
+                             name_aliases: dict) -> list[dict]:
+    record_date = parsed.get("record_date")
+    if record_date is None:
+        return []
+    hits = []
+    for duel in duels:
+        if not ledger_commanders_match(duel, parsed["commanders"], name_aliases):
+            continue
+        if not ledger_date_matches(duel, record_date):
+            continue
+        if not ledger_has_pov(duel, pov):
+            continue
+        hits.append(duel)
+    return hits
+
+
+def floored_ledger(duels: list[dict]) -> list[dict]:
+    return [duel for duel in duels if on_or_after_floor(str(duel.get("date") or ""))]
 
 
 def confirm_ledger(duels: list[dict], hud: dict, gpu: bool,
@@ -699,60 +757,68 @@ def _finish_ledger(row, video, channel, hud, ledger_hits, ledger_store,
     return row
 
 
-def consider_video(video: dict, channel: dict, manifest: dict,
+def confirm_parsed(parsed: dict, video: dict, channel: dict, manifest: dict,
                    name_aliases: dict, map_aliases: dict,
                    known_ids: set[str], gpu: bool, dry_run: bool,
                    ledger_duels: list[dict] | None = None,
                    ledger_store: dict | None = None,
-                   steam_names: dict | None = None) -> dict:
+                   steam_names: dict | None = None,
+                   row: dict | None = None) -> dict:
+    """Shortlist, last-HUD test, and store write. Shared by the channel
+    scanner and the inbox script. Does not fetch metadata or parse a title."""
     vid = video["id"]
-    title = video.get("title") or ""
-    parser = PARSERS.get(channel.get("parser") or "")
-    row = {
-        "channel": channel.get("key"),
-        "video_id": vid,
-        "title": title,
-        "url": video.get("url"),
-        "status": "",
-    }
-    if vid in known_ids:
-        row["status"] = "skip-known"
-        return row
-    if parser is None:
-        row["status"] = "no-parser"
-        row["detail"] = channel.get("parser")
-        return row
-    # Title gate before any description fetch. An empty description must
-    # return None when the title is not a match video for this channel.
-    if parser(title, "") is None:
-        row["status"] = "skip-title"
-        return row
-    try:
-        meta = cached_meta(vid, video["url"])
-    except Exception as exc:
-        row["status"] = "meta-failed"
-        row["detail"] = str(exc)
-        return row
-    title = meta.get("title") or title
-    row["title"] = title
-    parsed = parser(title, meta.get("description") or "")
-    if not parsed:
-        row["status"] = "skip-title"
-        return row
-    row["commanders"] = parsed["commanders"]
-    row["map_title"] = parsed["map_title"]
+    title = (row or {}).get("title") or video.get("title") or ""
+    if row is None:
+        row = {
+            "channel": channel.get("key"),
+            "video_id": vid,
+            "title": title,
+            "url": video.get("url"),
+            "status": "",
+        }
+    commanders = [c for c in (parsed.get("commanders") or []) if c]
+    map_title = (parsed.get("map_title") or "").strip()
     record_date = parsed.get("record_date")
+    row["commanders"] = list(parsed.get("commanders") or [])
+    row["map_title"] = map_title
     row["record_date"] = record_date.isoformat() if record_date else None
+    if len(commanders) != 2:
+        row["status"] = "incomplete"
+        return row
     if record_date is None:
         row["status"] = "no-date"
         return row
     pov = channel.get("pov") or ""
-    hits = shortlist(manifest, parsed, pov, name_aliases, map_aliases)
+    usable = {
+        "commanders": commanders,
+        "map_title": map_title,
+        "record_date": record_date,
+    }
+    manifest = floored_manifest(manifest)
+    ledger_duels = floored_ledger(list(ledger_duels or []))
+    if map_title:
+        hits = shortlist(manifest, usable, pov, name_aliases, map_aliases)
+    else:
+        hits = shortlist_mapless(manifest, usable, pov, name_aliases)
+        if len(hits) > MAPLESS_SHORTLIST_CAP:
+            row["status"] = "too-wide"
+            row["candidates"] = [h["id"] for h in hits]
+            row["detail"] = f"{len(hits)} map-less candidates"
+            return row
     row["candidates"] = [h["id"] for h in hits]
     ledger_hits: list[dict] = []
     if not hits and ledger_duels:
-        ledger_hits = shortlist_ledger(
-            ledger_duels, parsed, pov, name_aliases, map_aliases)
+        if map_title:
+            ledger_hits = shortlist_ledger(
+                ledger_duels, usable, pov, name_aliases, map_aliases)
+        else:
+            ledger_hits = shortlist_ledger_mapless(
+                ledger_duels, usable, pov, name_aliases)
+            if len(ledger_hits) > MAPLESS_SHORTLIST_CAP:
+                row["status"] = "too-wide"
+                row["ledger_candidates"] = [d.get("row") for d in ledger_hits]
+                row["detail"] = f"{len(ledger_hits)} map-less ledger candidates"
+                return row
         row["ledger_candidates"] = [d.get("row") for d in ledger_hits]
     if not hits and not ledger_hits:
         row["status"] = "no-candidates"
@@ -811,6 +877,54 @@ def consider_video(video: dict, channel: dict, manifest: dict,
     return row
 
 
+def consider_video(video: dict, channel: dict, manifest: dict,
+                   name_aliases: dict, map_aliases: dict,
+                   known_ids: set[str], gpu: bool, dry_run: bool,
+                   ledger_duels: list[dict] | None = None,
+                   ledger_store: dict | None = None,
+                   steam_names: dict | None = None) -> dict:
+    vid = video["id"]
+    title = video.get("title") or ""
+    parser = PARSERS.get(channel.get("parser") or "")
+    row = {
+        "channel": channel.get("key"),
+        "video_id": vid,
+        "title": title,
+        "url": video.get("url"),
+        "status": "",
+    }
+    if vid in known_ids:
+        row["status"] = "skip-known"
+        return row
+    if parser is None:
+        row["status"] = "no-parser"
+        row["detail"] = channel.get("parser")
+        return row
+    # Title gate before any description fetch. An empty description must
+    # return None when the title is not a match video for this channel.
+    if parser(title, "") is None:
+        row["status"] = "skip-title"
+        return row
+    try:
+        meta = cached_meta(vid, video["url"])
+    except Exception as exc:
+        row["status"] = "meta-failed"
+        row["detail"] = str(exc)
+        return row
+    title = meta.get("title") or title
+    row["title"] = title
+    video = dict(video)
+    video["title"] = title
+    parsed = parser(title, meta.get("description") or "")
+    if not parsed:
+        row["status"] = "skip-title"
+        return row
+    return confirm_parsed(
+        parsed, video, channel, manifest, name_aliases, map_aliases,
+        known_ids, gpu, dry_run, ledger_duels, ledger_store, steam_names, row,
+    )
+
+
 def run(args) -> int:
     if not MANIFEST_PATH.exists():
         mmv.fail(f"missing manifest {MANIFEST_PATH}")
@@ -829,6 +943,9 @@ def run(args) -> int:
     ocr_budget = args.limit
     for channel in channels:
         key = channel.get("key") or "?"
+        if channel.get("scan") is False:
+            log(f"{key}: pov only, not scanned")
+            continue
         parser_name = channel.get("parser")
         if parser_name not in PARSERS:
             log(f"{key}: parser {parser_name!r} is not implemented")
@@ -1020,6 +1137,39 @@ def _self_test() -> int:
     assert [d["row"] for d in found] == [400], found
     assert ledger_roster(duel)[0] == "Sev"
     assert "Herp McDerperson" in ledger_roster(duel)
+    mapless = shortlist_mapless(
+        manifest,
+        {"commanders": ["Sev", "Darkvale"], "record_date": date(2026, 9, 12)},
+        "F9bomber", aliases,
+    )
+    assert [h["id"] for h in mapless] == ["2026-09-13T02-32-33"], mapless
+    wide = dict(manifest)
+    for i in range(MAPLESS_SHORTLIST_CAP):
+        wide[f"w{i}"] = dict(entry, id=f"w{i}")
+    wide_row = confirm_parsed(
+        {"commanders": ["Sev", "Darkvale"], "map_title": "",
+         "record_date": date(2026, 9, 12)},
+        {"id": "wide", "url": "https://example.invalid", "title": "t"},
+        {"key": "F9bomber", "pov": "F9bomber"},
+        wide, aliases, {}, set(), False, True,
+    )
+    assert wide_row["status"] == "too-wide", wide_row
+    old = confirm_parsed(
+        {"commanders": ["Blue Banana", "F9bomber"], "map_title": "Quarry",
+         "record_date": date(2026, 5, 3)},
+        {"id": "old", "url": "u", "title": "t"},
+        {"key": "F9bomber", "pov": "F9bomber"},
+        manifest, aliases, {"quarry": "vsrquarry2"}, set(), False, True,
+    )
+    assert old["status"] == "no-candidates", old
+    incomplete = confirm_parsed(
+        {"commanders": ["Sev"], "map_title": "Egypt",
+         "record_date": date(2026, 9, 12)},
+        {"id": "x", "url": "u", "title": "t"},
+        {"key": "F9bomber", "pov": "F9bomber"},
+        manifest, aliases, {}, set(), False, True,
+    )
+    assert incomplete["status"] == "incomplete", incomplete
     muerte = {"name": "Muerte", "steam64": "76561198005099553"}
     aliases = person_aliases(muerte, {"76561198005099553": "mort"})
     assert aliases == ["Muerte", "mort"], aliases

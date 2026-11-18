@@ -3884,6 +3884,24 @@ python scripts/map_match_video.py --self-test
 
 `js/video-links.js` → `window.VTVideoLinks` (`ensureLoaded` / `videosFor` / `linkForMatchSec` / `linkForTick`). 404-safe sentinel `window.__vtMatchVideos`. Surfaces: match-banner Watch VOD (dropdown when multiple videos), kill-feed + snipe-feed row icons, storyline key-moments rail, Build Order Log hover icons, 3D replay HUD Watch button, picker **Has VOD** facet (`hasVod` on `pickerState`, URL `?vod=`, no storage-key bump), player-page match-log VOD column. CSS: `.vt-video-link` / `.vt-video-chip` in `css/vtstats-theme.css`.
 
+### `data/external/youtube.json`
+
+Gallery catalog written by `scripts/process_youtube.py` from `data/external/youtube_inbox.txt`. `schema_version: 1`. Display-only. Not telemetry, not in per-match JSON, not in contributions, not a rating input. The page at `/youtube/` reads this file and does not call YouTube except for hotlinked thumbnails. A match link is `videos[].match.id`, present only when that `video_id` is already in `match_videos.json`.
+
+| Field | Description |
+|---|---|
+| `videos[]` | Newest upload date first, then recording date. |
+| `video_id` / `url` | YouTube id and watch URL. |
+| `channel.{name,url,handle}` | Name and URL from yt-dlp. `handle` is the inbox channel (`@F9bomber`). |
+| `title` / `description` | yt-dlp. Description is capped for search. |
+| `upload_date` | `YYYY-MM-DD` from yt-dlp. Never used as the day the game was played. |
+| `duration_sec` | yt-dlp duration, or null. |
+| `recording_date` | Play date from that channel's extractor, else the inbox hint. |
+| `commanders[]` | `{name, steam64, slug, faction, winner?}`. Faction is ISDF, Hadean, or Scion. A linked match replaces the hint with `team_factions`. `winner` is true only for the commander on `match.winner.team` when that team is 1 or 2. |
+| `map.{raw,title,slug}` | `slug` is a map-registry key when the title resolves. |
+| `match.id` | Present only after the HUD check wrote this video into `match_videos.json`. |
+| `inbox_hint` | The CSV fields that last built the row, so a rerun can see a changed hint. |
+
 ## 17. Weapons Lab shooting range (display-only)
 
 Not telemetry. Not in the pipeline cache key. Built by standalone scripts, consumed only by the Weapons Lab Shooting range tab (`?tab=range`).
