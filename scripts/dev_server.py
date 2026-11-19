@@ -24,13 +24,16 @@ The relay works cross-port too: if you serve the site with another tool
 `js/bz2api.js` also tries http://localhost:8000/__proxy as a candidate, and
 the ACAO:* header makes that cross-origin localhost fetch legal.
 
-Stdlib only. GET/OPTIONS only. Upstream hosts are allowlisted below.
+Stdlib only. GET and OPTIONS serve the site and the relay. POST
+/__topdown/<stem> writes one overhead PNG into data/render/topdown/.
+Upstream hosts are allowlisted below.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -42,6 +45,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 PROXY_PATH = "/__proxy"
+TOPDOWN_PREFIX = "/__topdown/"
+TOPDOWN_DIR = REPO_ROOT / "data" / "render" / "topdown"
+TOPDOWN_STEM_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+TOPDOWN_MAX_BYTES = 4 * 1024 * 1024
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 # Only these upstream hosts may be relayed (https only).
 ALLOWED_PROXY_HOSTS = {
@@ -70,7 +78,7 @@ class DevHandler(SimpleHTTPRequestHandler):
 
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _proxy_error(self, code: int, message: str):
@@ -127,6 +135,79 @@ class DevHandler(SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
+    def do_POST(self):  # noqa: N802 (stdlib signature)
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith(TOPDOWN_PREFIX):
+            self._handle_topdown(parsed)
+            return
+        self.close_connection = True
+        self.send_error(404, "POST is only accepted at /__topdown/<stem>")
+
+    def _handle_topdown(self, parsed: urllib.parse.ParseResult):
+        stem = urllib.parse.unquote(parsed.path[len(TOPDOWN_PREFIX):])
+        if (
+            not stem
+            or "/" in stem
+            or "\\" in stem
+            or not TOPDOWN_STEM_RE.fullmatch(stem)
+        ):
+            self._discard_body()
+            self._proxy_error(400, "bad map stem")
+            return
+
+        body = self._read_limited_body()
+        if body is None:
+            return
+        if not body.startswith(PNG_MAGIC):
+            self._proxy_error(400, "body is not a PNG")
+            return
+
+        dest = (TOPDOWN_DIR / f"{stem}.png").resolve()
+        root = TOPDOWN_DIR.resolve()
+        if dest.parent != root:
+            self._proxy_error(400, "path escapes the topdown folder")
+            return
+
+        TOPDOWN_DIR.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        self.send_response(204)
+        self._send_cors_headers()
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _read_limited_body(self) -> bytes | None:
+        raw = self.headers.get("Content-Length", "")
+        try:
+            length = int(raw)
+        except ValueError:
+            self.close_connection = True
+            self._proxy_error(400, "bad content-length")
+            return None
+        if length < len(PNG_MAGIC) or length > TOPDOWN_MAX_BYTES:
+            self.close_connection = True
+            self._proxy_error(413, "png must be under 4 MB")
+            return None
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self.close_connection = True
+            self._proxy_error(400, "short body")
+            return None
+        return body
+
+    def _discard_body(self):
+        raw = self.headers.get("Content-Length", "")
+        try:
+            length = int(raw)
+        except ValueError:
+            self.close_connection = True
+            return
+        if length < 0 or length > TOPDOWN_MAX_BYTES:
+            self.close_connection = True
+            return
+        got = self.rfile.read(length)
+        if len(got) != length:
+            self.close_connection = True
+
     def do_OPTIONS(self):  # noqa: N802 (stdlib signature)
         self.send_response(204)
         self._send_cors_headers()
@@ -147,6 +228,7 @@ def main() -> int:
     print(f"  site        : http://localhost:{args.port}/")
     print(f"  game watch  : http://localhost:{args.port}/gw/")
     print(f"  CORS relay  : http://localhost:{args.port}{PROXY_PATH}?url=<encoded>")
+    print(f"  topdown save: POST http://localhost:{args.port}{TOPDOWN_PREFIX}<stem>")
     print(f"  allowlist   : {', '.join(sorted(ALLOWED_PROXY_HOSTS))}")
     print("Ctrl+C to stop.")
     try:

@@ -611,7 +611,9 @@
   }
 
   function topdownSrc(row) {
-    return `${state.dataPrefix}data/render/topdown/${encodeURIComponent(row.key)}.png`;
+    // Bump when the overhead photos are recaptured so a cached URL does not
+    // keep the previous generation. Catalog screenshots are a different file.
+    return `${state.dataPrefix}data/render/topdown/${encodeURIComponent(row.key)}.png?v=topdown2`;
   }
 
   function iondriverSrc(row) {

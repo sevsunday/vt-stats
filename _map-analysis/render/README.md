@@ -726,7 +726,7 @@ the clip. Players can only shorten these ranges in-game
 | 3D replay, free / cinema / top-down cameras | engine | none, far plane 8000 m |
 | 3D replay, In-Game Lighting off | studio stack | per camera as above |
 | Map viewer, orbit and embed | engine | none |
-| Map viewer, top-down capture (`?topdown=1`, batch) | studio stack | none (the committed `data/render/topdown/*.png` stay byte-stable) |
+| Map viewer, top-down capture (`?topdown=1`, batch) | studio stack | none (recapture `data/render/topdown/*.png` when terrain, tiles, liquids, or props change; a lighting-only change does not) |
 
 The replay's quality panel (`js/replay-quality.js`) carries both switches:
 **In-Game Lighting** (default on; off restores the pre-atmosphere ambient 0.9

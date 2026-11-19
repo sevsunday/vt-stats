@@ -275,8 +275,8 @@ export function updateSun(lights, atmo, elapsedSec, opts) {
 /**
  * The pre-atmosphere "studio" stack (ambient 0.9 + hemisphere 0.85 +
  * directional 2.0 at the TRN elevation). Kept for the top-down map
- * thumbnails, which must stay byte-stable, and the replay's In-Game
- * Lighting switch when it is off.
+ * thumbnails, so a lighting-only change does not require a recapture,
+ * and for the replay's In-Game Lighting switch when it is off.
  */
 export function applyStudioLights(scene, mapData, opts) {
   const mirrorZ = !!(opts && opts.mirrorZ);

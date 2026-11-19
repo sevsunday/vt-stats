@@ -14,8 +14,9 @@
  * the sun. Every lit material has to be `prepare`d, because an unprepared
  * one would add all four lights (`?shadowdebug=1` warns).
  *
- * The top-down thumbnail capture must not construct this module, so those
- * PNGs stay byte-stable. Terrain casts because hills shade valleys in the
+ * The top-down thumbnail capture must not construct this module. Recapture
+ * those PNGs when terrain, tiles, liquids, or props change; a lighting-only
+ * change does not. Terrain casts because hills shade valleys in the
  * game; the depth pass itself is not readable from the pixel shaders.
  */
 

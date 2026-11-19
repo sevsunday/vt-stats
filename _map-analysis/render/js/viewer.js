@@ -15,8 +15,9 @@
  *   - Objects group: built by objects.js, one InstancedMesh per kind.
  *   - Lights: the engine's flat ambient + sun from the map's .sky sidecar
  *     (atmosphere.js) for the interactive and embed views. The top-down
- *     thumbnail capture keeps the older studio stack so the committed
- *     PNGs stay byte-stable. No distance fog: these are orbit cameras.
+ *     thumbnail capture keeps the studio stack, so a lighting-only change
+ *     does not require another recapture. Recapture when terrain, tiles,
+ *     liquids, or props change. No distance fog: these are orbit cameras.
  *
  * Camera target = world_rect center. OrbitControls handles input.
  */
@@ -442,7 +443,7 @@ function initRenderer() {
   window.addEventListener('resize', onWindowResize);
 }
 
-/** Engine lighting everywhere except the byte-stable top-down capture. */
+/** Engine lighting everywhere except the studio-lit top-down capture. */
 function engineLit() {
   return !STATE.topdown;
 }
@@ -490,8 +491,9 @@ function initLights(data) {
     STATE.sunDir = sunDirectionAt(STATE.atmo, 0, mirrorZ);
   } else {
     // Top-down capture: the pre-atmosphere studio stack (ambient 0.9 +
-    // hemisphere 0.85 + directional 2.0 at the TRN elevation) so the
-    // committed thumbnails stay byte-stable.
+    // hemisphere 0.85 + directional 2.0 at the TRN elevation). A lighting-only
+    // change does not require a recapture; recapture when terrain, tiles,
+    // liquids, or props change.
     STATE.lights = applyStudioLights(STATE.scene, data, { mirrorZ });
     STATE.sunDir = null;
   }
