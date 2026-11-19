@@ -26,7 +26,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createCameraController } from './replay-cameras.js';
 import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=terrain1';
 import { buildObjectsGroup, unmeshedPools } from './objects.js?v=pools4';
-import { buildTileFloorMaterial } from './tile-floor.js?v=tiles2';
+import { buildTileFloorMaterial } from './tile-floor.js?v=tiles3';
 import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-atmo3';
 import {
@@ -37,7 +37,7 @@ import {
   updateSun,
   sunDirectionAt,
 } from './atmosphere.js?v=atmo1';
-import { buildPropsGroup } from './props.js?v=props4';
+import { buildPropsGroup } from './props.js?v=props6';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface } from './terrain-owners.js?v=3';
 

@@ -13,7 +13,10 @@ The script:
    conflicts logged).
 3. For each unique tile referenced by our maps, materializes the best
    available format into `_map-analysis/render/data/tiles/`:
-       - `.dds` available -> copy as-is (GPU-native compressed)
+       - `.dds` available -> copy as-is (GPU-native compressed), unless a
+         mip side is not a multiple of 4 (and not 1 or 2). WebGL rejects
+         that chain. Those files are decoded to PNG so the GPU can build
+         a legal mip pyramid. treebark01 is the one such tile.
        - only `.tga` available -> Pillow converts to `.png` (lossless)
        - neither -> mark missing (viewer disables tier 3 for affected maps)
 4. Emits `_map-analysis/render/data/tiles/_manifest.json` summarizing what
@@ -27,9 +30,15 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import struct
 import sys
 import time
 from pathlib import Path
+
+_OBJECT_RENDER = Path(__file__).resolve().parent / "object-render"
+if str(_OBJECT_RENDER) not in sys.path:
+    sys.path.insert(0, str(_OBJECT_RENDER))
+from dds_decode import decode_dds  # noqa: E402
 
 from _wat_sky import parse_trn_tile_textures
 from _paths import VSRMAPLIST_DIR, TILES_DIR, PROJECT_ROOT
@@ -167,6 +176,63 @@ def _convert_to_png(src: Path, dst: Path) -> None:
         im.save(dst, format="PNG", optimize=True)
 
 
+def _s3tc_side_legal(n: int) -> bool:
+    """WebGL S3TC: a side must be a multiple of 4, or the 1- or 2-pixel tail."""
+    return n in (1, 2) or (n > 0 and n % 4 == 0)
+
+
+def _dds_s3tc_chain_illegal(path: Path) -> bool:
+    """True when a compressed DDS mip chain has a level WebGL will reject.
+
+    Uncompressed files and headers we cannot read return False so the
+    ordinary DDS copy path still runs.
+    """
+    try:
+        with path.open("rb") as f:
+            head = f.read(128)
+    except OSError:
+        return False
+    if len(head) < 128 or head[:4] != b"DDS ":
+        return False
+    height, width = struct.unpack_from("<II", head, 12)
+    mipcount = struct.unpack_from("<I", head, 28)[0]
+    fourcc = head[84:88]
+    if fourcc not in (b"DXT1", b"DXT3", b"DXT5", b"DX10", b"ATI2", b"BC5U", b"BC5S"):
+        return False
+    w, h = width, height
+    for _ in range(max(1, mipcount)):
+        if not (_s3tc_side_legal(w) and _s3tc_side_legal(h)):
+            return True
+        w, h = max(1, w >> 1), max(1, h >> 1)
+    return False
+
+
+def _materialize_dds_as_png(name: str, dds_src: Path, tiles_dir: Path) -> dict:
+    """Decode a DDS whose mip chain is illegal for WebGL and write a PNG.
+
+    The GPU then builds a full mip pyramid. A stale `.dds` copy of the same
+    stem is removed so the manifest and the directory agree.
+    """
+    out = tiles_dir / f"{name}.png"
+    stale = tiles_dir / f"{name}.dds"
+    try:
+        img = decode_dds(dds_src)
+        img.save(out, format="PNG", optimize=True)
+    except Exception as e:
+        return {"name": name, "format": "dds_png_convert_failed",
+                "error": str(e), "source_path": str(dds_src)}
+    if stale.is_file():
+        stale.unlink()
+    return {
+        "name": name,
+        "format": "png",
+        "filename": out.name,
+        "bytes": out.stat().st_size,
+        "source_path": str(dds_src),
+        "source_format": "dds",
+    }
+
+
 def materialize_tile(name: str,
                      src: dict[str, Path | None],
                      tiles_dir: Path) -> dict:
@@ -174,10 +240,13 @@ def materialize_tile(name: str,
     entry dict for the tile.
 
     Preference: .dds (copy as-is, GPU-native compressed) > .tga/.bmp/.png
-    (convert to .png via Pillow, lossless).
+    (convert to .png via Pillow, lossless). A DDS whose mip chain is not
+    WebGL-legal is decoded to PNG instead of copied.
     """
     dds_src = src.get(".dds")
     if dds_src is not None:
+        if _dds_s3tc_chain_illegal(dds_src):
+            return _materialize_dds_as_png(name, dds_src, tiles_dir)
         out = tiles_dir / f"{name}.dds"
         if not out.exists() or out.stat().st_size != dds_src.stat().st_size:
             try:

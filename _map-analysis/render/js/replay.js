@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildTileFloorMaterial } from './tile-floor.js?v=tiles2';
+import { buildTileFloorMaterial } from './tile-floor.js?v=tiles3';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-atmo3';
 import {
   resolveAtmosphere,
@@ -27,7 +27,7 @@ import {
   sunDirectionAt,
 } from './atmosphere.js?v=atmo1';
 import { createSunShadows, sceneMapBounds } from './shadows.js?v=shadows1';
-import { buildPropsGroup } from './props.js?v=props4';
+import { buildPropsGroup } from './props.js?v=props6';
 import { mountLiquids } from './liquids.js?v=terrain1';
 import { buildTerrainSurface, buildTunnelIndex, tunnelAt, stampStructurePads } from './terrain-owners.js?v=orient1';
 

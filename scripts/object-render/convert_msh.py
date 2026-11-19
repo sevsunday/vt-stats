@@ -983,6 +983,64 @@ def build_file_index(roots, ext):
     return idx
 
 
+# stem_<version>.msh, version digits and dots (pine_1a_2.00, not a free suffix).
+_VERSIONED_MSH = re.compile(r"^(.+)_(\d+(?:\.\d+)*)$")
+# Closed list. A placed ODF whose only mesh is one of these is converted.
+# Anything else matching the version rule is a surprise and the run stops.
+_EXPECTED_VERSION_ALIASES = {
+    "bowlpalm1": "bowlpalm1_1.80",
+    "bowlpalm2": "bowlpalm2_1.80",
+    "pine_1a": "pine_1a_2.00",
+    "pine_2a": "pine_2a_2.00",
+    "redwd_1a": "redwd_1a_4.00",
+    "sbgrass_01a": "sbgrass_01a_4.00",
+    "bigrass01": "bigrass01_5.50",
+    "staminostat01": "staminostat01_7.00",
+    # Base-game files the workshop scan missed. Each is placed and unique.
+    "bcurch01": "bcurch01_0.50",
+    "mocrwn01": "mocrwn01_2.00",
+    "mcwing_skel": "mcwing_skel_0.10",
+}
+
+
+def _placed_map_classes() -> set[str]:
+    """objClass names from the ingested map reports, without .odf."""
+    found = set()
+    root = Path(__file__).resolve().parents[2] / "_map-analysis" / "vsrmaplist"
+    if not root.is_dir():
+        return found
+    for path in root.rglob("*.json"):
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for key in (doc.get("object_counts_by_class") or {}):
+            found.add(str(key).lower())
+    return found
+
+
+def _unique_versioned_msh(stem: str, msh_index: dict) -> str | None:
+    """The one stem_<version> key for `stem`, or None when there isn't exactly one."""
+    hits = []
+    for key in msh_index:
+        match = _VERSIONED_MSH.fullmatch(key)
+        if match and match.group(1) == stem:
+            hits.append(key)
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
+def _target_is_placed(meta: dict, placed: set[str]) -> bool:
+    for odf in meta.get("odfs") or []:
+        key = str(odf).lower()
+        if key.endswith(".odf"):
+            key = key[:-4]
+        if key in placed:
+            return True
+    return False
+
+
 def resolve_roots(steam_override=None):
     if bz2_paths is not None:
         try:
@@ -2136,16 +2194,26 @@ def main():
     # the only real mesh in the VSR dependency root (workshop 2785542655) is
     # the versioned export espilo_rifle_skel_0.13.msh. The empty
     # espilo_rifle_skel.msha stub is not indexed. Do not generalize this to
-    # other _0.xx workshop exports.
+    # other _0.xx workshop exports. Placed scenery whose only file is
+    # stem_<version>.msh is resolved separately, and only when that file is
+    # unique.
     msh_stem_aliases = {"espilo_rifle_skel": "espilo_rifle_skel_0.13"}
+    placed_classes = _placed_map_classes()
     resolved = []
     missing = []
+    version_aliases = {}
     for stem, meta in sorted(targets.items()):
         mp = msh_index.get(stem)
         if mp is None:
             alias = msh_stem_aliases.get(stem)
             if alias:
                 mp = msh_index.get(alias)
+        if mp is None and _target_is_placed(meta, placed_classes):
+            alias = _unique_versioned_msh(stem, msh_index)
+            if alias:
+                mp = msh_index.get(alias)
+                version_aliases[stem] = alias
+                print(f"  versioned mesh: {stem} -> {alias}")
         if mp is None:
             missing.append(stem)
             continue
@@ -2155,6 +2223,15 @@ def main():
             meta["terrainPatch"] = None
             print(f"  terrain patch failed for {stem}: {e!r}")
         resolved.append((stem, meta, mp))
+    if version_aliases != _EXPECTED_VERSION_ALIASES:
+        unexpected = sorted(set(version_aliases) - set(_EXPECTED_VERSION_ALIASES))
+        absent = sorted(set(_EXPECTED_VERSION_ALIASES) - set(version_aliases))
+        print("ERROR: versioned-mesh aliases are not the closed scenery list.")
+        if unexpected:
+            print("  unexpected:", ", ".join(f"{s}->{version_aliases[s]}" for s in unexpected))
+        if absent:
+            print("  missing:", ", ".join(absent))
+        raise SystemExit(1)
     print(f"resolved {len(resolved)} meshes, {len(missing)} missing (no baked .msh), "
           f"{sum(1 for _s, m, _p in resolved if m.get('terrainPatch'))} with a terrain patch")
     if args.verbose and missing:

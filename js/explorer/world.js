@@ -12,8 +12,8 @@ import { sampleTerrainHeight, sampleSheetHeight } from '../../_map-analysis/rend
 import {
   buildTerrainSurface, buildTunnelIndex, tunnelAt,
 } from '../../_map-analysis/render/js/terrain-owners.js?v=3';
-import { buildTileFloorMaterial } from '../../_map-analysis/render/js/tile-floor.js?v=tiles2';
-import { buildPropsGroup } from '../../_map-analysis/render/js/props.js?v=props4';
+import { buildTileFloorMaterial } from '../../_map-analysis/render/js/tile-floor.js?v=tiles3';
+import { buildPropsGroup } from '../../_map-analysis/render/js/props.js?v=props6';
 import { mountLiquids } from '../../_map-analysis/render/js/liquids.js?v=terrain1';
 import { attachSky, syncSky } from '../../_map-analysis/render/js/sky-dome.js?v=sky-atmo3';
 import {

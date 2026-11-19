@@ -47,6 +47,42 @@ async function loadAtlasPng(rel, opts = {}) {
   return tex;
 }
 
+// WebGL rejects an S3TC level whose side is not a multiple of 4, except the
+// 1- and 2-pixel tail. DDSLoader sizes those levels with width/4 instead of
+// rounding up to a 4x4 block, so the bytes past the last legal level are the
+// wrong slice of the file and decode as saturated confetti. Keep the legal
+// prefix only. treebark01 (1096) is the one tile in the corpus that hits this.
+const S3TC_BLOCK_BYTES = new Map([
+  [THREE.RGB_S3TC_DXT1_Format, 8],
+  [THREE.RGBA_S3TC_DXT1_Format, 8],
+  [THREE.RGBA_S3TC_DXT3_Format, 16],
+  [THREE.RGBA_S3TC_DXT5_Format, 16],
+]);
+
+function s3tcSideLegal(n) {
+  return n === 1 || n === 2 || (n > 0 && n % 4 === 0);
+}
+
+function keepLegalCompressedMips(tex) {
+  if (!tex || !tex.isCompressedTexture || !tex.mipmaps || tex.mipmaps.length < 2) return;
+  const blockBytes = S3TC_BLOCK_BYTES.get(tex.format);
+  if (!blockBytes) return;
+  const kept = [];
+  for (const mip of tex.mipmaps) {
+    const w = mip.width;
+    const h = mip.height;
+    const bytes = mip.data ? mip.data.byteLength : 0;
+    const expect = Math.ceil(w / 4) * Math.ceil(h / 4) * blockBytes;
+    if (!s3tcSideLegal(w) || !s3tcSideLegal(h) || bytes !== expect) break;
+    kept.push(mip);
+  }
+  if (!kept.length || kept.length === tex.mipmaps.length) return;
+  tex.mipmaps = kept;
+  tex.image = kept[0];
+  if (kept.length === 1) tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+}
+
 async function loadTileFromManifestEntry(entry) {
   const url = renderUrl(`tiles/${entry.filename}`);
   const src = await cachedBlobUrl(url);
@@ -54,10 +90,14 @@ async function loadTileFromManifestEntry(entry) {
   return new Promise((resolve, reject) => {
     const onLoad = (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
+      // Same row order as a compressed upload: the file's first row stays put.
+      tex.flipY = false;
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       tex.magFilter = THREE.LinearFilter;
       tex.minFilter = THREE.LinearMipMapLinearFilter;
+      if (tex.isCompressedTexture) keepLegalCompressedMips(tex);
+      else tex.generateMipmaps = true;
       tex.needsUpdate = true;
       resolve(tex);
     };

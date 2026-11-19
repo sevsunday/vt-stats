@@ -386,25 +386,90 @@ def parse_msh(path) -> list[MshMesh]:
         return blocks
 
 
+def _clean_tex_name(name):
+    """Block-level names are length-prefixed and padded with NULs."""
+    if not name:
+        return None
+    name = name.replace("\x00", "").strip()
+    return name or None
+
+
+def _groups_from_block(verts, norms, uvs, faces, buckys) -> list:
+    """Triangles from the block-level single-geometry arrays.
+
+    Multi-part units keep their real mesh in the node tree, and those verts
+    sit at each part's local origin, so this is only used when the tree
+    yielded nothing. The foliage cards are that case: the node name is empty
+    and the 12 faces live here.
+    """
+    groups = {}
+    order = []
+    nv, nn, nu = len(verts), len(norms), len(uvs)
+    for face in faces:
+        bi = int(face.buckyIndex)
+        flags, mat, tex = buckys[bi] if bi < len(buckys) else (0, None, None)
+        if flags & (RS_HIDDEN | RS_COLLIDABLE):
+            continue
+        g = groups.get(bi)
+        if g is None:
+            g = Group(bi)
+            g.flags = flags
+            g.material = _clean_tex_name(mat)
+            g.texture = _clean_tex_name(tex)
+            groups[bi] = g
+            order.append(bi)
+        tri = []
+        ok = True
+        for k in range(3):
+            vi = int(face.verts[k])
+            if vi >= nv:
+                ok = False
+                break
+            p = verts[vi]
+            ni = int(face.norms[k])
+            if ni < nn:
+                nrm = norms[ni]
+                normal = (nrm.x, nrm.y, nrm.z)
+            elif vi < nn:
+                nrm = norms[vi]
+                normal = (nrm.x, nrm.y, nrm.z)
+            else:
+                normal = (0.0, 1.0, 0.0)
+            ui = int(face.uvs[k])
+            if ui < nu:
+                uv = uvs[ui]
+                texcoord = (uv.u, uv.v)
+            else:
+                texcoord = (0.0, 0.0)
+            tri.append({"pos": (p.x, p.y, p.z), "norm": normal, "uv": texcoord})
+        if ok:
+            g.tris.append(tuple(tri))
+    return [groups[k] for k in order if groups[k].tris]
+
+
 def _parse_block(f) -> MshMesh:
     _read_struct(f, _BlockInfo)
     name = _read_name(f)
     sphere = _read_struct(f, _Sphere)
     _read_struct(f, _MshHeader)
 
-    # Skip the block-level "single geometry" arrays. They are NOT the assembled
-    # model for multi-part units (sub-parts sit at their local origin), so we
-    # render from the mesh TREE instead -- but we must consume these exactly to
-    # reach the tree.
-    n = _read_u32(f); f.read(n * sizeof(_Vec3))      # vertices
-    n = _read_u32(f); f.read(n * sizeof(_Vec3))      # normals
-    n = _read_u32(f); f.read(n * sizeof(_UV))        # uvs
-    n = _read_u32(f); f.read(n * sizeof(_Color))     # vert_colors
-    n = _read_u32(f); f.read(n * sizeof(_FaceObj))   # faces
+    # The block-level arrays are the single-geometry mesh. Multi-part units
+    # keep the assembled model in the tree (these verts sit at each part's
+    # local origin), so the tree wins whenever it produced triangles. A mesh
+    # whose node name is empty never builds a tree; the cards then come from
+    # these arrays.
+    n = _read_u32(f); b_verts = _read_array(f, _Vec3, n)
+    n = _read_u32(f); b_norms = _read_array(f, _Vec3, n)
+    n = _read_u32(f); b_uvs = _read_array(f, _UV, n)
+    n = _read_u32(f); f.read(n * sizeof(_Color))      # vert_colors
+    n = _read_u32(f); b_faces = _read_array(f, _FaceObj, n)
     n_bucky = _read_u32(f)
+    buckys = []
     for _ in range(n_bucky):
-        _read_u32(f); _read_u32(f); _read_u32(f)     # flags, index_count, vert_count
-        _skip_optionals(f)
+        flags = _read_u32(f)
+        _read_u32(f); _read_u32(f)                    # index_count, vert_count
+        mat, tex = _skip_optionals(f)
+        buckys.append((flags, mat, tex))
     n = _read_u32(f)                                 # vert_to_state
     for _ in range(n):
         m = _read_u32(f); f.read(m * (4 + 2))
@@ -546,7 +611,10 @@ def _parse_block(f) -> MshMesh:
     except MshError:
         pass  # keep whatever geometry we assembled
 
-    ordered = [groups[k] for k in order]
+    if any(groups[k].tris for k in order):
+        ordered = [groups[k] for k in order]
+    else:
+        ordered = _groups_from_block(b_verts, b_norms, b_uvs, b_faces, buckys)
     return MshMesh(name, sphere.radius, ordered)
 
 

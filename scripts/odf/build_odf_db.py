@@ -1057,6 +1057,87 @@ def _is_droplist(name):
     return False
 
 
+_VERSIONED_MSH = re.compile(r"^(.+)_(\d+(?:\.\d+)*)$")
+_placed_classes_cache = None
+_msh_stems_cache = None
+
+
+def _placed_map_classes() -> set[str]:
+    """objClass names placed on an ingested map, without the .odf suffix."""
+    global _placed_classes_cache
+    if _placed_classes_cache is not None:
+        return _placed_classes_cache
+    found = set()
+    root = PROJECT_ROOT / "_map-analysis" / "vsrmaplist"
+    if root.is_dir():
+        for path in root.rglob("*.json"):
+            try:
+                doc = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            for key in (doc.get("object_counts_by_class") or {}):
+                found.add(str(key).lower())
+    _placed_classes_cache = found
+    return found
+
+
+def _indexed_msh_stems() -> set[str]:
+    """Lowercased .msh stems under the base game and the BZCC workshop.
+
+    Same files convert_msh.py indexes. Missing installs yield an empty set,
+    and an abstract prop then stays dropped instead of being kept blind.
+    """
+    global _msh_stems_cache
+    if _msh_stems_cache is not None:
+        return _msh_stems_cache
+    stems = set()
+    base = STEAM_BASE_FALLBACK
+    roots = [base / BZ2R_DIR_RELATIVE, base / WORKSHOP_RELATIVE]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.msh"):
+            stems.add(path.stem.lower())
+    _msh_stems_cache = stems
+    return stems
+
+
+def _geometry_stem(blocks) -> str | None:
+    go = blocks.get("GameObjectClass") or {}
+    geo = None
+    for key, value in go.items():
+        if str(key).lower() == "geometryname":
+            geo = value
+            break
+    if not isinstance(geo, str):
+        return None
+    stem = Path(geo).stem.strip().lower()
+    if not stem or stem == "null":
+        return None
+    return stem
+
+
+def _mesh_resolves(stem: str, msh_stems: set[str]) -> bool:
+    """Exact stem.msh, or exactly one stem_<version>.msh. Two versions stay out."""
+    if stem in msh_stems:
+        return True
+    hits = [name for name in msh_stems
+            if (m := _VERSIONED_MSH.fullmatch(name)) and m.group(1) == stem]
+    return len(hits) == 1
+
+
+def _keep_placed_abstract(name: str, blocks) -> bool:
+    cls = name.lower()
+    if cls.endswith(".odf"):
+        cls = cls[:-4]
+    if cls not in _placed_map_classes():
+        return False
+    stem = _geometry_stem(blocks)
+    if not stem:
+        return False
+    return _mesh_resolves(stem, _indexed_msh_stems())
+
+
 def categorize_corpus(corpus):
     """
     Returns a dict[category_name -> dict[odf_basename -> blocks]] following
@@ -1080,6 +1161,15 @@ def categorize_corpus(corpus):
             dropped[name] = "no-sections"
             continue
         if len(bare) == 1 and bare[0] == "GameObjectClass":
+            # A class template has no geometry. A map prop with only this
+            # section is still a real object: Jade's foliage cards, the
+            # factory set pieces, the Nigeria rocks, the pilot statue, and
+            # the giant pod. Keep it when a map places it and a mesh
+            # resolves (exact stem, or one stem_<version>.msh). File it
+            # under Building so the models directory shows it.
+            if _keep_placed_abstract(name, blocks):
+                out.setdefault("Building", {})[name] = blocks
+                continue
             dropped[name] = "abstract-base (only [GameObjectClass])"
             continue
 

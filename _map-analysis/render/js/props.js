@@ -25,15 +25,18 @@ const EMISSIVE_DIR = new URL('textures/emissive/', MODELS_ROOT).href;
 /* Grass, palms, fences and ruin windows are cards on an atlas whose empty
  * texels are black RGB with alpha 0. Three.js ignores map alpha until
  * alphaTest is set, so those cards draw as solid black rectangles. A cutout
- * atlas is bimodal: a large empty field and an opaque core, with little soft
- * middle. Soft glows (alpha is a falloff) and building trims (alpha never
- * hits 0) stay opaque. Keep these thresholds in sync with js/models-viewer.js. */
+ * has a real hole and a solid core. A leafy fringe may sit between them.
+ * A smooth ramp with almost no solid core (a beam, a glow) stays opaque.
+ * Keep these thresholds in sync with js/models-viewer.js. */
 const CUTOUT_ALPHA_TEST = 0.15;
 const CUTOUT_SAMPLE_PX = 128;
 const CUTOUT_LOW_MAX = 16;
-const CUTOUT_MID_MAX = 200;
+const CUTOUT_OPAQUE_MIN = 200;
 const CUTOUT_LOW_SHARE = 0.20;
-const CUTOUT_MID_SHARE = 0.40;
+const CUTOUT_OPAQUE_SHARE = 0.08;
+// A branch card can be a hole plus a soft fringe and almost no fully opaque
+// core (pinesalpha2, the grass atlas). A glow ramp never gets this empty.
+const CUTOUT_FIELD_SHARE = 0.55;
 
 /* An owning piece shares faces with the terrain snapped to its patch (the
  * gate's wing tops sit exactly at the patch height). Pushing the piece back
@@ -62,7 +65,7 @@ export function ownsTerrain(row) {
   return !!(piece && ((piece.tunnels && piece.tunnels.length) || piece.terrainPatch));
 }
 
-/** True when the image is a hard alpha mask rather than a soft falloff. */
+/** True when the image is a leaf card (hole plus a solid core), not a glow ramp. */
 function imageIsCutout(image) {
   const sw = image && (image.width || image.videoWidth);
   const sh = image && (image.height || image.videoHeight);
@@ -78,6 +81,7 @@ function imageIsCutout(image) {
   let data;
   try {
     ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(image, 0, 0, w, h);
     data = ctx.getImageData(0, 0, w, h).data;
   } catch (err) {
@@ -86,13 +90,14 @@ function imageIsCutout(image) {
   const n = data.length / 4;
   if (!n) return false;
   let low = 0;
-  let mid = 0;
+  let opaque = 0;
   for (let i = 3; i < data.length; i += 4) {
     const a = data[i];
     if (a < CUTOUT_LOW_MAX) low++;
-    else if (a < CUTOUT_MID_MAX) mid++;
+    else if (a >= CUTOUT_OPAQUE_MIN) opaque++;
   }
-  return (low / n) >= CUTOUT_LOW_SHARE && (mid / n) <= CUTOUT_MID_SHARE;
+  return (low / n) >= CUTOUT_FIELD_SHARE
+    || ((low / n) >= CUTOUT_LOW_SHARE && (opaque / n) >= CUTOUT_OPAQUE_SHARE);
 }
 
 function punchCutout(mat, tex) {

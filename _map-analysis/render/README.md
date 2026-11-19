@@ -91,6 +91,8 @@ python scripts\extract_tile_textures.py
 # Defaults to --steam-root "C:/Program Files (x86)/Steam"
 ```
 
+A DDS whose mip chain has a side that is not a multiple of 4 (and not 1 or 2) is decoded to PNG instead of copied. WebGL rejects that compressed level, and the DDS loader then reads the rest of the chain from the wrong offset, which draws as rainbow confetti. `treebark01` (Jade, Wales, Golden Sun) is the one tile in the corpus. The floor also drops an illegal compressed mip prefix so a future file cannot upload the bad levels.
+
 To render a different map (e.g. Hubris): just visit
 `index.html?map=vsrhubris` — the JSON is already on disk. Heads up: maps
 with axis flips in their calibration (`x_flipped` / `y_flipped` on
@@ -247,7 +249,14 @@ corpus-wide frame test. Run it after any `.TER`, `_ter_full.py` or
 ## Props sidecar and terrain ownership: `<stem>.props.json`
 
 Written by `scripts/extract_props.py` (standalone; rerun after a models
-index regen or a `.TER` change). Schema 4:
+index regen or a `.TER` change). A placement is emitted when the class
+is in `data/models/index.json`. A `[GameObjectClass]`-only ODF is kept
+when a map places it and its `geometryName` resolves to a mesh: an
+exact `stem.msh`, or exactly one `stem_<version>.msh` (the bowl palms,
+Mountain Top pines and grass, and the giant pod). The foliage cards
+(`folhi`, `folmed`, `follow`) have an empty mesh-tree node name; their
+triangles come from the block-level arrays. Unplaced abstract ODFs stay
+out. Schema 4:
 
 ```jsonc
 {

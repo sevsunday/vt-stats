@@ -37,15 +37,18 @@ const TEX_BASE = '../data/models/textures/';
 
 /* Same cutout rule as _map-analysis/render/js/props.js. Foliage cards sample
  * an atlas whose empty texels are black RGB with alpha 0; without alphaTest
- * those cards draw as solid black rectangles. A cutout is bimodal (large
- * empty field, opaque core, little soft middle). Soft glows and building
- * trims stay opaque. Keep the thresholds in sync with props.js. */
+ * those cards draw as solid black rectangles. A cutout has a real hole and a
+ * solid core. A leafy fringe may sit between them. A smooth ramp with almost
+ * no solid core stays opaque. Keep the thresholds in sync with props.js. */
 const CUTOUT_ALPHA_TEST = 0.15;
 const CUTOUT_SAMPLE_PX = 128;
 const CUTOUT_LOW_MAX = 16;
-const CUTOUT_MID_MAX = 200;
+const CUTOUT_OPAQUE_MIN = 200;
 const CUTOUT_LOW_SHARE = 0.20;
-const CUTOUT_MID_SHARE = 0.40;
+const CUTOUT_OPAQUE_SHARE = 0.08;
+// A branch card can be a hole plus a soft fringe and almost no fully opaque
+// core (pinesalpha2, the grass atlas). A glow ramp never gets this empty.
+const CUTOUT_FIELD_SHARE = 0.55;
 
 let cutoutCanvas = null;
 
@@ -73,6 +76,7 @@ function imageIsCutout(image) {
   let data;
   try {
     ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(image, 0, 0, w, h);
     data = ctx.getImageData(0, 0, w, h).data;
   } catch (err) {
@@ -81,13 +85,14 @@ function imageIsCutout(image) {
   const n = data.length / 4;
   if (!n) return false;
   let low = 0;
-  let mid = 0;
+  let opaque = 0;
   for (let i = 3; i < data.length; i += 4) {
     const a = data[i];
     if (a < CUTOUT_LOW_MAX) low++;
-    else if (a < CUTOUT_MID_MAX) mid++;
+    else if (a >= CUTOUT_OPAQUE_MIN) opaque++;
   }
-  return (low / n) >= CUTOUT_LOW_SHARE && (mid / n) <= CUTOUT_MID_SHARE;
+  return (low / n) >= CUTOUT_FIELD_SHARE
+    || ((low / n) >= CUTOUT_LOW_SHARE && (opaque / n) >= CUTOUT_OPAQUE_SHARE);
 }
 // Team-color masks live in a single perf-resolution set (no HQ variant); keyed by
 // the diffuse/material stem so a material name maps straight to its mask.
