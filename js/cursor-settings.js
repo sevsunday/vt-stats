@@ -28,6 +28,77 @@
 (function () {
   'use strict';
 
+  // Who-this-browser-follows stub. Assigned before any other work so
+  // landing.js / app.js / player.js can read it during their own parse,
+  // before who.js finishes downloading. who.js replaces this object and
+  // keeps every method name. A Steam64 is never coerced with Number.
+  const WHO_KEY = 'vt.who.v1';
+  const WHO_STEAM_RE = /^\d{17}$/;
+
+  function readWhoRecord() {
+    try {
+      const raw = window.localStorage.getItem(WHO_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || (parsed.status !== 'set' && parsed.status !== 'skipped')) return null;
+      if (parsed.status === 'set' && !WHO_STEAM_RE.test(String(parsed.steam64 || ''))) return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function applyWhoDataset(rec) {
+    const root = document.documentElement;
+    if (rec && rec.status === 'set' && WHO_STEAM_RE.test(String(rec.steam64 || ''))) {
+      root.dataset.vtWho = String(rec.steam64);
+    } else {
+      delete root.dataset.vtWho;
+    }
+  }
+
+  function whoNameList(rec) {
+    if (!rec || rec.status !== 'set' || !Array.isArray(rec.names)) return [];
+    const out = [];
+    for (let i = 0; i < rec.names.length; i++) {
+      if (typeof rec.names[i] === 'string' && rec.names[i] && out.indexOf(rec.names[i]) === -1) {
+        out.push(rec.names[i]);
+      }
+    }
+    return out;
+  }
+
+  applyWhoDataset(readWhoRecord());
+
+  window.VTWho = {
+    get: function () { return readWhoRecord(); },
+    status: function () {
+      const rec = readWhoRecord();
+      return rec ? rec.status : '';
+    },
+    steam64: function () {
+      const rec = readWhoRecord();
+      return rec && rec.status === 'set' ? String(rec.steam64) : '';
+    },
+    names: function () { return whoNameList(readWhoRecord()); },
+    played: function (entry) {
+      const names = whoNameList(readWhoRecord());
+      if (!names.length || !entry || !Array.isArray(entry.players)) return false;
+      for (let i = 0; i < entry.players.length; i++) {
+        if (names.indexOf(entry.players[i]) !== -1) return true;
+      }
+      return false;
+    },
+    commanded: function (entry) {
+      const id = window.VTWho.steam64();
+      if (!id || !entry || !entry.team_leaders) return false;
+      const leaders = entry.team_leaders;
+      const a = leaders['1'] && leaders['1'].s64 != null ? String(leaders['1'].s64) : '';
+      const b = leaders['2'] && leaders['2'].s64 != null ? String(leaders['2'].s64) : '';
+      return a === id || b === id;
+    },
+  };
+
   // currentScript is only valid during synchronous execution -- capture now.
   const SCRIPT_URL = (document.currentScript && document.currentScript.src) || '';
 
@@ -423,6 +494,7 @@
     });
 
     syncPanelControls();
+    if (window.VTWho && typeof window.VTWho.mount === 'function') window.VTWho.mount();
   }
 
   function speedToSlider(sec) {
@@ -464,5 +536,20 @@
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
+  }
+
+  // who.js resolves its own data URLs from this script's directory, so a
+  // page at /map/<slug>/ does not request a relative js/who.js. async=false
+  // keeps it ordered; it does not block DOMContentLoaded.
+  if (!document.querySelector('script[data-vt-who]')) {
+    const who = document.createElement('script');
+    who.async = false;
+    who.setAttribute('data-vt-who', '1');
+    try {
+      who.src = new URL('who.js', SCRIPT_URL || (document.currentScript && document.currentScript.src) || window.location.href).href;
+    } catch (_) {
+      who.src = 'js/who.js';
+    }
+    (document.head || document.documentElement).appendChild(who);
   }
 })();

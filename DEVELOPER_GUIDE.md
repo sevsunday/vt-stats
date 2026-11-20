@@ -1280,6 +1280,14 @@ Four cards, commander first:
 
 Deep link: `?match=<id>&tab=elo`.
 
+### Who this browser follows
+
+A visitor can point this browser at one corpus player. The choice lives in `localStorage` key `vt.who.v1` (`status` `set` or `skipped`, `steam64` as a string, cached `name` / `slug` / `names`). It is not a sign-in. [`js/cursor-settings.js`](js/cursor-settings.js) assigns `window.VTWho` (get, status, steam64, names, played, commanded) before `DOMContentLoaded`, then loads [`js/who.js`](js/who.js), which adds the picker, the gear row, and the highlight stylesheet. Pages that personalize register a `vt-who-change` listener while they parse.
+
+VTSR-T on the new surfaces is a band and a verdict. VTSR-C keeps its number. `played(entry)` matches `matches.json` `players` (display names) against the cached name list, so a rename whose old nick is in neither the slug map nor an alias source stays unmarked. `commanded(entry)` compares `team_leaders['1'|'2'].s64` to the stored Steam64. The choice never enters the query string. `?who=` remains the legacy Experimental-tab redirect and is unrelated.
+
+The home page swaps the two rising cards for a thug card and a command card, with a You | Climbers toggle in `sessionStorage` `vt.who.homeView`. The match gallery stamps You played / You commanded. The match page shows a For you pill ([`js/match-you.js`](js/match-you.js)) only when the unfiltered leaderboard contains that Steam64, including a camera pod. For you reads `currentData` and ignores the player filter. `?tab=you` opens it when the pill is visible; otherwise Overview stays up.
+
 ### Global Player Filter
 
 **Scope.** The global filter applies to the **per-match view only**. The All Matches view consumes the in-memory aggregate produced by `VTAggregate.build()` from `match_contributions.json` (see [`js/all-matches-aggregator.js`](js/all-matches-aggregator.js)). `career_stats[]` fields render unfiltered with respect to `filterState`; the Players hub's filter bar (§14.7) is a separate, URL-carried scope that re-aggregates with `opts.rowFilter` and has no interaction with `filterState` or the match picker.

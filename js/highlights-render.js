@@ -24,7 +24,9 @@ function esc(s) {
 function vtPlayerLinkHtml(name, steam64) {
   if (typeof global.vtPlayerLinkHtml === 'function') return global.vtPlayerLinkHtml(name, steam64);
   if (global.VTPlayer && typeof global.VTPlayer.playerHref === 'function' && steam64) {
-    return `<a href="${esc(global.VTPlayer.playerHref(steam64))}" class="vt-player-link">${esc(name)}</a>`;
+    const sid = /^\d{17}$/.test(String(steam64 || '')) ? String(steam64) : '';
+    const attr = sid ? ` data-steam64="${sid}"` : '';
+    return `<a href="${esc(global.VTPlayer.playerHref(steam64))}" class="vt-player-link"${attr}>${esc(name)}</a>`;
   }
   return esc(name);
 }

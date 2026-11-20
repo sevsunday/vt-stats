@@ -104,7 +104,7 @@ body.vt-home-body {
 
 .vt-home-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
 }
@@ -118,11 +118,101 @@ body.vt-home-body {
 
 .vt-home-card-head a:hover { text-decoration: underline; }
 
+.vt-home-who-toggle {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.1rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+}
+
+.vt-home-who-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--kb-text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.vt-home-who-toggle button[aria-pressed="true"] {
+  color: var(--kb-primary-fg);
+  background: var(--kb-primary);
+}
+
+.vt-home-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.vt-home-brand .navbar-brand {
+  margin-right: 0;
+}
+
+.vt-home-at {
+  align-self: center;
+  margin-left: 0.65rem;
+  min-width: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--kb-text-secondary);
+  font-size: 0.85rem;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.vt-home-at:hover,
+.vt-home-at:focus-visible {
+  color: var(--kb-primary);
+}
+
+.vt-home-you-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.vt-home-you-line {
+  font-size: 0.78rem;
+  color: var(--kb-text-secondary);
+}
+
+.vt-home-you-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 1.55em;
+  margin-left: 0.3rem;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--kb-primary) 32%, var(--kb-border-subtle));
+  background: color-mix(in oklab, var(--kb-primary) 10%, transparent);
+  color: color-mix(in oklab, var(--kb-primary) 62%, var(--kb-text-secondary));
+  font-size: 0.52rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: 0.05em;
+}
+
 .vt-home-card-body {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+#vt-home-commanders,
+#vt-home-thugs {
+  flex: 1 1 auto;
 }
 
 .vt-home-empty,
@@ -382,15 +472,85 @@ body.vt-home-body {
   white-space: nowrap;
 }
 
-.vt-home-spark {
-  display: block;
-  width: 100%;
-  height: 1.15rem;
-  margin-top: 0.1rem;
+.vt-home-form {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0.22rem;
+  flex: 1 1 auto;
+  min-height: 4.5rem;
+  min-width: 0;
+  margin-top: 0.2rem;
 }
 
-.vt-home-spark-pos { fill: var(--kb-success); }
-.vt-home-spark-neg { fill: var(--kb-danger); }
+.vt-home-form-zero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--kb-border-subtle);
+  pointer-events: none;
+}
+
+.vt-home-form-net {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1;
+  text-align: right;
+}
+
+.vt-home-form-net[data-sign="up"] { color: var(--kb-success); }
+.vt-home-form-net[data-sign="down"] { color: var(--kb-danger); }
+.vt-home-form-net[data-sign="flat"] { color: var(--kb-text-muted); }
+
+.vt-home-form-net-k {
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kb-text-muted);
+}
+
+.vt-home-form-col {
+  flex: 1 1 0;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  min-width: 0;
+}
+
+.vt-home-form-bar {
+  width: 100%;
+  border-radius: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.vt-home-form-col[data-side="up"] .vt-home-form-bar {
+  grid-row: 1;
+  align-self: end;
+  height: calc(var(--h) * 100%);
+  background: var(--kb-success);
+}
+
+.vt-home-form-col[data-side="down"] .vt-home-form-bar {
+  grid-row: 2;
+  align-self: start;
+  height: calc(var(--h) * 100%);
+  background: var(--kb-danger);
+}
+
+.vt-home-form-col[data-side="flat"] .vt-home-form-bar {
+  grid-row: 1 / span 2;
+  align-self: center;
+  height: 3px;
+  background: var(--kb-text-muted);
+}
 
 .vt-home-pills {
   display: flex;

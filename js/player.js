@@ -38,6 +38,11 @@
 (function () {
   'use strict';
 
+  // Registered during parse, before who.js can write a choice.
+  document.addEventListener('vt-who-change', () => {
+    if (typeof syncYouChip === 'function') syncYouChip();
+  });
+
   // ---- Constants --------------------------------------------------------
 
   // Tier list (top first) from elo_current.json band_config via
@@ -1272,6 +1277,28 @@
 
   // ---- Phase 4: Overview tab renderer ----------------------------------
 
+  function syncYouChip() {
+    const chips = document.querySelector('#vt-player-single .vt-player-title-chips');
+    if (!chips) return;
+    let chip = chips.querySelector('.vt-you-title-chip');
+    const boot = window.__vtPlayerBoot && window.__vtPlayerBoot.steam64
+      ? String(window.__vtPlayerBoot.steam64)
+      : '';
+    const shown = boot || (state.currentRating && state.currentRating.steam64
+      ? String(state.currentRating.steam64)
+      : '');
+    const me = window.VTWho && VTWho.steam64 ? VTWho.steam64() : '';
+    const on = !!(shown && me && shown === me);
+    if (on && !chip) {
+      chip = document.createElement('span');
+      chip.className = 'vt-player-card-pill vt-you-title-chip';
+      chip.textContent = 'This is you';
+      chips.appendChild(chip);
+    } else if (!on && chip) {
+      chip.remove();
+    }
+  }
+
   function renderSingle(rating) {
     const role = roleLabel(rating);
     const band = VTSRDisplay.bandFor(rating);
@@ -1311,6 +1338,7 @@
     // Stash the current rating on state so tab renderers can be
     // re-run on activation without re-resolving from URL.
     state.currentRating = rating;
+    syncYouChip();
 
     // "Compare with..." button — stash this player in the localStorage
     // clipboard and bounce back to the directory with compare-mode on.
@@ -4950,7 +4978,7 @@
     const href = playerHref(r.steam64);
     return `
       <div class="vt-compare-mini-card" style="--vt-compare-accent: ${f.color};"
-           data-slug="${escapeHtml(f.slug)}">
+           data-slug="${escapeHtml(f.slug)}" data-steam64="${escapeHtml(r.steam64)}">
         <button type="button" class="vt-compare-mini-remove"
                 title="Remove ${escapeHtml(r.name)}"
                 data-action="remove" data-slug="${escapeHtml(f.slug)}"
@@ -4961,7 +4989,7 @@
           <span class="vt-compare-mini-swatch" aria-hidden="true"></span>
           <span class="vt-compare-mini-slot small text-secondary">#${index + 1}</span>
         </div>
-        <a href="${href}" class="vt-compare-mini-name" title="Open ${escapeHtml(r.name)}'s profile">
+        <a href="${href}" class="vt-compare-mini-name" data-steam64="${escapeHtml(r.steam64)}" title="Open ${escapeHtml(r.name)}'s profile">
           ${escapeHtml(r.name)}
         </a>
         <div class="vt-compare-mini-vtsr">

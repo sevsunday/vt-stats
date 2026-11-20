@@ -4,13 +4,13 @@ overview: A browser-only “who this device follows” setting, stored in localS
 todos:
   - id: who-module
     content: Add the VTWho stub in cursor-settings.js, then js/who.js (picker, gear row, highlight stylesheet, vt-who-change)
-    status: pending
+    status: completed
   - id: home-cards
     content: When someone is set, swap the two rising cards for thug and command cards, with a You | Climbers session toggle, and mark Latest matches
-    status: pending
+    status: completed
   - id: match-highlight
     content: Stamp data-steam64 on every player-link helper plus the accuracy, movement, and map rows so the shared stylesheet can wash the row
-    status: pending
+    status: in_progress
   - id: for-you
     content: Add the For you match pill and js/match-you.js scan of the unfiltered match
     status: pending

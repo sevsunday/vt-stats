@@ -4643,7 +4643,7 @@ td.vt-col-split {
 
 .vt-match-picker-card-title {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.3rem;
     min-width: 0;
     flex: 1 1 auto;
@@ -9152,3 +9152,266 @@ html.vt-cursor-active * {
     background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
     color: var(--kb-text-primary);
 }
+
+/* Who this browser follows — picker, gear row, For you scan.
+   The row wash itself is an injected stylesheet in js/who.js so the
+   Steam64 never lands in a static file. */
+.vt-who-gear {
+    display: flex;
+    align-items: stretch;
+    gap: 0.15rem;
+}
+
+.vt-who-gear .vt-settings-navitem {
+    flex: 1 1 auto;
+}
+
+.vt-who-clear {
+    flex: 0 0 auto;
+    width: auto;
+    color: var(--kb-text-muted);
+}
+
+.vt-who-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 18rem;
+    overflow-y: auto;
+    padding: 0.1rem;
+}
+
+.vt-who-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid color-mix(in oklab, var(--kb-text-secondary) 38%, var(--kb-border-subtle));
+    border-radius: 0.45rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 72%, transparent);
+    color: var(--kb-text-primary);
+    text-align: left;
+    box-shadow: inset 0 0 0 1px transparent;
+}
+
+.vt-who-row:hover:not(.is-active) {
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, var(--kb-border-subtle));
+    background: color-mix(in oklab, var(--kb-primary) 8%, var(--kb-bg-subtle));
+}
+
+.vt-who-row.is-active {
+    border-color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 28%, var(--kb-bg-card));
+    /* Second ring, same color, so the selection reads as a 2px primary stroke
+       without the row changing size. */
+    box-shadow: inset 0 0 0 1px var(--kb-primary);
+}
+
+.vt-who-name {
+    font-weight: 650;
+}
+
+.vt-who-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+}
+
+.vt-who-chip,
+.vt-you-title-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    color: var(--kb-text-secondary);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-who-games {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+}
+
+.vt-match-picker-you {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 1.55em;
+    margin: 0;
+    padding: 0 0.35em;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 32%, var(--kb-border-subtle));
+    background: color-mix(in oklab, var(--kb-primary) 10%, transparent);
+    color: color-mix(in oklab, var(--kb-primary) 62%, var(--kb-text-secondary));
+    font-size: 0.52rem;
+    font-weight: 650;
+    letter-spacing: 0;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.vt-you-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+    align-items: baseline;
+    margin-bottom: 0.85rem;
+}
+
+.vt-you-head-name {
+    font-weight: 700;
+    font-size: 1.15rem;
+}
+
+.vt-you-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 0.75rem;
+}
+
+.vt-you-card {
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.75rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 92%, transparent);
+}
+
+.vt-you-jump {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--kb-primary);
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.vt-you-jump:hover { text-decoration: underline; }
+
+.vt-you-card p {
+    margin: 0.35rem 0 0;
+}
+
+.vt-you-outcome {
+    margin: 0.5rem 0 0;
+    font-size: 1.7rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+
+.vt-you-outcome[data-tone="won"] { color: var(--kb-success); }
+.vt-you-outcome[data-tone="lost"] { color: var(--kb-danger); }
+.vt-you-outcome[data-tone="muted"] { color: var(--kb-text-secondary); }
+
+.vt-you-sub,
+.vt-you-note {
+    margin: 0.35rem 0 0;
+    color: var(--kb-text-secondary);
+}
+
+.vt-you-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem 1.15rem;
+    margin-top: 0.55rem;
+}
+
+.vt-you-stat {
+    display: flex;
+    flex-direction: column;
+    min-width: 3.4rem;
+}
+
+.vt-you-stat-value {
+    font-size: 1.35rem;
+    font-weight: 650;
+    line-height: 1.05;
+    color: var(--kb-text-primary);
+}
+
+.vt-you-stat-label,
+.vt-you-rate-k,
+.vt-you-rival-k,
+.vt-you-meter-band {
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-you-awards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.55rem;
+}
+
+.vt-you-rate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    margin: 0.45rem 0 0;
+}
+
+.vt-you-arrow { color: var(--kb-text-muted); }
+
+.vt-you-delta { font-weight: 700; }
+.vt-you-delta[data-sign="up"] { color: var(--kb-success); }
+.vt-you-delta[data-sign="down"] { color: var(--kb-danger); }
+.vt-you-delta[data-sign="flat"] { color: var(--kb-text-muted); font-weight: 650; }
+
+.vt-you-meter { margin-top: 0.5rem; }
+
+.vt-you-meter-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.vt-you-meter-score {
+    font-size: 1.35rem;
+    font-weight: 650;
+    line-height: 1;
+}
+
+.vt-you-meter-track {
+    height: 0.4rem;
+    margin-top: 0.35rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    overflow: hidden;
+}
+
+.vt-you-meter-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--kb-primary);
+}
+
+.vt-you-rival {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.vt-you-rival-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.vt-you-rival-k { display: block; }

@@ -70,6 +70,7 @@ function renderMovementLeaderboard(tableId, positioning, leaderboard, sortState)
     if (!pos) continue;
     rows.push({
       name: p.name,
+      steam64: p.steam64,
       faction: p.faction,
       score: pos.metrics.activity_score,
       band: pos.metrics.movement_band,
@@ -110,7 +111,8 @@ Area covered: ${Math.round(r.convex_hull_area).toLocaleString()} m\u00b2
 First leave: ${firstLeave}
 Returns to base: ${r.return_to_base_count}
 P95 distance: ${Math.round(r.p95_dist).toLocaleString()}m`;
-    return `<tr class="vt-movement-row" data-name="${_attr(r.name)}" title="${_attr(rowTitle)}">
+    const sid = /^\d{17}$/.test(String(r.steam64 || '')) ? String(r.steam64) : '';
+    return `<tr class="vt-movement-row" data-name="${_attr(r.name)}"${sid ? ` data-steam64="${sid}"` : ''} title="${_attr(rowTitle)}">
       <td>${i + 1}</td>
       <td class="fw-semibold">${_esc(r.name)}</td>
       <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>

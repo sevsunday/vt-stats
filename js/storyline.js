@@ -52,7 +52,9 @@
     const slugMap = window.__vtSlugMap || null;
     const slug = slugMap && (slugMap.slugs || slugMap)[String(steam64)];
     const href = slug ? `player/${slug}/` : `player/index.html?p=${encodeURIComponent(steam64)}`;
-    return `<a class="vt-player-link" href="${href}">${label}</a>`;
+    const sid = /^\d{17}$/.test(String(steam64 || '')) ? String(steam64) : '';
+    const attr = sid ? ` data-steam64="${sid}"` : '';
+    return `<a class="vt-player-link" href="${href}"${attr}>${label}</a>`;
   }
 
   // ------------------------------------------------------------ STORY_COPY

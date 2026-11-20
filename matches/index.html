@@ -376,6 +376,9 @@
     <!-- Match Tab Navigation -->
     <div class="vt-tab-scroll-wrap mb-4">
       <ul class="nav nav-pills" id="match-tabs" role="tablist">
+        <li class="nav-item d-none" role="presentation" id="tab-you-li">
+          <button class="nav-link" id="tab-you-btn" data-bs-toggle="pill" data-bs-target="#tab-you" type="button" role="tab" aria-controls="tab-you" aria-selected="false">For you</button>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
         </li>
@@ -418,6 +421,10 @@
 
     <!-- Match Tab Content -->
     <div class="tab-content" id="match-tab-content">
+
+      <div class="tab-pane fade" id="tab-you" role="tabpanel" aria-labelledby="tab-you-btn">
+        <div id="vt-you-root"></div>
+      </div>
 
       <!-- Tab: Overview -->
       <div class="tab-pane fade show active" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-btn">
@@ -1577,6 +1584,7 @@
        so it loads after it, before app.js. -->
   <script src="js/vtsr-display.js"></script>
   <script src="js/match-elo.js"></script>
+  <script src="js/match-you.js"></script>
   <!-- Balonce Meter: shared win-probability model (VTSR-C commander gap +
        thug VTSR-T handicap) + the per-match Outcome-card read
        (#outcome-read / #outcome-after inside #section-faction).

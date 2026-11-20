@@ -68,7 +68,9 @@
   const fmt = n => (PL() ? PL().formatNumber(n) : String(n));
   const link = (name, sid) => {
     if (!sid || !PL()) return esc(name);
-    return `<a href="${esc(PL().playerHref(sid))}">${esc(name)}</a>`;
+    const id = /^\d{17}$/.test(String(sid || '')) ? String(sid) : '';
+    const attr = id ? ` data-steam64="${id}"` : '';
+    return `<a href="${esc(PL().playerHref(sid))}"${attr}>${esc(name)}</a>`;
   };
   const cssVar = (n, fb) => { try { return (typeof global.getCSSVar === 'function' && global.getCSSVar(n)) || fb; } catch (_) { return fb; } };
 

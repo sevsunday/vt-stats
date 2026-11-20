@@ -88,7 +88,9 @@
     const slugs = (slugMap && slugMap.slugs) || null;
     const known = slugs && slugs[String(steam64)] && slugs[String(steam64)].slug;
     const cls = known ? 'vt-player-link' : 'vt-player-link vt-player-link-fallback';
-    return `<a class="${cls}" href="${href}">${safeName}</a>`;
+    const sid = /^\d{17}$/.test(String(steam64 || '')) ? String(steam64) : '';
+    const attr = sid ? ` data-steam64="${sid}"` : '';
+    return `<a class="${cls}" href="${href}"${attr}>${safeName}</a>`;
   }
 
   function mapNameResolver(mapFile) {

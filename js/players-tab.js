@@ -847,7 +847,9 @@
     if (typeof window.vtPlayerLinkHtml === 'function') return window.vtPlayerLinkHtml(name, sid);
     // On /player/ pages js/player.js owns the slug map + path logic.
     if (window.VTPlayer && typeof window.VTPlayer.playerHref === 'function' && sid) {
-      return '<a href="' + esc(window.VTPlayer.playerHref(sid)) + '">' + esc(name) + '</a>';
+      const id = /^\d{17}$/.test(String(sid || '')) ? String(sid) : '';
+      const attr = id ? ' data-steam64="' + id + '"' : '';
+      return '<a href="' + esc(window.VTPlayer.playerHref(sid)) + '"' + attr + '>' + esc(name) + '</a>';
     }
     return esc(name);
   }

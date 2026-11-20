@@ -35,6 +35,16 @@
   let polling = false;
   let themeObs = null;
   let liveFitting = false;
+  let homeElo = null;
+  let homeCmdr = null;
+  let homeSlugs = null;
+  // Registered during parse, before who.js can open the picker.
+  document.addEventListener('vt-who-change', () => {
+    paintHomeAt();
+    if (!homeElo && !homeCmdr && !homeSlugs) return;
+    paintHomeLists();
+    paintMatches();
+  });
   const LIVE_FIT_MAX = 4;
   const LIVE_CAP_FLOOR = 2;
 
@@ -327,7 +337,7 @@
       return '<a class="vt-home-match" href="' + esc(href) + '">'
         + thumb
         + '<span class="vt-home-match-copy">'
-        + '<span class="vt-home-match-name">' + esc(m.name || m.id || 'Match') + '</span>'
+        + '<span class="vt-home-match-name">' + esc(m.name || m.id || 'Match') + youMatchMark(m) + '</span>'
         + '<span class="vt-home-match-vs">' + leaderSpan(m, 1) + '<span class="vt-home-vs">vs</span>' + leaderSpan(m, 2) + '</span>'
         + matchStats(m)
         + '</span>'
@@ -871,7 +881,297 @@
     });
   }
 
+  function youMatchMark(m) {
+    const who = window.VTWho;
+    if (!who || who.status() !== 'set') return '';
+    if (who.commanded(m)) return '<span class="vt-home-you-mark">You commanded</span>';
+    if (who.played(m)) return '<span class="vt-home-you-mark">You played</span>';
+    return '';
+  }
+
+  function homeCommunity() {
+    try { return sessionStorage.getItem('vt.who.homeView') === 'community'; }
+    catch (e) { return false; }
+  }
+
+  function findBySteam(ratings, sid) {
+    const list = ratings || [];
+    for (let i = 0; i < list.length; i++) {
+      if (String(list[i] && list[i].steam64 || '') === sid) return list[i];
+    }
+    return null;
+  }
+
+  function findManifest(id) {
+    if (!id) return null;
+    for (let i = 0; i < manifest.length; i++) {
+      if (manifest[i] && manifest[i].id === id) return manifest[i];
+    }
+    return null;
+  }
+
+  function statusChip(status) {
+    if (status === 'inactive') return '<span class="vt-who-chip">Inactive</span>';
+    if (status === 'returning') return '<span class="vt-who-chip">Returning</span>';
+    return '';
+  }
+
+  // Last-10 bars for the personal cards. Rising lists keep the flat pills.
+  // Thug bars use the verdict words. Commander bars use the signed VTSR-C change.
+  function formChart(hist, kind) {
+    const vals = [];
+    for (let i = 0; i < hist.length; i++) {
+      const v = Number(hist[i]);
+      if (Number.isFinite(v)) vals.push(v);
+    }
+    if (!vals.length) return '';
+    const display = window.VTSRDisplay;
+    let max = 0;
+    const sides = vals.map((v) => {
+      if (kind === 'thug') {
+        const verdict = display && display.deltaVerdict ? display.deltaVerdict(v) : null;
+        const key = verdict ? verdict.key : 'par';
+        const side = key === 'beat' ? 'up' : key === 'below' ? 'down' : 'flat';
+        if (side !== 'flat' && Math.abs(v) > max) max = Math.abs(v);
+        return { side: side, title: verdict ? verdict.label : 'On par', v: v };
+      }
+      const side = v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+      const rounded = Math.round(v);
+      if (side !== 'flat' && Math.abs(v) > max) max = Math.abs(v);
+      return { side: side, title: (rounded > 0 ? '+' : '') + rounded, v: v };
+    });
+    if (!(max > 0)) max = 1;
+    let up = 0;
+    let down = 0;
+    let flat = 0;
+    const bars = sides.map((item) => {
+      if (item.side === 'up') up += 1;
+      else if (item.side === 'down') down += 1;
+      else flat += 1;
+      const h = item.side === 'flat' ? 0 : Math.max(0.22, Math.abs(item.v) / max);
+      return '<span class="vt-home-form-col" data-side="' + item.side + '">'
+        + '<span class="vt-home-form-bar" style="--h:' + h.toFixed(3) + '" title="' + esc(item.title) + '"></span>'
+        + '</span>';
+    }).join('');
+    let net;
+    let netTitle;
+    if (kind === 'thug') {
+      net = up - down;
+      netTitle = 'Games above expectation minus games below. On par counts as zero.';
+    } else {
+      let sum = 0;
+      for (let i = 0; i < vals.length; i++) sum += vals[i];
+      net = Math.round(sum);
+      netTitle = 'Net VTSR-C change over these games.';
+    }
+    const sign = net > 0 ? 'up' : net < 0 ? 'down' : 'flat';
+    const netText = (net > 0 ? '+' : '') + net;
+    const label = kind === 'thug'
+      ? 'Last ' + vals.length + ' games: ' + up + ' beat expectation, ' + flat + ' on par, ' + down + ' below. Net ' + netText
+      : 'Last ' + vals.length + ' commanded games. Net VTSR-C ' + netText;
+    return {
+      chart: '<div class="vt-home-form" role="img" aria-label="' + esc(label) + '">'
+        + bars + '<i class="vt-home-form-zero" aria-hidden="true"></i></div>',
+      net: '<span class="vt-home-form-net" data-sign="' + sign + '" title="' + esc(netTitle) + '">'
+        + '<span class="vt-mono">' + esc(netText) + '</span>'
+        + '<span class="vt-home-form-net-k">net</span></span>',
+    };
+  }
+
+  function placeHeadNet(bodyId, html) {
+    const body = document.getElementById(bodyId);
+    const head = body && body.parentElement && body.parentElement.querySelector('.vt-home-card-head');
+    if (!head) return;
+    const old = head.querySelector('.vt-home-form-net');
+    if (old) old.remove();
+    if (html) head.insertAdjacentHTML('beforeend', html);
+  }
+
+  function ensureHomeToggle(head) {
+    let toggle = head.querySelector('.vt-home-who-toggle');
+    if (toggle) return toggle;
+    toggle = document.createElement('div');
+    toggle.className = 'vt-home-who-toggle';
+    toggle.setAttribute('role', 'group');
+    toggle.setAttribute('aria-label', 'Home lists');
+    toggle.innerHTML = '<button type="button" data-vt-home-view="me">You</button>'
+      + '<button type="button" data-vt-home-view="community">Climbers</button>';
+    toggle.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-vt-home-view]');
+      if (!btn) return;
+      try {
+        if (btn.getAttribute('data-vt-home-view') === 'community') {
+          sessionStorage.setItem('vt.who.homeView', 'community');
+        } else {
+          sessionStorage.removeItem('vt.who.homeView');
+        }
+      } catch (e) { /* private mode */ }
+      paintHomeLists();
+    });
+    head.appendChild(toggle);
+    return toggle;
+  }
+
+  function syncHomeHead(titleId, risingHtml, personalHtml) {
+    const title = document.getElementById(titleId);
+    if (!title) return;
+    const head = title.parentElement;
+    const link = head.querySelector('a[href]');
+    const set = window.VTWho && VTWho.status() === 'set';
+    const youOn = set && !homeCommunity();
+    if (set && !youOn) {
+      const toggle = ensureHomeToggle(head);
+      toggle.hidden = false;
+      const youBtn = toggle.querySelector('[data-vt-home-view="me"]');
+      const climbBtn = toggle.querySelector('[data-vt-home-view="community"]');
+      if (youBtn) youBtn.setAttribute('aria-pressed', 'false');
+      if (climbBtn) climbBtn.setAttribute('aria-pressed', 'true');
+    } else {
+      const toggle = head.querySelector('.vt-home-who-toggle');
+      if (toggle) toggle.hidden = true;
+    }
+    if (link) link.hidden = !!youOn;
+    title.innerHTML = youOn ? personalHtml : risingHtml;
+  }
+
+  function recentPlayed() {
+    const who = window.VTWho;
+    const out = [];
+    if (!who) return out;
+    const open = openMatches();
+    for (let i = 0; i < open.length && out.length < 4; i++) {
+      if (who.played(open[i]) || who.commanded(open[i])) out.push(open[i]);
+    }
+    return out;
+  }
+
+  function recentLine(m) {
+    const who = window.VTWho;
+    const href = 'matches/?match=' + encodeURIComponent(m.id || '');
+    const tag = who && who.commanded(m) ? 'Commanded' : 'Played';
+    return '<a class="vt-home-you-line" href="' + esc(href) + '">'
+      + esc(m.name || m.id || 'Match') + ' · ' + esc(ago(m.date)) + ' · ' + tag + '</a>';
+  }
+
+  function paintYouThug(elo, slugFile) {
+    const list = document.getElementById('vt-home-thugs');
+    if (!list || !window.VTWho) return;
+    const sid = VTWho.steam64();
+    const rec = VTWho.get();
+    const row = findBySteam(elo && elo.ratings, sid);
+    const name = (row && row.name) || (rec && rec.name) || 'You';
+    const link = '<a class="vt-home-you-name" href="' + esc(playerHref(slugFile, sid)) + '">' + esc(name) + '</a>';
+    if (!row) {
+      placeHeadNet('vt-home-thugs', '');
+      list.innerHTML = link + '<p class="vt-home-you-line">No thug rating yet</p>';
+      return;
+    }
+    const display = window.VTSRDisplay;
+    if (display && display.setConfig) display.setConfig(elo);
+    const band = display && display.bandFor ? display.bandFor(row) : null;
+    const chip = band && display.bandChipHtml
+      ? display.bandChipHtml(band, { compact: true, bsTooltip: false })
+      : '';
+    const prov = row.matches_provisional ? '<span class="vt-who-chip">Provisional</span>' : '';
+    const hist = Array.isArray(row.win_history) ? row.win_history.map(Number) : [];
+    const form = formChart(hist, 'thug');
+    placeHeadNet('vt-home-thugs', form && form.net);
+    list.innerHTML = link
+      + '<span class="vt-home-you-line">' + chip + prov + statusChip(row.inactive_status) + '</span>'
+      + (form ? form.chart : '')
+      + '<p class="vt-home-you-line">' + thugWhen(row) + '</p>';
+  }
+
+  function thugWhen(row) {
+    const m = findManifest(row.last_match_id);
+    const map = m && m.name ? ' · ' + esc(m.name) : '';
+    const rated = row.matches_played != null ? ' · ' + row.matches_played + ' rated' : '';
+    const status = row.inactive_status || 'active';
+    if (status === 'inactive' || status === 'returning') {
+      const seen = row.last_seen_date ? esc(String(row.last_seen_date).slice(0, 10)) : '—';
+      return 'Last seen ' + seen + map + rated;
+    }
+    const rel = m && m.date ? ago(m.date) : '';
+    return 'Last played ' + (rel || '—') + map + rated;
+  }
+
+  function paintYouCommand(data, slugFile) {
+    const list = document.getElementById('vt-home-commanders');
+    if (!list || !window.VTWho) return;
+    const sid = VTWho.steam64();
+    const row = findBySteam(data && data.ratings, sid);
+    if (!row) {
+      placeHeadNet('vt-home-commanders', '');
+      const recent = recentPlayed();
+      list.innerHTML = '<p class="vt-home-you-line">No commander rating yet</p>'
+        + recent.map(recentLine).join('');
+      return;
+    }
+    const prov = row.provisional ? '<span class="vt-who-chip">Provisional</span>' : '';
+    const record = (row.wins || 0) + '–' + (row.losses || 0) + '–' + (row.draws || 0);
+    const hist = Array.isArray(row.win_history) ? row.win_history.map(Number) : [];
+    const form = formChart(hist, 'commander');
+    placeHeadNet('vt-home-commanders', form && form.net);
+    const href = playerHref(slugFile, sid);
+    list.innerHTML = '<a class="vt-home-you-name" href="' + esc(href) + '">' + esc(row.name || 'You') + '</a>'
+      + '<span class="vt-home-you-line vt-mono">' + Math.round(row.vtsr_c || 0) + ' · ' + record + '</span> '
+      + prov
+      + (form ? form.chart : '')
+      + '<p class="vt-home-you-line">' + commandWhen(row) + '</p>';
+  }
+
+  function commandWhen(row) {
+    const id = String(row.last_match_id || '');
+    const date = row.last_command_date ? esc(String(row.last_command_date).slice(0, 10)) : '—';
+    if (id.indexOf('f9:') === 0) {
+      return 'Last commanded ' + date + ' · <a href="https://f9bomber.com">Community ledger</a>';
+    }
+    const m = findManifest(id);
+    const map = m && m.name ? ' · ' + esc(m.name) : '';
+    return 'Last commanded ' + date + map;
+  }
+
+  function paintHomeAt() {
+    const el = document.getElementById('vt-home-at');
+    if (!el || !window.VTWho) return;
+    const rec = VTWho.get();
+    if (!rec || rec.status !== 'set' || !rec.name) {
+      el.hidden = true;
+      el.removeAttribute('href');
+      el.textContent = '';
+      return;
+    }
+    el.hidden = false;
+    el.href = playerHref(homeSlugs, rec.steam64);
+    el.textContent = '@' + rec.name;
+    el.title = rec.name;
+  }
+
+  function paintHomeLists() {
+    const youOn = window.VTWho && VTWho.status() === 'set' && !homeCommunity();
+    syncHomeHead(
+      'vt-home-cmdr-title',
+      '<i class="bi bi-trophy"></i>Rising commanders',
+      '<i class="bi bi-trophy"></i>Command'
+    );
+    syncHomeHead(
+      'vt-home-thug-title',
+      '<i class="bi bi-graph-up-arrow"></i>Rising thugs',
+      '<i class="bi bi-graph-up-arrow"></i>Thug form'
+    );
+    if (youOn) {
+      paintYouThug(homeElo, homeSlugs);
+      paintYouCommand(homeCmdr, homeSlugs);
+    } else {
+      placeHeadNet('vt-home-commanders', '');
+      placeHeadNet('vt-home-thugs', '');
+      paintCommanders(homeCmdr, homeSlugs);
+      paintThugs(homeElo, homeSlugs);
+    }
+  }
+
   function boot() {
+    paintHomeAt();
     fitHeader();
     window.addEventListener('resize', () => {
       fitHeader();
@@ -900,11 +1200,16 @@
     ]).then((files) => {
       manifest = Array.isArray(files[0]) ? files[0] : [];
       manifest.sort((a, b) => new Date(b.date) - new Date(a.date));
+      homeElo = files[1];
+      homeCmdr = files[2];
+      homeSlugs = files[3];
+      window.__vtHomeFiles = { elo: files[1], commander: files[2], slugs: files[3] };
+      if (window.VTWho && typeof VTWho.note === 'function') VTWho.note(window.__vtHomeFiles);
       paintKpis(files[1]);
       paintHours();
       paintMatches();
-      paintCommanders(files[2], files[3]);
-      paintThugs(files[1], files[3]);
+      paintHomeAt();
+      paintHomeLists();
       paintMeta();
       requestAnimationFrame(fitRising);
     });

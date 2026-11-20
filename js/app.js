@@ -17,6 +17,18 @@
   const $dashboard = document.getElementById('dashboard');
   const $gallery = document.getElementById('matches-gallery');
 
+  // var so a vt-who-change during the first await (before the later
+  // lets run) is not a temporal-dead-zone throw.
+  var currentData = null;
+
+  // Registered during parse, before who.js can write a choice.
+  document.addEventListener('vt-who-change', () => {
+    if ($pickerGrid) applyPickerFilters();
+    if (currentData && window.VTMatchYou && typeof VTMatchYou.render === 'function') {
+      VTMatchYou.render(currentData);
+    }
+  });
+
   // --- Match picker DOM handles ---
   // One trigger on the match banner, plus a shared XL modal. The gallery
   // (/matches/ with no ?match=) shows the same search, filters and cards
@@ -119,6 +131,7 @@
   let pickerState = DEFAULT_PICKER_STATE();
 
   const MATCH_TAB_SLUGS = {
+    you:         'tab-you-btn',
     overview:    'tab-overview-btn',
     economy:     'tab-economy-btn',
     elo:         'tab-elo-btn',
@@ -816,6 +829,28 @@
     return !!(entry && window.VTVideoLinks && VTVideoLinks.videosFor(entry.id).length);
   }
 
+  function stampPickerYouMark(cardEl, entry) {
+    const titleEl = cardEl.querySelector('.vt-match-picker-card-title');
+    if (!titleEl) return;
+    let mark = titleEl.querySelector('.vt-match-picker-you');
+    const who = window.VTWho;
+    let text = '';
+    if (who && who.status() === 'set') {
+      if (who.commanded(entry)) text = 'You commanded';
+      else if (who.played(entry)) text = 'You played';
+    }
+    if (text) {
+      if (!mark) {
+        mark = document.createElement('span');
+        mark.className = 'vt-match-picker-you';
+        titleEl.appendChild(mark);
+      }
+      mark.textContent = text;
+    } else if (mark) {
+      mark.remove();
+    }
+  }
+
   function stampPickerVodMark(cardEl, entry) {
     const titleEl = cardEl.querySelector('.vt-match-picker-card-title');
     if (!titleEl) return;
@@ -1293,7 +1328,10 @@
     // another delegated click listener.
     cards.forEach((el) => {
       const entry = entryByFile.get(el.dataset.target);
-      if (entry) stampPickerVodMark(el, entry);
+      if (entry) {
+        stampPickerVodMark(el, entry);
+        stampPickerYouMark(el, entry);
+      }
     });
 
     // Result counter.
@@ -1959,7 +1997,7 @@
   }
 
   // --- Filter State ---
-  let currentData = null;
+  // currentData is declared at the top of this function (var).
   let currentFilteredData = null;
   let filterState = { mode: 'all', players: [], team: null, persist: false };
   let timelineMode = 'player';
@@ -3096,6 +3134,10 @@
       });
     }
 
+    if (window.VTMatchYou && typeof VTMatchYou.render === 'function') {
+      VTMatchYou.render(currentData);
+    }
+
     registerTabRenderer('#tab-positioning', () => {
       renderPositioningTab(data);
     });
@@ -3387,6 +3429,9 @@
     try {
       window.__vtSlugMap = (slugRes && slugRes.ok) ? await slugRes.json() : null;
     } catch { window.__vtSlugMap = null; }
+    if (window.VTWho && typeof VTWho.note === 'function') {
+      VTWho.note({ elo: window.__vtElo, slugs: window.__vtSlugMap });
+    }
     try {
       window.__vtValidation = (valRes && valRes.ok) ? await valRes.json() : null;
     } catch { window.__vtValidation = null; }
@@ -3423,6 +3468,11 @@
   // wraps a name in the standard `.vt-player-link` anchor; it always
   // returns *something* (escaped fallback span when steam64 is empty)
   // so callers can dump its result directly into innerHTML.
+  function steamDataAttr(steam64) {
+    const sid = String(steam64 || '').trim();
+    return /^\d{17}$/.test(sid) ? ` data-steam64="${sid}"` : '';
+  }
+
   function vtPlayerHref(steam64) {
     const sid = String(steam64 || '').trim();
     if (!sid) return null;
@@ -3443,7 +3493,7 @@
     const cls = (slugs && slugs[String(steam64)] && slugs[String(steam64)].slug)
       ? 'vt-player-link' : 'vt-player-link vt-player-link-fallback';
     const extra = (opts && opts.title) ? ` title="${esc(opts.title)}"` : '';
-    return `<a class="${cls}" href="${href}"${extra}>${safeName}</a>`;
+    return `<a class="${cls}" href="${href}"${extra}${steamDataAttr(steam64)}>${safeName}</a>`;
   }
   // Expose for downstream modules (all-matches-aggregator renders are
   // injected as raw HTML by app.js, so they just call the global).
@@ -6306,7 +6356,7 @@
       const tkeyCell = tkey == null
         ? `<span style="color:var(--kb-text-muted)" title="${tkeyTip}">—</span>`
         : `${(tkey * 100).toFixed(1)}%`;
-      return `<tr>
+      return `<tr${steamDataAttr(p.steam64)}>
         <td class="fw-semibold">${esc(p.name)}</td>
         <td class="text-end">${ps.shots_fired.toLocaleString()}</td>
         <td class="text-end">${hitsCell}</td>
@@ -6562,10 +6612,10 @@
       const killerSid = vtSteam64FromName(entry.killer);
       const victimSid = vtSteam64FromName(entry.victim);
       const killerHtml = killerSid
-        ? `<a class="vt-player-link" href="${vtPlayerHref(killerSid)}" style="color:var(--kb-primary);">${esc(entry.killer)}</a>`
+        ? `<a class="vt-player-link" href="${vtPlayerHref(killerSid)}" style="color:var(--kb-primary);"${steamDataAttr(killerSid)}>${esc(entry.killer)}</a>`
         : `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>`;
       const victimHtml = victimSid
-        ? `<a class="vt-player-link" href="${vtPlayerHref(victimSid)}" style="color:var(--kb-accent);">${esc(entry.victim)}</a>`
+        ? `<a class="vt-player-link" href="${vtPlayerHref(victimSid)}" style="color:var(--kb-accent);"${steamDataAttr(victimSid)}>${esc(entry.victim)}</a>`
         : `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>`;
       // match.schema_version 13: assist credit. entry.assists is a list of
       // non-finisher contributors [{name, steam64, share}] (descending
@@ -6576,7 +6626,7 @@
         const parts = entry.assists.map(a => {
           const pct = Math.round((a.share || 0) * 100);
           const nameHtml = a.steam64
-            ? `<a class="vt-player-link" href="${vtPlayerHref(a.steam64)}">${esc(a.name)}</a>`
+            ? `<a class="vt-player-link" href="${vtPlayerHref(a.steam64)}"${steamDataAttr(a.steam64)}>${esc(a.name)}</a>`
             : esc(a.name);
           return `${nameHtml} ${pct}%`;
         }).join(', ');

@@ -1117,7 +1117,7 @@
     const body = rows.map((r, i) => {
       const href = playerHref(r.steam64);
       const link = href
-        ? `<a class="vt-map-cmdr-name" href="${escapeHtml(href)}">${escapeHtml(r.name)}</a>`
+        ? `<a class="vt-map-cmdr-name" href="${escapeHtml(href)}"${/^\d{17}$/.test(String(r.steam64 || '')) ? ` data-steam64="${escapeHtml(String(r.steam64))}"` : ''}>${escapeHtml(r.name)}</a>`
         : `<span class="vt-map-cmdr-name vt-map-cmdr-name-fallback">${escapeHtml(r.name)}</span>`;
       const wins = safeNum(r.wins);
       const losses = safeNum(r.losses);
