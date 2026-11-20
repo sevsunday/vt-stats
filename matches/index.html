@@ -556,7 +556,7 @@
                     <i class="bi bi-graph-up-arrow me-1"></i>VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR-T this game</strong><br>How this match went against what the player&rsquo;s rating expected: Beat expectation, On par, or Below expectation.<br>&mdash; if the match was excluded (&lt;6 players or &lt;5 min)."></i>
+                       title="<strong>VTSR-T this game</strong><br>How this match went against what the player&rsquo;s rating expected: Beat expectation, On par, or Below expectation.<br>On a cancelled or drawn match the chip was measured and not applied &mdash; VTSR-T did not change.<br>&mdash; when the lobby never entered rating."></i>
                   </th>
                   <th data-sort="asset_dealt" class="text-end">
                     Unit Dmg
@@ -720,7 +720,9 @@
       <!-- Tab: Elo (commander duel first when one exists, then per-match
            VTSR-T). Rendered by js/match-elo.js (window.VTMatchElo).
            Match-global, always unfiltered (highlights passthrough); the
-           player filter only preselects. -->
+           player filter only preselects. A cancelled or drawn match with
+           a shadow block shows that preview and says neither rating
+           changed. Other exclusions stay on the empty card. -->
       <div class="tab-pane fade" id="tab-elo" role="tabpanel" aria-labelledby="tab-elo-btn">
         <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -753,7 +755,7 @@
         <div class="card mb-4 d-none" id="section-match-elo-lobby">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Lobby rating moves</h5>
-            <span class="vt-match-elo-why d-none d-md-inline">how this match changed each player's VTSR-T — click a row</span>
+            <span class="vt-match-elo-why d-none d-md-inline" id="match-elo-lobby-why">how this match changed each player's VTSR-T — click a row</span>
           </div>
           <div class="card-body" id="match-elo-lobby-body"></div>
         </div>

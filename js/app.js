@@ -5775,9 +5775,38 @@
       return (currentData[cacheKey] = { available: false, missing: true });
     }
     if (entry.match_excluded) {
+      const reason = entry.exclusion_reason || 'unknown';
+      const shadow = entry.shadow;
+      const shadowDeltas = (reason === 'cancelled' || reason === 'draw')
+        && shadow && Array.isArray(shadow.deltas) && shadow.deltas.length
+        ? shadow.deltas
+        : null;
+      // A cancel or a draw that cleared the lobby gates still has a
+      // never-applied performance read. Index it like a rated delta so
+      // the column and its sort can show the verdict. `would_delta` is
+      // copied onto `delta` in this index only.
+      if (shadowDeltas) {
+        const bySteam = new Map(), byName = new Map();
+        for (const raw of shadowDeltas) {
+          const view = {
+            delta: raw.would_delta,
+            before: raw.before,
+            performance: raw.performance,
+            expected: raw.expected,
+            axis_contributions: raw.axis_contributions || {},
+            preview: true,
+          };
+          if (raw.steam64) bySteam.set(String(raw.steam64), view);
+          if (raw.name) byName.set(String(raw.name).toLowerCase(), view);
+        }
+        return (currentData[cacheKey] = {
+          available: true, excluded: false, preview: true,
+          exclusion_reason: reason, bySteam, byName,
+        });
+      }
       return (currentData[cacheKey] = {
         available: true, excluded: true,
-        exclusion_reason: entry.exclusion_reason || 'unknown',
+        exclusion_reason: reason,
       });
     }
     const bySteam = new Map(), byName = new Map();
@@ -5805,6 +5834,7 @@
         performance: d.performance,
         expected: d.expected,
         axis_contributions: d.axis_contributions || {},
+        preview: !!d.preview,
       };
     }
     return null;
@@ -5841,10 +5871,10 @@
       })
       .join(' \u00b7 ');
     const verdict = VTSRDisplay.deltaVerdict(d.delta);
-    const tipParts = [
-      verdict ? verdict.label : 'No change',
-      `Perf ${d.performance.toFixed(2)} vs expected ${d.expected.toFixed(2)}`,
-    ];
+    const tipParts = [];
+    if (d.preview) tipParts.push('Measured, not applied. VTSR-T did not change.');
+    tipParts.push(verdict ? verdict.label : 'No change');
+    tipParts.push(`Perf ${d.performance.toFixed(2)} vs expected ${d.expected.toFixed(2)}`);
     if (axes) tipParts.push(`Top axes: ${axes}`);
     return `<td class="text-end">${VTSRDisplay.verdictChipHtml(d.delta, { title: tipParts.join(' \u00b7 ') })}</td>`;
   }

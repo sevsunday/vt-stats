@@ -3,10 +3,14 @@
 // Joins the currently loaded match against elo_history.json (already
 // fetched on dashboard boot into window.__vtEloHistory) and explains
 // how this lobby moved VTSR-T: a full-lobby Δ list, a selected-player
-// verdict + axis breakdown, and a P-vs-E scatter. When
-// elo_commander_history.json has a duel for this match, a compact
-// VTSR-C two-row strip is appended (hidden on the historical
-// undetermined corpus — no empty card). A rated 1v1 (a duel in
+// verdict + axis breakdown, and a P-vs-E scatter. A cancelled or drawn
+// match that carries elo_history `shadow.deltas` shows that same read
+// and says VTSR-T did not change; the commander card shows both
+// branches (had they won / had they lost) and says VTSR-C did not
+// change. The view model copies `would_delta` onto `delta` and never
+// writes it back. When elo_commander_history.json has a duel for this
+// match, a compact VTSR-C two-row strip is appended (hidden on the
+// historical undetermined corpus — no empty card). A rated 1v1 (a duel in
 // elo_1v1_history.json) gets its own VTSR-1v1 strip, shown even though
 // VTSR-T excludes the match. A rated 2v2 (a recorded game in
 // elo_2v2_history.json) gets the 2v2 card the same way.
@@ -39,6 +43,15 @@
     '<div><strong>Played vs expected</strong></div>' +
     '<div>Expected is how a player at your pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s share of the lobby\u2019s damage to the enemy, versus everyone here. Above the dashed line means you beat that prediction \u2014 that is what moves VTSR-T, win or lose.</div>';
 
+  const PREVIEW_EXPECTED_TIP_HTML =
+    '<div><strong>Played vs expected</strong></div>' +
+    '<div>Expected is how a player at this pre-match VTSR-T is predicted to do in this lobby. Played is this match\u2019s share of the lobby\u2019s damage to the enemy. The match was not rated, so VTSR-T did not change.</div>';
+
+  const PREVIEW_REASONS = new Set(['cancelled', 'draw']);
+  const PREVIEW_VERDICT_TITLE = 'Measured, not applied. VTSR-T did not change.';
+  const LOBBY_WHY_RATED = 'how this match changed each player\u2019s VTSR-T \u2014 click a row';
+  const VTSRC_WHY_RATED = 'win/loss rating \u2014 not the enemy-damage score';
+
   const VTSR_AXIS_META = {
     enemy_damage_share: {
       label: 'Enemy damage share',
@@ -52,6 +65,7 @@
 
   let selectedKey = null;
   let lastMatchId = null;
+  let lastCurrentData = null;
   let lobbyBound = false;
   let vtsrcBound = false;
   let lastJoined = null;
@@ -78,6 +92,59 @@
 
   function expectedInfoIcon() {
     return `<i class="bi bi-info-circle vt-col-info vt-match-elo-info" role="img" aria-label="What played better than expected means" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom" data-elo-expected-tip="1" title=""></i>`;
+  }
+
+  function shadowPreview(entry) {
+    if (!entry || !entry.match_excluded) return null;
+    const reason = entry.exclusion_reason || 'unknown';
+    if (!PREVIEW_REASONS.has(reason)) return null;
+    const shadow = entry.shadow;
+    if (!shadow || !Array.isArray(shadow.deltas) || !shadow.deltas.length) return null;
+    return { reason, deltas: shadow.deltas };
+  }
+
+  // View-model only. `would_delta` becomes the field the painters already
+  // read as `delta`. The history object is not mutated, and `after` is
+  // left off so a band arrow cannot be drawn.
+  function asViewDelta(raw, preview) {
+    if (!raw || !preview) return raw;
+    return {
+      name: raw.name,
+      steam64: raw.steam64,
+      is_commander: !!raw.is_commander,
+      before: raw.before,
+      performance: raw.performance,
+      expected: raw.expected,
+      delta: raw.would_delta,
+      axis_contributions: raw.axis_contributions || {},
+      preview: true,
+    };
+  }
+
+  function syncLobbyWhy(joined) {
+    const why = document.getElementById('match-elo-lobby-why');
+    if (!why) return;
+    why.textContent = (joined && joined.preview)
+      ? 'how this match would have read \u2014 VTSR-T did not change'
+      : LOBBY_WHY_RATED;
+  }
+
+  function setVtsrcWhy(text) {
+    const card = document.getElementById('section-match-elo-vtsrc');
+    const why = card && card.querySelector('.vt-match-elo-why');
+    if (why) why.textContent = text;
+  }
+
+  function previewNote(reason) {
+    const word = reason === 'draw' ? 'ended in a draw' : 'was cancelled';
+    return `<p class="text-muted small mb-3">This match ${word}. This is how the match would have read. VTSR-T did not change and VTSR-C did not change.</p>`;
+  }
+
+  function verdictOpts(joined, long) {
+    const opts = { bsTooltip: false };
+    if (long) opts.long = true;
+    if (joined && joined.preview) opts.title = PREVIEW_VERDICT_TITLE;
+    return opts;
   }
 
   function exclusionReasonText(reason) {
@@ -157,16 +224,19 @@
     if (!match.id) return { available: false };
     const entry = hist.history.find((h) => h.match_id === match.id);
     if (!entry) return { available: false, missing: true };
-    if (entry.match_excluded) {
+    const shadow = shadowPreview(entry);
+    if (entry.match_excluded && !shadow) {
       return {
         available: true,
         excluded: true,
         reason: entry.exclusion_reason || 'unknown',
       };
     }
+    const preview = !!shadow;
     const bySteam = new Map();
     const byName = new Map();
-    for (const d of (entry.deltas || [])) {
+    for (const raw of (preview ? shadow.deltas : (entry.deltas || []))) {
+      const d = asViewDelta(raw, preview);
       if (d.steam64) bySteam.set(String(d.steam64), d);
       if (d.name) byName.set(d.name.toLowerCase(), d);
     }
@@ -182,7 +252,15 @@
       else unrated.push(item);
     }
     rated.sort((a, b) => (b.delta.delta || 0) - (a.delta.delta || 0));
-    return { available: true, excluded: false, rated, unrated, bench: match.bench || null };
+    return {
+      available: true,
+      excluded: false,
+      preview,
+      reason: preview ? shadow.reason : null,
+      rated,
+      unrated,
+      bench: match.bench || null,
+    };
   }
 
   function pickDefaultKey(joined, filterPlayers) {
@@ -301,6 +379,7 @@
   function paintLobby(joined) {
     const body = document.getElementById('match-elo-lobby-body');
     if (!body) return;
+    syncLobbyWhy(joined);
     const maxAbs = Math.max(
       1,
       ...(joined.rated || []).map((item) => Math.abs(item.delta.delta || 0)),
@@ -346,7 +425,7 @@
           : `right:50%; width:${pct.toFixed(2)}%;`;
         trackInner = `<span class="vt-match-elo-track-center"></span>
           <span class="vt-match-elo-track-fill ${fillCls}" style="${fillStyle}"></span>`;
-        deltaHtml = `<span class="vt-match-elo-delta">${VTSRDisplay.verdictChipHtml(v, { bsTooltip: false })}</span>`;
+        deltaHtml = `<span class="vt-match-elo-delta">${VTSRDisplay.verdictChipHtml(v, verdictOpts(joined, false))}</span>`;
       } else {
         trackInner = '<span class="vt-match-elo-track-center"></span>';
       }
@@ -366,7 +445,8 @@
     if (unratedHtml) {
       unratedBlock = `<div class="vt-match-elo-unrated-label">Not rated this match</div>${unratedHtml}`;
     }
-    body.innerHTML = ratedHtml + unratedBlock;
+    const note = joined.preview ? previewNote(joined.reason) : '';
+    body.innerHTML = note + ratedHtml + unratedBlock;
   }
 
   function paintPlayer(joined) {
@@ -393,11 +473,25 @@
     } else {
       verdict = 'About as expected for this lobby.';
     }
-    const bandIn = VTSRDisplay.rawBandFor(d.before);
-    const bandOut = VTSRDisplay.rawBandFor(d.after);
-    const bandMove = (bandIn && bandOut && bandIn.index !== bandOut.index)
-      ? `${VTSRDisplay.bandChipHtml(bandIn, { compact: true, bsTooltip: false, title: bandIn.label })} \u2192 ${VTSRDisplay.bandChipHtml(bandOut, { compact: true, bsTooltip: false, title: bandOut.label })}`
-      : (bandOut ? VTSRDisplay.bandChipHtml(bandOut, { bsTooltip: false, title: `${bandOut.label}, unchanged` }) : '');
+    let bandMove;
+    if (joined.preview) {
+      const bandIn = VTSRDisplay.rawBandFor(d.before);
+      bandMove = bandIn
+        ? VTSRDisplay.bandChipHtml(bandIn, {
+          bsTooltip: false,
+          title: `${bandIn.label}, unchanged. VTSR-T did not change.`,
+        })
+        : '';
+    } else {
+      const bandIn = VTSRDisplay.rawBandFor(d.before);
+      const bandOut = VTSRDisplay.rawBandFor(d.after);
+      bandMove = (bandIn && bandOut && bandIn.index !== bandOut.index)
+        ? `${VTSRDisplay.bandChipHtml(bandIn, { compact: true, bsTooltip: false, title: bandIn.label })} \u2192 ${VTSRDisplay.bandChipHtml(bandOut, { compact: true, bsTooltip: false, title: bandOut.label })}`
+        : (bandOut ? VTSRDisplay.bandChipHtml(bandOut, { bsTooltip: false, title: `${bandOut.label}, unchanged` }) : '');
+    }
+    const heldNote = joined.preview
+      ? '<p class="text-muted small mb-2">VTSR-T did not change.</p>'
+      : '';
     const weights = redistributedWeights(d.axis_contributions || {});
     const sentence = axisSentence(d.axis_contributions || {}, weights);
     const cmdrNote = d.axis_contributions_meta
@@ -408,10 +502,11 @@
       : '';
     body.innerHTML = `
       <div class="vt-match-elo-headline mb-2">
-        <span class="vt-match-elo-headline-delta">${VTSRDisplay.verdictChipHtml(d.delta, { long: true, bsTooltip: false })}</span>
+        <span class="vt-match-elo-headline-delta">${VTSRDisplay.verdictChipHtml(d.delta, verdictOpts(joined, true))}</span>
         <span class="vt-match-elo-headline-range">${bandMove}</span>
       </div>
       <p class="vt-match-elo-verdict mb-2">${esc(verdict)} ${expectedInfoIcon()}</p>
+      ${heldNote}
       ${cmdrNote}
       ${sentenceHtml}
       ${axisGridHtml(d.axis_contributions || {})}`;
@@ -534,7 +629,8 @@
                 const pt = item.raw;
                 if (!pt || pt.name == null) return null;
                 const v = VTSRDisplay.deltaVerdict(pt.delta);
-                return `Played ${pt.y >= 0 ? '+' : ''}${pt.y.toFixed(2)} vs expected ${pt.x >= 0 ? '+' : ''}${pt.x.toFixed(2)} \u2192 ${v ? v.label : 'no change'}`;
+                const applied = joined.preview ? ' \u00b7 measured, not applied' : '';
+                return `Played ${pt.y >= 0 ? '+' : ''}${pt.y.toFixed(2)} vs expected ${pt.x >= 0 ? '+' : ''}${pt.x.toFixed(2)} \u2192 ${v ? v.label : 'no change'}${applied}`;
               },
             },
           }),
@@ -625,6 +721,36 @@
     return { label: 'Thugs', text: `Team ${team}\u2019s thugs were stronger going in (about ${VTSRDisplay.winShiftText(shift)} win chance).`, tip: '' };
   }
 
+  function paintCommanderPreview(card, body) {
+    const preview = (lastCurrentData && window.VTBalonce && VTBalonce.commanderPreview)
+      ? VTBalonce.commanderPreview(lastCurrentData)
+      : null;
+    if (!preview || !preview.rows || !preview.rows.length) {
+      hideVtsrc();
+      setVtsrcWhy(VTSRC_WHY_RATED);
+      return;
+    }
+    setVtsrcWhy('neither result was applied \u2014 VTSR-C did not change');
+    const branch = (cls, label, before, delta) => `
+      <span class="vt-balonce-whatif-branch ${cls}">
+        <span class="vt-balonce-whatif-label">${esc(label)}</span>
+        <span class="vt-mono">${Math.round(before)} \u2192 ${Math.round(before + delta)}</span>
+        <span class="vt-mono vt-balonce-whatif-delta">${signedDelta(delta)}</span>
+      </span>`;
+    const rows = preview.rows.map((r) => `
+      <div class="vt-balonce-whatif-row">
+        <span class="vt-balonce-whatif-cmdr">${playerLinkHtml(r.name, r.steam64)}${r.provisional
+          ? ' <span class="text-muted">(unrated commander)</span>'
+          : ''}</span>
+        <span class="vt-balonce-whatif-branches">
+          ${branch('is-win', 'had they won', r.before, r.onWin)}
+          ${branch('is-loss', 'had they lost', r.before, r.onLoss)}
+        </span>
+      </div>`).join('');
+    body.innerHTML = `<p class="vt-match-elo-vtsrc-verdict mb-2">${esc(preview.sentence)}</p>${rows}`;
+    card.classList.remove('d-none');
+  }
+
   function paintVtsrc(joined, matchId) {
     const card = document.getElementById('section-match-elo-vtsrc');
     const body = document.getElementById('match-elo-vtsrc-body');
@@ -633,6 +759,11 @@
       hideVtsrc();
       return;
     }
+    if (joined && joined.preview) {
+      paintCommanderPreview(card, body);
+      return;
+    }
+    setVtsrcWhy(VTSRC_WHY_RATED);
     const duel = findDuel(matchId);
     const c1 = duel && (duel.commanders['1'] || duel.commanders[1]);
     const c2 = duel && (duel.commanders['2'] || duel.commanders[2]);
@@ -937,8 +1068,11 @@
   function ensurePaneTooltips() {
     const pane = document.getElementById('tab-elo');
     if (!pane || !window.bootstrap || !bootstrap.Tooltip) return;
+    const expectedTip = (lastJoined && lastJoined.preview)
+      ? PREVIEW_EXPECTED_TIP_HTML
+      : EXPECTED_TIP_HTML;
     pane.querySelectorAll('[data-elo-expected-tip]').forEach((el) => {
-      el.setAttribute('title', EXPECTED_TIP_HTML);
+      el.setAttribute('title', expectedTip);
     });
     pane.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
       const existing = bootstrap.Tooltip.getInstance(el);
@@ -963,6 +1097,7 @@
   }
 
   function render(currentData, opts) {
+    lastCurrentData = currentData;
     const matchId = (currentData && currentData.match && currentData.match.id) || null;
     if (matchId !== lastMatchId) {
       selectedKey = null;

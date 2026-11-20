@@ -135,9 +135,49 @@
     return null;
   }
 
+  function shadowFor(entry, row) {
+    if (!entry || !entry.match_excluded) return null;
+    const reason = entry.exclusion_reason || '';
+    if (reason !== 'cancelled' && reason !== 'draw') return null;
+    const deltas = entry.shadow && entry.shadow.deltas;
+    if (!Array.isArray(deltas)) return null;
+    const sid = String(row.steam64 || '');
+    for (let i = 0; i < deltas.length; i++) {
+      if (String(deltas[i].steam64 || '') === sid) return deltas[i];
+    }
+    return null;
+  }
+
+  function thugPreviewHtml(raw) {
+    const display = window.VTSRDisplay;
+    if (display && display.setConfig && window.__vtElo) display.setConfig(window.__vtElo);
+    const before = display && display.rawBandFor ? display.rawBandFor(raw.before) : null;
+    const chip = before && display.bandChipHtml
+      ? display.bandChipHtml(before, {
+        compact: true,
+        bsTooltip: false,
+        title: before.label + ', unchanged. VTSR-T did not change.',
+      })
+      : '';
+    const verdict = display && display.verdictChipHtml
+      ? display.verdictChipHtml(raw.would_delta, {
+        long: true,
+        bsTooltip: false,
+        title: 'Measured, not applied. VTSR-T did not change.',
+      })
+      : '';
+    return '<div class="vt-you-rate"><span class="vt-you-rate-k">VTSR-T</span>'
+      + chip + verdict + '</div>'
+      + '<p class="vt-you-note">This is how the match would have read. VTSR-T did not change.</p>';
+  }
+
   function thugRatingHtml(data, row) {
     const match = (data && data.match) || {};
     const entry = historyEntry(match.id);
+    const omitted = omitSentence(row);
+    if (omitted) return '<p class="vt-you-note">' + esc(omitted) + '</p>';
+    const shadow = shadowFor(entry, row);
+    if (shadow) return thugPreviewHtml(shadow);
     if (entry && entry.match_excluded) {
       return '<p class="vt-you-note">' + esc(exclusionText(entry.exclusion_reason)) + '</p>';
     }
@@ -172,16 +212,43 @@
     return null;
   }
 
-  function commanderHtml(matchId, sid) {
-    const hist = window.__vtCmdrEloHistory;
-    if (!hist || !Array.isArray(hist.duels)) return '';
-    let duel = null;
-    for (let i = 0; i < hist.duels.length; i++) {
-      if (hist.duels[i] && hist.duels[i].match_id === matchId) { duel = hist.duels[i]; break; }
+  function commanderBranchHtml(label, before, delta) {
+    return '<p class="vt-you-rate"><span class="vt-you-rate-k">' + esc(label) + '</span>'
+      + '<span class="vt-mono">' + Math.round(Number(before)) + ' \u2192 '
+      + Math.round(Number(before) + Number(delta)) + '</span>'
+      + '<span class="vt-you-delta" data-sign="' + deltaSign(delta) + '">' + signed(delta) + '</span></p>';
+  }
+
+  function commanderPreviewHtml(data, row) {
+    if (!row.is_commander) return '';
+    const preview = window.VTBalonce && VTBalonce.commanderPreview
+      ? VTBalonce.commanderPreview(data)
+      : null;
+    if (!preview) return '';
+    const sid = String(row.steam64 || '');
+    const mine = (preview.rows || []).find((r) => String(r.steam64 || '') === sid);
+    let html = '<p class="vt-you-note">VTSR-C did not change.</p>';
+    if (mine) {
+      html += commanderBranchHtml('Had you won', mine.before, mine.onWin)
+        + commanderBranchHtml('Had you lost', mine.before, mine.onLoss)
+        + '<p class="vt-you-note">Neither happened.</p>';
     }
-    const cmdr = findDuelSide(duel, sid);
-    if (!cmdr) return '';
-    return ratingLine('VTSR-C', cmdr.before, cmdr.after, cmdr.delta);
+    return html;
+  }
+
+  function commanderHtml(data, row) {
+    const matchId = data && data.match && data.match.id;
+    const sid = String(row.steam64 || '');
+    const hist = window.__vtCmdrEloHistory;
+    if (hist && Array.isArray(hist.duels)) {
+      let duel = null;
+      for (let i = 0; i < hist.duels.length; i++) {
+        if (hist.duels[i] && hist.duels[i].match_id === matchId) { duel = hist.duels[i]; break; }
+      }
+      const cmdr = findDuelSide(duel, sid);
+      if (cmdr) return ratingLine('VTSR-C', cmdr.before, cmdr.after, cmdr.delta);
+    }
+    return commanderPreviewHtml(data, row);
   }
 
   function oneVOneHtml(matchId, sid) {
@@ -456,7 +523,7 @@
     const cards = [];
     cards.push(card(jump('Result', '#tab-overview-btn'), resultHtml(data, row)));
     const ratingBody = thugRatingHtml(data, row)
-      + commanderHtml(match.id, sid)
+      + commanderHtml(data, row)
       + oneVOneHtml(match.id, sid)
       + twoVTwoHtml(match.id, sid);
     cards.push(card(jump('Rating', '#tab-elo-btn'), ratingBody));

@@ -2732,7 +2732,7 @@ A host-cancelled game is a real, fully-recorded match whose *result* was lost to
 
 **No version bumps.** `elo_current.json` / `elo_history.json` sit in the `load_cache_index()` skip set and regenerate every run, so no `PIPELINE_VERSION` bump is needed; per-match JSON is untouched, so no `match.schema_version`; nothing re-rates, so no `ELO_SCHEMA_VERSION` — the same call the R^W wins ladder made while inert.
 
-Consumer: the Balonce Meter's **How it was going** zone (§13.14).
+Consumers: the Balonce Meter's **How it was going** zone (§13.14), plus the Elo tab, the leaderboard VTSR-T column, and the For you rating card. Those three read `shadow` and label it measured, not applied: VTSR-T shows the verdict and the unchanged band, and VTSR-C shows both branches (had they won / had they lost). `deltas` stays empty, so nothing treats the preview as a rating change.
 
 ### 13.10 File-format reference
 

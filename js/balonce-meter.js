@@ -1015,6 +1015,7 @@
       rows.push({
         side,
         name: commanderName(joined, side) || `Team ${side}`,
+        steam64: row && row.steam64,
         before,
         expected,
         onWin: k * (1 - expected),
@@ -1023,6 +1024,24 @@
       });
     }
     return rows;
+  }
+
+  /**
+   * Both commander branches for a cancelled or drawn match, for the Elo
+   * tab and For you. Same rows Overview already shows. Null when this
+   * match is not that what-if.
+   */
+  function commanderPreview(currentData) {
+    const joined = joinMatch(currentData);
+    if (!joined || !joined.available || !joined.hypothetical) return null;
+    const rows = whatIfRows(joined);
+    if (!rows.length) return null;
+    return {
+      reason: joined.exclusionReason,
+      sentence: notRatedSentence(joined)
+        + '. Neither branch happened, so VTSR-C did not change.',
+      rows,
+    };
   }
 
   function zoneWhatIfHtml(joined) {
@@ -1840,5 +1859,6 @@
     renderMatchSection: render,
     destroyMatchSection,
     rosterRatings,
+    commanderPreview,
   };
 })();
