@@ -274,10 +274,14 @@ const BZ2API = (function() {
   // ============================================================================
 
   /**
-   * Base Steam Browser protocol URL for directly joining games
-   * 624970 = Battlezone Combat Commander App ID
+   * Steam Browser protocol for launching Battlezone Combat Commander.
+   * 624970 = the app id. The Steam64 is the same placeholder Join uses;
+   * Steam launches the local client either way.
    */
-  const STEAM_JOIN_BASE = 'steam://rungame/624970/76561198955218468/-connect-mp%20';
+  const STEAM_RUNGAME = 'steam://rungame/624970/76561198955218468/';
+  const STEAM_JOIN_BASE = STEAM_RUNGAME + '-connect-mp%20';
+  // Old host launch: -hostname "bz2vsr" -nomovies. Quotes are %22 so the href stays valid.
+  const STEAM_HOST_URL = STEAM_RUNGAME + '-hostname%20%22bz2vsr%22%20-nomovies';
 
   /**
    * Convert ASCII string to hexadecimal
@@ -1145,6 +1149,7 @@ const BZ2API = (function() {
     buildGogProfileUrl,
     buildWorkshopUrl,
     buildSteamJoinUrl,
+    STEAM_HOST_URL,
     
     // Constants
     GAME_TYPE_NAMES,
