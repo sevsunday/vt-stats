@@ -852,9 +852,9 @@ def dense_scan(source: str, headers: dict | None, video_dur: float,
         "-f", "rawvideo", "-pix_fmt", "gray",
         "pipe:1",
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # Height is unknown until we probe; read the first frame after probing
-    # via a second tiny ffmpeg. Scale keeps width=DENSE_WIDTH, height even.
+    # Probe height before the long decode. Starting that ffmpeg first fills
+    # the unread stdout pipe and blocks it while this second process runs.
+    # stderr is discarded: an unread PIPE fills and deadlocks the decode.
     probe = subprocess.run(
         [ffmpeg, "-hide_banner", "-loglevel", "error",
          *ffmpeg_headers(headers), "-i", source,
@@ -862,10 +862,10 @@ def dense_scan(source: str, headers: dict | None, video_dur: float,
          "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
         capture_output=True, check=False)
     if not probe.stdout:
-        proc.kill()
         fail("dense scan: could not probe frame size")
     height = len(probe.stdout) // DENSE_WIDTH
     frame_bytes = DENSE_WIDTH * height
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     anchors = []
     cuts = []
     prev_small = None
