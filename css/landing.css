@@ -616,8 +616,14 @@ body.vt-home-body {
 /* Joinable known-host lobby. open = a seat is free (green). full = the
    count has reached the cap (blue). The pulse matches the Tools button,
    and the color comes from this card so the nav animation stays green. */
-#vt-home-live[data-vt-live="open"] { --vt-home-live: var(--kb-success); }
-#vt-home-live[data-vt-live="full"] { --vt-home-live: var(--kb-info); }
+#vt-home-live[data-vt-live="open"] {
+  --vt-home-live: var(--kb-success);
+  --vt-home-live-fg: white;
+}
+#vt-home-live[data-vt-live="full"] {
+  --vt-home-live: var(--kb-info);
+  --vt-home-live-fg: var(--kb-info-fg);
+}
 
 #vt-home-live[data-vt-live="open"],
 #vt-home-live[data-vt-live="full"] {
@@ -658,8 +664,27 @@ body.vt-home-body {
 }
 
 #vt-home-live[data-vt-live] .gw-card--interest {
-  border-color: color-mix(in oklab, var(--vt-home-live) 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--vt-home-live) 50%, transparent);
+  position: relative;
+  border-color: var(--vt-home-live);
+}
+
+/* The status bar paints over an inset shadow, so the ring is a layer
+   above the card. pointer-events stays off so Join still receives the click. */
+#vt-home-live[data-vt-live] .gw-card--interest::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid var(--vt-home-live);
+  pointer-events: none;
+  z-index: 2;
+}
+
+#vt-home-live[data-vt-live] .gw-join:not(.gw-join--locked),
+#vt-home-live[data-vt-live] .gw-join:not(.gw-join--locked):hover {
+  background: var(--vt-home-live);
+  color: var(--vt-home-live-fg);
+  border-color: transparent;
 }
 
 #vt-home-live .gw-card-bar,
